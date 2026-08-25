@@ -9,7 +9,7 @@ interface LoginScreenProps {
 }
 
 // Provided Google Client ID
-const GOOGLE_CLIENT_ID = '547501643468-9sc6kqtea5e58namh86rt80t5i6cahf0.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = '547501643468-7t1n1fb6b5stv0cbqqovlgfhqrj8cpjh.apps.googleusercontent.com';
 
 declare global {
   interface Window {
