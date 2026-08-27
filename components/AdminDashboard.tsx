@@ -12628,7 +12628,7 @@ INV-789012`}
                                                 const adminListToDisplay = showOnlyTerkirimBersih
                                                    ? Array.from(sameDayResiSet)
                                                    : showOnlyCancelAdmin
-                                                   ? (showOnlyCancelImportAdmin ? Array.from(cancelMatchedSet).filter(bc => cancelImportOnlySet.has(bc)) : Array.from(cancelMatchedSet))
+                                                   ? (showOnlyCancelImportAdmin ? Array.from(cancelMatchedSet).filter(bc => cancelImportOnlySet.has(bc) && !gudangCancelResiSet.has(bc)) : Array.from(cancelMatchedSet))
                                                    : showOnlyReadyAdmin
                                                    ? Array.from(readyMatchedSet)
                                                    : showOnlyCrossDateAdmin
@@ -12729,7 +12729,7 @@ INV-789012`}
                                                                      onChange={e => setShowOnlyCancelImportAdmin(e.target.checked)} 
                                                                      className="rounded text-red-500 focus:ring-red-500 w-3 h-3 cursor-pointer" 
                                                                   />
-                                                                  Cancel Import Saja ({Array.from(cancelMatchedSet).filter(bc => cancelImportOnlySet.has(bc)).length})
+                                                                  Cancel Import Saja ({Array.from(cancelMatchedSet).filter(bc => cancelImportOnlySet.has(bc) && !gudangCancelResiSet.has(bc)).length})
                                                                   {showOnlyCancelImportAdmin && (
                                                                      <span 
                                                                         onClick={(e) => { e.preventDefault(); setShowOnlyCancelImportAdmin(false); }} 
@@ -14609,7 +14609,7 @@ INV-789012`}
                                                     const adminListToDisplay = showOnlyTerkirimBersih
                                                        ? Array.from(sameDayResiSet)
                                                        : showOnlyCancelAdmin
-                                                       ? (showOnlyCancelImportAdmin ? Array.from(cancelMatchedSet).filter(bc => cancelImportOnlySet.has(bc)) : Array.from(cancelMatchedSet))
+                                                       ? (showOnlyCancelImportAdmin ? Array.from(cancelMatchedSet).filter(bc => cancelImportOnlySet.has(bc) && !gudangCancelResiSet.has(bc)) : Array.from(cancelMatchedSet))
                                                        : showOnlyReadyAdmin
                                                        ? Array.from(readyMatchedSet)
                                                        : showOnlyCrossDateAdmin
@@ -14661,7 +14661,7 @@ INV-789012`}
                                                                 {showOnlyCancelAdmin && (
                                                                    <label className="flex items-center gap-1.5 text-[10px] text-red-600 dark:text-red-400 font-bold cursor-pointer ml-1">
                                                                       <input type="checkbox" checked={showOnlyCancelImportAdmin} onChange={e => setShowOnlyCancelImportAdmin(e.target.checked)} className="rounded text-red-500 focus:ring-red-500 w-3 h-3 cursor-pointer" />
-                                                                      Cancel Import Saja ({Array.from(cancelMatchedSet).filter(bc => cancelImportOnlySet.has(bc)).length})
+                                                                      Cancel Import Saja ({Array.from(cancelMatchedSet).filter(bc => cancelImportOnlySet.has(bc) && !gudangCancelResiSet.has(bc)).length})
                                                                       {showOnlyCancelImportAdmin && (
                                                                          <span 
                                                                             onClick={(e) => { e.preventDefault(); setShowOnlyCancelImportAdmin(false); }} 
