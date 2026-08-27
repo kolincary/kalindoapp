@@ -5025,7 +5025,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                setPendingDeleteBarcode(null);
             }}
             onSuccess={handleAssignmentDeleteSubmit}
-            expectedPin={userPin}
+            userEmail={userEmail}
             accentColor="red"
          />
 
@@ -5036,7 +5036,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                setPendingSwitchBarcode(null);
             }}
             onSuccess={handleAssignmentSwitchSubmit}
-            expectedPin={userPin}
+            userEmail={userEmail}
             accentColor="blue"
          />
 

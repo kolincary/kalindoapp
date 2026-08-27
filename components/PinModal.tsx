@@ -1,17 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { Delete, ShieldCheck } from 'lucide-react';
+import { Delete, ShieldCheck, Loader2 } from 'lucide-react';
+import { supabase } from '../services/supabaseClient';
 
 interface PinModalProps {
   isOpen: boolean;
   onSuccess: () => void;
   onClose: () => void;
-  expectedPin: string;
-  accentColor?: 'blue' | 'purple';
+  userEmail?: string;
+  expectedPin?: string;
+  onValidate?: (pin: string) => Promise<boolean> | boolean;
+  accentColor?: 'blue' | 'purple' | 'red';
 }
 
-export const PinModal: React.FC<PinModalProps> = ({ isOpen, onSuccess, onClose, expectedPin, accentColor = 'blue' }) => {
+export const PinModal: React.FC<PinModalProps> = ({ 
+  isOpen, 
+  onSuccess, 
+  onClose, 
+  userEmail, 
+  expectedPin, 
+  onValidate, 
+  accentColor = 'blue' 
+}) => {
   const [pin, setPin] = useState('');
   const [error, setError] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
 
   const PIN_LENGTH = 6;
 
@@ -33,18 +45,34 @@ export const PinModal: React.FC<PinModalProps> = ({ isOpen, onSuccess, onClose, 
       mobileIcon: 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400',
       dot: 'bg-purple-600 dark:bg-purple-400',
     },
-  }[accentColor];
+    red: {
+      leftBg: 'bg-red-700',
+      leftGradient: 'from-red-700 to-rose-800',
+      leftDecor: 'bg-red-400',
+      leftText: 'text-red-100',
+      mobileIcon: 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400',
+      dot: 'bg-red-600 dark:bg-red-400',
+    },
+  }[accentColor] || {
+    leftBg: 'bg-blue-600',
+    leftGradient: 'from-blue-600 to-blue-800',
+    leftDecor: 'bg-blue-400',
+    leftText: 'text-blue-100',
+    mobileIcon: 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400',
+    dot: 'bg-blue-600 dark:bg-blue-500',
+  };
 
   useEffect(() => {
     if (isOpen) {
       setPin('');
       setError(false);
+      setIsValidating(false);
     }
   }, [isOpen]);
 
   // Handle Physical Keyboard Input
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || isValidating) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (/^[0-9]$/.test(e.key)) {
@@ -59,15 +87,16 @@ export const PinModal: React.FC<PinModalProps> = ({ isOpen, onSuccess, onClose, 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, pin]);
+  }, [isOpen, pin, isValidating]);
 
   const handleNumberClick = (num: string) => {
+    if (isValidating) return;
     setPin(prev => {
       if (prev.length < PIN_LENGTH) {
         const newPin = prev + num;
         setError(false);
         if (newPin.length === PIN_LENGTH) {
-          setTimeout(() => validatePin(newPin), 300);
+          setTimeout(() => validatePin(newPin), 200);
         }
         return newPin;
       }
@@ -76,16 +105,86 @@ export const PinModal: React.FC<PinModalProps> = ({ isOpen, onSuccess, onClose, 
   };
 
   const handleDelete = () => {
+    if (isValidating) return;
     setPin(prev => prev.slice(0, -1));
     setError(false);
   };
 
-  const validatePin = (inputPin: string) => {
-    if (inputPin === expectedPin) {
-      onSuccess();
-    } else {
+  const validatePin = async (inputPin: string) => {
+    setIsValidating(true);
+    try {
+      if (onValidate) {
+        const isValid = await onValidate(inputPin);
+        if (isValid) {
+          onSuccess();
+          return;
+        } else {
+          setError(true);
+          setPin('');
+          return;
+        }
+      }
+
+      if (userEmail) {
+        // 1. Try secure Postgres RPC function verify_user_pin first
+        try {
+          const { data: rpcValid, error: rpcError } = await supabase.rpc('verify_user_pin', {
+            p_email: userEmail,
+            p_pin: inputPin
+          });
+
+          if (!rpcError && typeof rpcValid === 'boolean') {
+            if (rpcValid) {
+              onSuccess();
+              return;
+            } else {
+              setError(true);
+              setPin('');
+              return;
+            }
+          }
+        } catch (rpcErr) {
+          // RPC may not exist yet, fallback to direct query
+        }
+
+        // 2. Direct query fallback for existing databases
+        const { data, error } = await supabase
+          .from('app_users')
+          .select('id')
+          .eq('email', userEmail)
+          .eq('pin', inputPin)
+          .maybeSingle();
+
+        if (!error && data) {
+          onSuccess();
+          return;
+        }
+
+        // Fallback for default hardcoded dev credentials or offline
+        if (expectedPin && inputPin === expectedPin) {
+          onSuccess();
+          return;
+        }
+
+        setError(true);
+        setPin('');
+        return;
+      }
+
+      if (expectedPin) {
+        if (inputPin === expectedPin) {
+          onSuccess();
+        } else {
+          setError(true);
+          setPin('');
+        }
+      }
+    } catch (err) {
+      console.error("PIN validation error:", err);
       setError(true);
       setPin('');
+    } finally {
+      setIsValidating(false);
     }
   };
 

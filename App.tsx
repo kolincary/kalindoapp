@@ -147,24 +147,21 @@ const App: React.FC = () => {
 
     const fetchSupabaseData = async () => {
       try {
-        const { data, error } = await supabase.from('app_users').select('*');
+        const { data, error } = await supabase.from('app_users').select('email, roles, allow_manual_input, is_blocked');
 
         if (error) throw error;
 
         if (data && data.length > 0) {
           const newPerms: UserPermissions = { ...DEFAULT_PERMISSIONS };
-          const newPins: UserPins = { ...DEFAULT_PINS };
           const newManualAccess: UserManualInputAccess = {};
 
           data.forEach((user: any) => {
             newPerms[user.email] = user.roles;
-            newPins[user.email] = user.pin;
             // Load manual input permission. Default false (locked) if undefined/null.
             newManualAccess[user.email] = user.allow_manual_input === true;
           });
 
           setUserPermissions(newPerms);
-          setUserPins(newPins);
           setUserManualInputAccess(newManualAccess);
         }
       } catch (err: any) {
@@ -253,10 +250,41 @@ const App: React.FC = () => {
           if (Date.now() - lastLogin < threeDaysMs) {
             try {
               const adminData = JSON.parse(adminSessionStr);
-              setCurrentAdmin(adminData);
-              // Refresh sliding expiration
-              localStorage.setItem(STORAGE_KEY_ADMIN_LAST_LOGIN, Date.now().toString());
-              setAuthStep('ADMIN_DASHBOARD');
+              if (adminData && adminData.username) {
+                // Verify with Supabase that this admin actually exists
+                supabase
+                  .from('admin_users')
+                  .select('id, username, permissions')
+                  .eq('username', adminData.username)
+                  .maybeSingle()
+                  .then(({ data: dbAdmin, error: adminErr }) => {
+                    if (!adminErr && dbAdmin) {
+                      const verifiedAdmin: AdminUser = {
+                        id: dbAdmin.id,
+                        username: dbAdmin.username,
+                        permissions: dbAdmin.permissions || []
+                      };
+                      setCurrentAdmin(verifiedAdmin);
+                      localStorage.setItem(STORAGE_KEY_ADMIN_SESSION, JSON.stringify(verifiedAdmin));
+                      localStorage.setItem(STORAGE_KEY_ADMIN_LAST_LOGIN, Date.now().toString());
+                      setAuthStep('ADMIN_DASHBOARD');
+                    } else if (adminData.username === 'Tamu' && adminData.id === -1) {
+                      setCurrentAdmin(adminData);
+                      setAuthStep('ADMIN_DASHBOARD');
+                    } else {
+                      // Session is forged or admin no longer exists
+                      localStorage.removeItem(STORAGE_KEY_ADMIN_SESSION);
+                      localStorage.removeItem(STORAGE_KEY_ADMIN_LAST_LOGIN);
+                      localStorage.removeItem('is_admin_mode');
+                      setAuthStep('ADMIN_LOGIN');
+                    }
+                  })
+                  .catch(() => {
+                    setAuthStep('ADMIN_LOGIN');
+                  });
+              } else {
+                setAuthStep('ADMIN_LOGIN');
+              }
             } catch (e) {
               setAuthStep('ADMIN_LOGIN');
             }
@@ -955,16 +983,16 @@ const App: React.FC = () => {
           />
         )}
 
-        {/* PIN Modal Overlay (Standard Flow) - REMOVED FOR MAIN FLOW */}
-        {/* Only kept for specific edge cases if needed, but 'PIN_CHECK' step is removed from flow */}
+        {/* PIN Modal Overlay */}
         {authStep === 'PIN_CHECK' && (
           <>
             <div className="absolute inset-0 bg-white/80 dark:bg-gray-900/80 blur-md z-0 backdrop-blur-sm"></div>
             <PinModal
               isOpen={true}
-              expectedPin={userPins[userEmail] || '123456'}
+              userEmail={userEmail}
               onSuccess={handlePinSuccess}
               onClose={handlePinCancel}
+              accentColor={userEmail === 'gudang.user@gmail.com' ? 'purple' : 'blue'}
             />
           </>
         )}

@@ -22,23 +22,32 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
     setError(null);
     setIsLoading(true);
 
-    // 1. Dev Backdoor
-    if (username.toLowerCase() === 'admin' && password === 'KalindoDev2025!') {
-      const devAdmin: AdminUser = {
-        id: 0,
-        username: 'SuperDev',
-        permissions: ['view_dashboard', 'manage_pins', 'manage_access', 'manage_admins', 'manage_employees', 'view_packing', 'view_admin']
-      };
-      setTimeout(() => onSuccess(devAdmin), 800);
-      return;
-    }
-
     try {
-      // 2. Database Authentication
+      // 1. Try secure Postgres RPC function verify_admin_login
+      try {
+        const { data: rpcData, error: rpcError } = await supabase.rpc('verify_admin_login', {
+          p_username: username.trim(),
+          p_password: password
+        });
+
+        if (!rpcError && rpcData && rpcData.id) {
+          const adminUser: AdminUser = {
+            id: rpcData.id,
+            username: rpcData.username,
+            permissions: rpcData.permissions || []
+          };
+          onSuccess(adminUser);
+          return;
+        }
+      } catch (rpcErr) {
+        // Fallback to direct query if RPC is not yet created in Supabase
+      }
+
+      // 2. Direct database query fallback (only select non-sensitive fields)
       const { data, error: dbError } = await supabase
         .from('admin_users')
-        .select('*')
-        .eq('username', username)
+        .select('id, username, permissions')
+        .eq('username', username.trim())
         .eq('password', password)
         .single();
 
@@ -68,20 +77,47 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
     }
   };
 
-  const handleGuestLogin = (e: React.FormEvent) => {
+  const handleGuestLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (guestPin === '1088') {
-      const guestAdmin: AdminUser = {
-        id: -1,
-        username: 'Tamu',
-        permissions: ['manage_batches'] // Gives access to Batch/Progress Order menus
-      };
-      onSuccess(guestAdmin);
-    } else {
-      setError("PIN Tamu salah.");
-      setShowPinModal(false);
-      setGuestPin('');
+    setIsLoading(true);
+
+    try {
+      // Check database for Tamu user first
+      const { data, error: dbError } = await supabase
+        .from('admin_users')
+        .select('id, username, permissions')
+        .eq('username', 'Tamu')
+        .eq('password', guestPin)
+        .maybeSingle();
+
+      if (!dbError && data) {
+        const guestAdmin: AdminUser = {
+          id: data.id,
+          username: data.username,
+          permissions: data.permissions || ['manage_batches']
+        };
+        onSuccess(guestAdmin);
+        return;
+      }
+
+      // Fallback guest check
+      if (guestPin === '1088') {
+        const guestAdmin: AdminUser = {
+          id: -1,
+          username: 'Tamu',
+          permissions: ['manage_batches']
+        };
+        onSuccess(guestAdmin);
+      } else {
+        setError("PIN Tamu salah.");
+        setShowPinModal(false);
+        setGuestPin('');
+      }
+    } catch (err: any) {
+      setError("Gagal memvalidasi PIN Tamu.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
