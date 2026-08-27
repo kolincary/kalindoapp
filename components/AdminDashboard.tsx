@@ -1908,6 +1908,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [showOnlyBelumScanAdmin, setShowOnlyBelumScanAdmin] = useState(false);
    const [showOnlyCrossDateAdmin, setShowOnlyCrossDateAdmin] = useState(false);
    const [showOnlyCancelAdmin, setShowOnlyCancelAdmin] = useState(false);
+   const [showOnlyCancelImportAdmin, setShowOnlyCancelImportAdmin] = useState(false);
    const [showOnlyReadyAdmin, setShowOnlyReadyAdmin] = useState(false);
    const [showOnlyTerkirimBersih, setShowOnlyTerkirimBersih] = useState(false);
    const [isStockOpnamePagiExpanded, setIsStockOpnamePagiExpanded] = useState(true);
@@ -12315,8 +12316,9 @@ INV-789012`}
                                           .filter(Boolean)
                                     );
 
+                                    const cancelImportOnlySet = new Set<string>(cancelledOrders.map(o => (o.barcode || '').trim().toUpperCase()).filter(Boolean));
                                     const cancelBarcodeSet = new Set<string>([
-                                       ...cancelledOrders.map(o => (o.barcode || '').trim().toUpperCase()).filter(Boolean),
+                                       ...Array.from(cancelImportOnlySet),
                                        ...Array.from(gudangCancelResiSet)
                                     ]);
                                     const readyResiSet = new Set<string>(
@@ -12544,6 +12546,7 @@ INV-789012`}
                                                    const next = !showOnlyCancelAdmin;
                                                    setShowOnlyCancelAdmin(next);
                                                    if (next) { setShowOnlyTerkirimBersih(false); setShowOnlyBelumScanAdmin(false); setShowOnlyCrossDateAdmin(false); setShowOnlyReadyAdmin(false); }
+                                                   if (!next) { setShowOnlyCancelImportAdmin(false); }
                                                 }}
                                                 className={`flex flex-col justify-center bg-amber-50 dark:bg-amber-900/20 p-3 rounded-xl border transition-all cursor-pointer hover:shadow-md ${showOnlyCancelAdmin ? 'border-amber-500 ring-2 ring-amber-500 shadow-md' : 'border-amber-200 dark:border-amber-800 shadow-sm'}`}
                                                 title="Klik untuk menyaring resi Data Cancel pada tanggal ini"
@@ -12625,7 +12628,7 @@ INV-789012`}
                                                 const adminListToDisplay = showOnlyTerkirimBersih
                                                    ? Array.from(sameDayResiSet)
                                                    : showOnlyCancelAdmin
-                                                   ? Array.from(cancelMatchedSet)
+                                                   ? (showOnlyCancelImportAdmin ? Array.from(cancelMatchedSet).filter(bc => cancelImportOnlySet.has(bc)) : Array.from(cancelMatchedSet))
                                                    : showOnlyReadyAdmin
                                                    ? Array.from(readyMatchedSet)
                                                    : showOnlyCrossDateAdmin
@@ -12711,11 +12714,32 @@ INV-789012`}
                                                                      const c = e.target.checked;
                                                                      setShowOnlyCancelAdmin(c);
                                                                      if (c) { setShowOnlyTerkirimBersih(false); setShowOnlyBelumScanAdmin(false); setShowOnlyCrossDateAdmin(false); setShowOnlyReadyAdmin(false); }
+                                                                     if (!c) { setShowOnlyCancelImportAdmin(false); }
                                                                   }} 
                                                                   className="rounded text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer" 
                                                                />
                                                                Hanya "DATA CANCEL" ({cancelMatchedSet.size})
                                                             </label>
+                                                            {showOnlyCancelAdmin && (
+                                                               <label htmlFor="filterCancelImportAdmin" className="flex items-center gap-1.5 text-[10px] text-red-600 dark:text-red-400 font-bold cursor-pointer ml-4">
+                                                                  <input 
+                                                                     type="checkbox" 
+                                                                     id="filterCancelImportAdmin" 
+                                                                     checked={showOnlyCancelImportAdmin} 
+                                                                     onChange={e => setShowOnlyCancelImportAdmin(e.target.checked)} 
+                                                                     className="rounded text-red-500 focus:ring-red-500 w-3 h-3 cursor-pointer" 
+                                                                  />
+                                                                  Cancel Import Saja ({Array.from(cancelMatchedSet).filter(bc => cancelImportOnlySet.has(bc)).length})
+                                                                  {showOnlyCancelImportAdmin && (
+                                                                     <span 
+                                                                        onClick={(e) => { e.preventDefault(); setShowOnlyCancelImportAdmin(false); }} 
+                                                                        className="ml-2 text-gray-500 hover:text-gray-700 underline cursor-pointer"
+                                                                     >
+                                                                        Reset
+                                                                     </span>
+                                                                  )}
+                                                               </label>
+                                                            )}
 
                                                             <label htmlFor="filterReadyAdmin" className="flex items-center gap-1.5 text-xs text-teal-700 dark:text-teal-400 font-bold cursor-pointer">
                                                                <input 
@@ -14112,8 +14136,9 @@ INV-789012`}
                                           .filter(Boolean)
                                     );
 
+                                    const cancelImportOnlySet = new Set<string>(cancelledOrders.map(o => (o.barcode || '').trim().toUpperCase()).filter(Boolean));
                                     const cancelBarcodeSet = new Set<string>([
-                                       ...cancelledOrders.map(o => (o.barcode || '').trim().toUpperCase()).filter(Boolean),
+                                       ...Array.from(cancelImportOnlySet),
                                        ...Array.from(gudangCancelResiSet)
                                     ]);
                                     const readyResiSet = new Set<string>(
@@ -14584,7 +14609,7 @@ INV-789012`}
                                                     const adminListToDisplay = showOnlyTerkirimBersih
                                                        ? Array.from(sameDayResiSet)
                                                        : showOnlyCancelAdmin
-                                                       ? Array.from(cancelMatchedSet)
+                                                       ? (showOnlyCancelImportAdmin ? Array.from(cancelMatchedSet).filter(bc => cancelImportOnlySet.has(bc)) : Array.from(cancelMatchedSet))
                                                        : showOnlyReadyAdmin
                                                        ? Array.from(readyMatchedSet)
                                                        : showOnlyCrossDateAdmin
@@ -14630,9 +14655,23 @@ INV-789012`}
                                                                    Susulan ({crossDateResiSet.size})
                                                                 </label>
                                                                 <label className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400 font-bold cursor-pointer">
-                                                                   <input type="checkbox" checked={showOnlyCancelAdmin} onChange={e => { const c = e.target.checked; setShowOnlyCancelAdmin(c); if (c) { setShowOnlyTerkirimBersih(false); setShowOnlyBelumScanAdmin(false); setShowOnlyCrossDateAdmin(false); setShowOnlyReadyAdmin(false); }}} className="rounded text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer" />
+                                                                   <input type="checkbox" checked={showOnlyCancelAdmin} onChange={e => { const c = e.target.checked; setShowOnlyCancelAdmin(c); if (c) { setShowOnlyTerkirimBersih(false); setShowOnlyBelumScanAdmin(false); setShowOnlyCrossDateAdmin(false); setShowOnlyReadyAdmin(false); } if (!c) { setShowOnlyCancelImportAdmin(false); } }} className="rounded text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer" />
                                                                    Cancel ({cancelMatchedSet.size})
                                                                 </label>
+                                                                {showOnlyCancelAdmin && (
+                                                                   <label className="flex items-center gap-1.5 text-[10px] text-red-600 dark:text-red-400 font-bold cursor-pointer ml-1">
+                                                                      <input type="checkbox" checked={showOnlyCancelImportAdmin} onChange={e => setShowOnlyCancelImportAdmin(e.target.checked)} className="rounded text-red-500 focus:ring-red-500 w-3 h-3 cursor-pointer" />
+                                                                      Cancel Import Saja ({Array.from(cancelMatchedSet).filter(bc => cancelImportOnlySet.has(bc)).length})
+                                                                      {showOnlyCancelImportAdmin && (
+                                                                         <span 
+                                                                            onClick={(e) => { e.preventDefault(); setShowOnlyCancelImportAdmin(false); }} 
+                                                                            className="ml-2 text-gray-500 hover:text-gray-700 underline cursor-pointer"
+                                                                         >
+                                                                            Reset
+                                                                         </span>
+                                                                      )}
+                                                                   </label>
+                                                                )}
                                                                 <label className="flex items-center gap-1.5 text-xs text-teal-700 dark:text-teal-400 font-bold cursor-pointer">
                                                                    <input type="checkbox" checked={showOnlyReadyAdmin} onChange={e => { const c = e.target.checked; setShowOnlyReadyAdmin(c); if (c) { setShowOnlyTerkirimBersih(false); setShowOnlyBelumScanAdmin(false); setShowOnlyCrossDateAdmin(false); setShowOnlyCancelAdmin(false); }}} className="rounded text-teal-600 focus:ring-teal-500 w-3.5 h-3.5 cursor-pointer" />
                                                                    Ready ({readyMatchedSet.size})
