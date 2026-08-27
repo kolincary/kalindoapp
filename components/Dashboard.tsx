@@ -105,10 +105,15 @@ const ScanCard = React.memo(({ item, theme, index, onClick, isActuallyCancelled,
 
          <div className="flex justify-between items-start mb-2 relative z-10">
             <div className={isCancel ? 'mt-4' : ''}>
-               <div className="flex items-center gap-2">
-                  <span className="font-mono font-bold text-lg text-gray-800 dark:text-gray-200 tracking-tight">
+               <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono font-bold text-lg text-gray-800 dark:text-gray-200 tracking-tight select-all cursor-copy" title="Salin Barcode/Resi">
                      {item.barcode}
                   </span>
+                  {item.order_id && (
+                     <span className="font-mono font-semibold text-sm text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded border border-indigo-100 dark:border-indigo-800 tracking-tight select-all cursor-copy" title="Salin ID Pesanan">
+                        {item.order_id}
+                     </span>
+                  )}
                </div>
                <p className="text-xs text-gray-400 font-medium">
                   {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -347,6 +352,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       destination: string;
       priority: 'HIGH' | 'NORMAL' | 'LOW';
       tempId?: number;
+      order_id?: string;
    } | null>(null);
    const [selectedPage, setSelectedPage] = useState<number>(1);
    // Fullscreen Page Picker (Mobile only)
@@ -1484,6 +1490,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                id: uniqueId,
                timestamp: Date.now(),
                barcode: it.barcode,
+               order_id: it.order_id || null, // Include order_id from batch_items
                role: role,
                status: 'COMPLETED' as const,
                // Description: [CANCEL] tag if matched, else [AUTO-BATCH]
@@ -1550,11 +1557,44 @@ export const Dashboard: React.FC<DashboardProps> = ({
    };
 
    const processScanResult = async (
-      result: { barcode: string; description: string; destination: string; priority: 'HIGH' | 'NORMAL' | 'LOW'; report_keterangan?: string; report_msku?: string; report_qty?: string; },
+      result: { barcode: string; description: string; destination: string; priority: 'HIGH' | 'NORMAL' | 'LOW'; report_keterangan?: string; report_msku?: string; report_qty?: string; order_id?: string; },
       tempId?: number
    ) => {
       // Stripping '@' from barcode globally
       result.barcode = result.barcode.replace(/@/g, '').trim().toUpperCase();
+
+      // Fetch order_id from batch_items or scanned_items if it exists and we are online
+      if (!result.order_id && navigator.onLine) {
+         try {
+            // Priority 1: Check batch_items (data belum di-move)
+            const { data: bItem } = await supabase
+               .from('batch_items')
+               .select('order_id')
+               .eq('barcode', result.barcode)
+               .not('order_id', 'is', null)
+               .limit(1)
+               .maybeSingle();
+            
+            if (bItem?.order_id) {
+               result.order_id = bItem.order_id;
+            } else {
+               // Priority 2: Check scanned_items (data sudah di-move via auto-batch)
+               const { data: sItem } = await supabase
+                  .from('scanned_items')
+                  .select('order_id')
+                  .eq('barcode', result.barcode)
+                  .not('order_id', 'is', null)
+                  .limit(1)
+                  .maybeSingle();
+               
+               if (sItem?.order_id) {
+                  result.order_id = sItem.order_id;
+               }
+            }
+         } catch (e) {
+            console.warn("Failed to fetch order_id:", e);
+         }
+      }
 
       // Buat nama gabungan untuk mode TIM agar anggota tim terekam di DB Supabase
       const combinedName = (((role === UserRole.SORTIR || role === UserRole.SORTIR_BATCH) || (role === UserRole.PICKER || role === UserRole.PICKER_2)) && scanMode === 'TIM' && teamMembers.length > 0)
@@ -2126,6 +2166,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                id: uniqueId,
                timestamp: Date.now(),
                barcode: result.barcode,
+               order_id: result.order_id,
                role: role,
                status: scanStatus,
                description: contextDesc,
@@ -2176,7 +2217,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
             description: result.description,
             destination: result.destination,
             priority: result.priority,
-            tempId: tempId
+            tempId: tempId,
+            order_id: result.order_id
          });
          setSelectedPage(1); // Reset to page 1
          setIsPickerModalOpen(true);
@@ -2230,6 +2272,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
          id: uniqueId,
          timestamp: Date.now(),
          barcode: result.barcode,
+         order_id: result.order_id,
          role: role,
          status: scanStatus,
          description: contextDesc,
@@ -2333,7 +2376,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
    const handlePickerConfirm = async () => {
       if (!pendingPickerScan) return;
 
-      const { barcode, description, destination, priority, tempId } = pendingPickerScan;
+      const { barcode, description, destination, priority, tempId, order_id } = pendingPickerScan;
 
       // Generate unique ID
       const uniqueId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -2349,6 +2392,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
          id: uniqueId,
          timestamp: Date.now(),
          barcode: barcode,
+         order_id: order_id,
          role: role,
          status: 'COMPLETED',
          description: contextDesc,
@@ -2781,7 +2825,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                ...(targetTable === 'scanned_items' ? {
                   report_keterangan: item.report_keterangan || null,
                   report_msku: item.report_msku || null,
-                  report_qty: item.report_qty || null
+                  report_qty: item.report_qty || null,
+                  order_id: item.order_id || null
                } : {}),
                ...(targetTable === 'outbound_scans' ? { qty: 1 } : {})
             };
@@ -3654,7 +3699,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                      team_members: item.team_members || [],
                      report_keterangan: item.report_keterangan || null,
                      report_msku: item.report_msku || null,
-                     report_qty: item.report_qty || null
+                     report_qty: item.report_qty || null,
+                     order_id: item.order_id || null
                   }
                ]);
 

@@ -24,8 +24,57 @@ export const PinModal: React.FC<PinModalProps> = ({
   const [pin, setPin] = useState('');
   const [error, setError] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
+  const [lockoutSeconds, setLockoutSeconds] = useState(0);
 
   const PIN_LENGTH = 6;
+  const MAX_ATTEMPTS = 5;
+  const LOCKOUT_DURATION = 60; // 60 seconds
+
+  const storageKeyPrefix = userEmail ? `pin_lock_${userEmail}` : 'pin_lock_general';
+
+  // Check existing lockout on modal open
+  useEffect(() => {
+    if (isOpen) {
+      setPin('');
+      setError(false);
+      setIsValidating(false);
+
+      try {
+        const lockoutUntil = sessionStorage.getItem(`${storageKeyPrefix}_until`);
+        if (lockoutUntil) {
+          const remaining = Math.ceil((parseInt(lockoutUntil, 10) - Date.now()) / 1000);
+          if (remaining > 0) {
+            setLockoutSeconds(remaining);
+          } else {
+            sessionStorage.removeItem(`${storageKeyPrefix}_until`);
+            sessionStorage.removeItem(`${storageKeyPrefix}_attempts`);
+            setLockoutSeconds(0);
+          }
+        }
+      } catch (e) {}
+    }
+  }, [isOpen, storageKeyPrefix]);
+
+  // Lockout countdown timer
+  useEffect(() => {
+    if (lockoutSeconds <= 0) return;
+
+    const timer = setInterval(() => {
+      setLockoutSeconds(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          try {
+            sessionStorage.removeItem(`${storageKeyPrefix}_until`);
+            sessionStorage.removeItem(`${storageKeyPrefix}_attempts`);
+          } catch (e) {}
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [lockoutSeconds, storageKeyPrefix]);
 
   // Color maps based on accentColor prop
   const colors = {
@@ -62,17 +111,9 @@ export const PinModal: React.FC<PinModalProps> = ({
     dot: 'bg-blue-600 dark:bg-blue-500',
   };
 
-  useEffect(() => {
-    if (isOpen) {
-      setPin('');
-      setError(false);
-      setIsValidating(false);
-    }
-  }, [isOpen]);
-
   // Handle Physical Keyboard Input
   useEffect(() => {
-    if (!isOpen || isValidating) return;
+    if (!isOpen || isValidating || lockoutSeconds > 0) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (/^[0-9]$/.test(e.key)) {
@@ -87,10 +128,10 @@ export const PinModal: React.FC<PinModalProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, pin, isValidating]);
+  }, [isOpen, pin, isValidating, lockoutSeconds]);
 
   const handleNumberClick = (num: string) => {
-    if (isValidating) return;
+    if (isValidating || lockoutSeconds > 0) return;
     setPin(prev => {
       if (prev.length < PIN_LENGTH) {
         const newPin = prev + num;
@@ -105,22 +146,45 @@ export const PinModal: React.FC<PinModalProps> = ({
   };
 
   const handleDelete = () => {
-    if (isValidating) return;
+    if (isValidating || lockoutSeconds > 0) return;
     setPin(prev => prev.slice(0, -1));
     setError(false);
   };
 
+  const recordFailedAttempt = () => {
+    setError(true);
+    setPin('');
+    try {
+      const currentAttempts = parseInt(sessionStorage.getItem(`${storageKeyPrefix}_attempts`) || '0', 10) + 1;
+      sessionStorage.setItem(`${storageKeyPrefix}_attempts`, currentAttempts.toString());
+
+      if (currentAttempts >= MAX_ATTEMPTS) {
+        const lockUntil = Date.now() + LOCKOUT_DURATION * 1000;
+        sessionStorage.setItem(`${storageKeyPrefix}_until`, lockUntil.toString());
+        setLockoutSeconds(LOCKOUT_DURATION);
+      }
+    } catch (e) {}
+  };
+
+  const clearFailedAttempts = () => {
+    try {
+      sessionStorage.removeItem(`${storageKeyPrefix}_attempts`);
+      sessionStorage.removeItem(`${storageKeyPrefix}_until`);
+    } catch (e) {}
+  };
+
   const validatePin = async (inputPin: string) => {
+    if (lockoutSeconds > 0) return;
     setIsValidating(true);
     try {
       if (onValidate) {
         const isValid = await onValidate(inputPin);
         if (isValid) {
+          clearFailedAttempts();
           onSuccess();
           return;
         } else {
-          setError(true);
-          setPin('');
+          recordFailedAttempt();
           return;
         }
       }
@@ -135,11 +199,11 @@ export const PinModal: React.FC<PinModalProps> = ({
 
           if (!rpcError && typeof rpcValid === 'boolean') {
             if (rpcValid) {
+              clearFailedAttempts();
               onSuccess();
               return;
             } else {
-              setError(true);
-              setPin('');
+              recordFailedAttempt();
               return;
             }
           }
@@ -156,33 +220,33 @@ export const PinModal: React.FC<PinModalProps> = ({
           .maybeSingle();
 
         if (!error && data) {
+          clearFailedAttempts();
           onSuccess();
           return;
         }
 
         // Fallback for default hardcoded dev credentials or offline
         if (expectedPin && inputPin === expectedPin) {
+          clearFailedAttempts();
           onSuccess();
           return;
         }
 
-        setError(true);
-        setPin('');
+        recordFailedAttempt();
         return;
       }
 
       if (expectedPin) {
         if (inputPin === expectedPin) {
+          clearFailedAttempts();
           onSuccess();
         } else {
-          setError(true);
-          setPin('');
+          recordFailedAttempt();
         }
       }
     } catch (err) {
       console.error("PIN validation error:", err);
-      setError(true);
-      setPin('');
+      recordFailedAttempt();
     } finally {
       setIsValidating(false);
     }
@@ -249,21 +313,31 @@ export const PinModal: React.FC<PinModalProps> = ({
             </div>
 
             {/* Status Message Area */}
-            <div className="h-6 mb-2 flex items-center justify-center w-full">
-              {error && (
-                <p className="text-red-500 text-xs font-bold animate-pulse bg-red-50 dark:bg-red-900/20 px-3 py-1 rounded-full border border-red-100 dark:border-red-800">
-                  Incorrect PIN.
+            <div className="min-h-6 mb-2 flex items-center justify-center w-full px-2">
+              {lockoutSeconds > 0 ? (
+                <p className="text-amber-600 dark:text-amber-400 text-xs font-bold bg-amber-50 dark:bg-amber-900/30 px-3 py-1.5 rounded-full border border-amber-200 dark:border-amber-800 text-center animate-pulse">
+                  Terlalu banyak percobaan. Tunggu <span className="font-mono text-sm underline">{lockoutSeconds}s</span>
                 </p>
-              )}
+              ) : isValidating ? (
+                <p className="text-blue-600 dark:text-blue-400 text-xs font-semibold flex items-center bg-blue-50 dark:bg-blue-900/20 px-3 py-1 rounded-full border border-blue-100 dark:border-blue-800">
+                  <Loader2 size={13} className="animate-spin mr-1.5" />
+                  Memverifikasi PIN...
+                </p>
+              ) : error ? (
+                <p className="text-red-500 text-xs font-bold animate-pulse bg-red-50 dark:bg-red-900/20 px-3 py-1 rounded-full border border-red-100 dark:border-red-800">
+                  PIN salah. Silakan coba lagi.
+                </p>
+              ) : null}
             </div>
 
             {/* Custom Numpad */}
-            <div className="grid grid-cols-3 gap-x-4 sm:gap-x-6 gap-y-3.5 sm:gap-y-4.5 w-full max-w-[280px] sm:max-w-[320px] justify-items-center">
+            <div className={`grid grid-cols-3 gap-x-4 sm:gap-x-6 gap-y-3.5 sm:gap-y-4.5 w-full max-w-[280px] sm:max-w-[320px] justify-items-center transition-opacity ${lockoutSeconds > 0 ? 'opacity-40 pointer-events-none' : ''}`}>
               {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
                 <button
                   key={num}
+                  disabled={lockoutSeconds > 0 || isValidating}
                   onClick={() => handleNumberClick(num.toString())}
-                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl sm:rounded-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-2xl sm:text-3xl font-bold text-gray-800 dark:text-gray-100 flex items-center justify-center transition-all active:scale-90 active:bg-blue-100 dark:active:bg-gray-600 shadow-xs hover:shadow-md cursor-pointer select-none"
+                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl sm:rounded-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-2xl sm:text-3xl font-bold text-gray-800 dark:text-gray-100 flex items-center justify-center transition-all active:scale-90 active:bg-blue-100 dark:active:bg-gray-600 shadow-xs hover:shadow-md cursor-pointer select-none disabled:cursor-not-allowed"
                 >
                   {num}
                 </button>
@@ -272,14 +346,16 @@ export const PinModal: React.FC<PinModalProps> = ({
                 {/* Empty Placeholder */}
               </div>
               <button
+                disabled={lockoutSeconds > 0 || isValidating}
                 onClick={() => handleNumberClick('0')}
-                className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl sm:rounded-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-2xl sm:text-3xl font-bold text-gray-800 dark:text-gray-100 flex items-center justify-center transition-all active:scale-90 active:bg-blue-100 dark:active:bg-gray-600 shadow-xs hover:shadow-md cursor-pointer select-none"
+                className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl sm:rounded-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-2xl sm:text-3xl font-bold text-gray-800 dark:text-gray-100 flex items-center justify-center transition-all active:scale-90 active:bg-blue-100 dark:active:bg-gray-600 shadow-xs hover:shadow-md cursor-pointer select-none disabled:cursor-not-allowed"
               >
                 0
               </button>
               <button
+                disabled={lockoutSeconds > 0 || isValidating}
                 onClick={handleDelete}
-                className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl sm:rounded-full text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-all active:scale-90 active:bg-gray-200 dark:active:bg-gray-700 cursor-pointer select-none"
+                className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl sm:rounded-full text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-all active:scale-90 active:bg-gray-200 dark:active:bg-gray-700 cursor-pointer select-none disabled:cursor-not-allowed"
               >
                 <Delete size={26} />
               </button>

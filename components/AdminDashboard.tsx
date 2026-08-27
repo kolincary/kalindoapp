@@ -4673,24 +4673,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const executeSaveBatch = async () => {
       setIsSavingBatch(true);
       try {
-         const lines = batchImportText.split(/[\n,;]+/)
+         const parsedLines = batchImportText.split(/[\n,;]+/)
             .map(line => line.replace(/@/g, '').trim().toUpperCase())
-            .filter(line => line.length > 0);
-         if (lines.length === 0) {
+            .filter(line => line.length > 0)
+            .map(line => {
+               const parts = line.split(/\s+/);
+               if (parts.length >= 2) {
+                  return { order_id: parts[0], barcode: parts[1] };
+               } else {
+                  return { order_id: null, barcode: parts[0] };
+               }
+            });
+
+         if (parsedLines.length === 0) {
             alert("Tidak ada barcode valid.");
             setIsSavingBatch(false);
             return;
          }
 
-         // Remove duplicate lines from the input itself first
-         const uniqueLines = Array.from(new Set(lines));
+         // Remove duplicate lines from the input itself first based on barcode
+         const uniqueMap = new Map();
+         for (const item of parsedLines) {
+             if (!uniqueMap.has(item.barcode)) {
+                 uniqueMap.set(item.barcode, item);
+             }
+         }
+         const uniqueItems = Array.from(uniqueMap.values());
+         const barcodesToCheck = uniqueItems.map(item => item.barcode);
 
          // Enforce unique Barcode/AWB logic globally via chunked fetch
          const existingSet = new Set();
          const CHUNK_SIZE = 500;
 
-         for (let i = 0; i < uniqueLines.length; i += CHUNK_SIZE) {
-            const chunk = uniqueLines.slice(i, i + CHUNK_SIZE);
+         for (let i = 0; i < barcodesToCheck.length; i += CHUNK_SIZE) {
+            const chunk = barcodesToCheck.slice(i, i + CHUNK_SIZE);
             const { data: matched } = await supabase
                .from('batch_items')
                .select('barcode')
@@ -4701,12 +4717,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             }
          }
 
-         const finalBarcodesToInsert = uniqueLines.filter((bc: string) => !existingSet.has(bc));
+         const finalItemsToInsert = uniqueItems.filter(item => !existingSet.has(item.barcode));
 
-         if (finalBarcodesToInsert.length === 0) {
+         if (finalItemsToInsert.length === 0) {
             if (skipDuplicateBatch) {
                // Silently skip the duplicate error and pretend it succeeded as requested
-               setSuccessToast(`Berhasil menyimpan ${uniqueLines.length} data batch.`);
+               setSuccessToast(`Berhasil menyimpan ${uniqueItems.length} data batch.`);
                setIsBatchImportModalOpen(false);
                setBatchImportText('');
                setBatchExcelFilename('');
@@ -4717,7 +4733,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                setIsSavingBatch(false);
                return;
             } else {
-               alert("Semua barcode duplikat, tidak ada data baru yang ditambahkan.");
+               const dupExamples = Array.from(existingSet).slice(0, 5).join(', ');
+               console.warn('Duplicate barcodes found in batch_items:', Array.from(existingSet));
+               alert(`Semua barcode duplikat (${existingSet.size}/${uniqueItems.length}), tidak ada data baru.\n\nContoh duplikat: ${dupExamples}\n\nCek di tabel batch_items apakah data ini sudah pernah diimport sebelumnya.`);
                setIsSavingBatch(false);
                return;
             }
@@ -4751,12 +4769,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
          // 2. Create Batch Items via chunked insert
          const INSERT_CHUNK = 500;
-         for (let i = 0; i < finalBarcodesToInsert.length; i += INSERT_CHUNK) {
-            const insertChunk = finalBarcodesToInsert.slice(i, i + INSERT_CHUNK);
+         for (let i = 0; i < finalItemsToInsert.length; i += INSERT_CHUNK) {
+            const insertChunk = finalItemsToInsert.slice(i, i + INSERT_CHUNK);
             const { error: itemsError } = await supabase.from('batch_items').insert(
-               insertChunk.map(barcode => ({
+               insertChunk.map(item => ({
                   batch_id: newBatch.id,
-                  barcode: barcode,
+                  barcode: item.barcode,
+                  order_id: item.order_id,
                   created_at: overrideCreatedAt
                }))
             );
@@ -4770,17 +4789,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             await addDoc(collection(db, 'admin_batch_imports'), {
                excelFilename: batchExcelFilename.trim(),
                staffName: matchedStaff,
-               jumlah: finalBarcodesToInsert.length,
+               jumlah: finalItemsToInsert.length,
                timestamp: overrideCreatedAt,
                batchId: newBatchNo,
                createdAt: new Date().toISOString(),
-               barcodes: finalBarcodesToInsert
+               barcodes: finalItemsToInsert.map(i => i.barcode)
             });
          } catch (fsErr: any) {
             console.error("Failed to save to Firestore admin_batch_imports:", fsErr);
          }
 
-         setSuccessToast(`Berhasil menyimpan ${finalBarcodesToInsert.length} data batch.`);
+         setSuccessToast(`Berhasil menyimpan ${finalItemsToInsert.length} data batch.`);
          setBatchImportText('');
          setIsBatchImportModalOpen(false);
          setBatchExcelFilename('');
@@ -5491,21 +5510,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                   if (jsonData.length === 0) continue;
 
-                  // Map to group barcodes by batch name
-                  const batchGroups = new Map<string, string[]>();
+                  // Map to group items by batch name
+                  const batchGroups = new Map<string, { barcode: string; order_id: string | null }[]>();
 
-                  // Try to find the AWB and Batch columns dynamically from header (index 0)
+                  // Try to find the AWB, Batch, and Order ID columns dynamically from header (index 0)
                   const headerRow = jsonData[0] || [];
                   let awbIndex = -1;
                   let batchIndex = -1;
+                  let orderIdIndex = -1;
                   
                   for (let col = 0; col < headerRow.length; col++) {
-                     const colName = String(headerRow[col] || '').toUpperCase();
+                     const colName = String(headerRow[col] || '').toUpperCase().trim();
                      if (colName.includes('AWB') || colName.includes('BARCODE') || colName.includes('RESI')) {
                         awbIndex = col;
                      }
                      if (colName.includes('BATCH') || colName.includes('FILENAME')) {
                         batchIndex = col;
+                     }
+                     if (colName.includes('PESANAN') || colName.includes('ORDER_ID') || colName.includes('ORDER ID') || colName === 'ID') {
+                        orderIdIndex = col;
                      }
                   }
 
@@ -5515,7 +5538,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   for (let i = 1; i < jsonData.length; i++) {
                      const row = jsonData[i];
                      if (row && row.length > awbIndex && row[awbIndex]) {
-                        const bc = String(row[awbIndex]).trim().toUpperCase();
+                        const bc = String(row[awbIndex]).replace(/@/g, '').trim().toUpperCase();
+                        const ordId = (orderIdIndex !== -1 && row[orderIdIndex]) ? String(row[orderIdIndex]).replace(/@/g, '').trim().toUpperCase() : null;
                         if (bc) {
                            let rowBatchName = `${sheetName.trim()} [${baseFileName}]-${datePart}-${randomPart}`;
                            if (batchIndex !== -1 && row[batchIndex]) {
@@ -5525,16 +5549,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                            if (!batchGroups.has(rowBatchName)) {
                               batchGroups.set(rowBatchName, []);
                            }
-                           batchGroups.get(rowBatchName)!.push(bc);
+                           batchGroups.get(rowBatchName)!.push({ barcode: bc, order_id: ordId });
                         }
                      }
                   }
 
                   // Process each grouped batch
-                  for (const [batchNo, barcodes] of batchGroups.entries()) {
-                     // Remove duplicates within the batch
-                     const uniqueBarcodes = Array.from(new Set(barcodes));
-                     if (uniqueBarcodes.length === 0) continue;
+                  for (const [batchNo, rawItems] of batchGroups.entries()) {
+                     // Remove duplicates within the batch based on barcode
+                     const uniqueMap = new Map<string, { barcode: string; order_id: string | null }>();
+                     for (const it of rawItems) {
+                        if (!uniqueMap.has(it.barcode)) {
+                           uniqueMap.set(it.barcode, it);
+                        }
+                     }
+                     const uniqueItems = Array.from(uniqueMap.values());
+                     if (uniqueItems.length === 0) continue;
 
                      let batchId;
                      const { data: newBatch, error: batchError } = await supabase
@@ -5556,8 +5586,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                      const existingSet = new Set<string>();
                      const CHUNK_SIZE = 500;
 
-                     for (let i = 0; i < uniqueBarcodes.length; i += CHUNK_SIZE) {
-                        const chunk = uniqueBarcodes.slice(i, i + CHUNK_SIZE);
+                     const allBarcodes = uniqueItems.map(it => it.barcode);
+                     for (let i = 0; i < allBarcodes.length; i += CHUNK_SIZE) {
+                        const chunk = allBarcodes.slice(i, i + CHUNK_SIZE);
                         const { data: matched } = await supabase
                            .from('batch_items')
                            .select('barcode')
@@ -5568,18 +5599,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         }
                      }
 
-                     const finalBarcodesToInsert = uniqueBarcodes.filter((bc: string) => !existingSet.has(bc));
+                     const finalItemsToInsert = uniqueItems.filter(it => !existingSet.has(it.barcode));
 
-                     if (finalBarcodesToInsert.length === 0) continue; // Skip if all barcodes already imported
+                     if (finalItemsToInsert.length === 0) continue; // Skip if all barcodes already imported
 
                      // Insert only completely new barcodes via chunks
                      const INSERT_CHUNK = 500;
-                     for (let i = 0; i < finalBarcodesToInsert.length; i += INSERT_CHUNK) {
-                        const insertChunk = finalBarcodesToInsert.slice(i, i + INSERT_CHUNK);
+                     for (let i = 0; i < finalItemsToInsert.length; i += INSERT_CHUNK) {
+                        const insertChunk = finalItemsToInsert.slice(i, i + INSERT_CHUNK);
                         const { error: itemsError } = await supabase.from('batch_items').insert(
-                           insertChunk.map(barcode => ({
+                           insertChunk.map(item => ({
                               batch_id: batchId,
-                              barcode: barcode
+                              barcode: item.barcode,
+                              order_id: item.order_id || null
                            }))
                         );
 
@@ -5588,7 +5620,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         }
                      }
 
-                     totalImported += finalBarcodesToInsert.length;
+                     totalImported += finalItemsToInsert.length;
                      sheetsProcessed++;
 
                      // Save to Firestore admin_batch_imports for each batch
@@ -5598,11 +5630,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         await addDoc(collection(db, 'admin_batch_imports'), {
                            excelFilename: file.name,
                            staffName: matchedStaff,
-                           jumlah: finalBarcodesToInsert.length,
+                           jumlah: finalItemsToInsert.length,
                            timestamp: new Date().toISOString(),
                            batchId: batchNo,
                            createdAt: new Date().toISOString(),
-                           barcodes: finalBarcodesToInsert
+                           barcodes: finalItemsToInsert.map(i => i.barcode)
                         });
                      } catch (fsErr: any) {
                         console.error("Failed to save to Firestore admin_batch_imports:", fsErr);
@@ -6649,11 +6681,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                fsItems.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
                if (fsItems.length > 0) {
-                  const headers = "No,Timestamp,Barcode,File Excel,Employee,Shift,Role,Status,Destination,Description";
+                  const headers = "No,Timestamp,ID Pesanan,Barcode,File Excel,Employee,Shift,Role,Status,Destination,Description";
                   const batchRows = fsItems.map((item: any, idx: number) => {
                      const tsFormatted = item.timestamp ? new Date(item.timestamp).toLocaleString('id-ID').replace(/,/g, '') : '-';
                      const status = item.description?.includes('[CANCEL]') ? 'CANCEL' : 'SUCCESS';
-                     return `${idx + 1},"${tsFormatted}","=""${item.barcode || ''}""","${item.excel_filename || ''}","${item.employee_name || ''}","${item.shift || '-'}","${item.role || 'PACKING'}","${status}","${item.destination || ''}","${(item.description || '').replace(/"/g, '""')}"`;
+                     return `${idx + 1},"${tsFormatted}","=""${item.order_id || ''}""","=""${item.barcode || ''}""","${item.excel_filename || ''}","${item.employee_name || ''}","${item.shift || '-'}","${item.role || 'PACKING'}","${status}","${item.destination || ''}","${(item.description || '').replace(/"/g, '""')}"`;
                   });
 
                   const csvContent = "\uFEFF" + headers + "\n" + batchRows.join("\n");
@@ -6676,7 +6708,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          // Unlimited Export: Single File, No Split Limit
 
          let accumulatedRows = "";
-         const headers = "No,Timestamp,Barcode,File Excel,Employee,Shift,Role,Status,Destination,Description";
+         const headers = "No,Timestamp,ID Pesanan,Barcode,File Excel,Employee,Shift,Role,Status,Destination,Description";
 
          for (let offset = 0; offset < totalRecords; offset += FETCH_BATCH_SIZE) {
             setExportProgress(Math.round((offset / totalRecords) * 100));
@@ -6698,7 +6730,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                const batchRows = enrichedBatch.map((item: any, idx: number) => {
                   const dateStr = new Date(item.timestamp).toLocaleString('id-ID');
                   // Global index
-                  return `${offset + idx + 1},"${dateStr}","=""${item.barcode}""","${item.excel_filename || ''}","${item.employee_name}","${item.shift}","${item.role}","${item.status}","${item.destination || ''}","${item.description || ''}"`;
+                  return `${offset + idx + 1},"${dateStr}","=""${item.order_id || ''}""","=""${item.barcode}""","${item.excel_filename || ''}","${item.employee_name}","${item.shift}","${item.role}","${item.status}","${item.destination || ''}","${item.description || ''}"`;
                }).join('\n');
 
                accumulatedRows += (accumulatedRows ? '\n' : '') + batchRows;
@@ -6927,7 +6959,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          // Unlimited Export: Single File, No Split Limit
 
          let accumulatedRows = "";
-         const headers = "No,Timestamp,Barcode,File Excel,Employee,Shift,Role,Status,Destination,Description";
+         const headers = "No,Timestamp,ID Pesanan,Barcode,File Excel,Employee,Shift,Role,Status,Destination,Description";
 
          for (let offset = 0; offset < totalRecords; offset += FETCH_BATCH_SIZE) {
             setExportPackingProgress(Math.round((offset / totalRecords) * 100));
@@ -6944,7 +6976,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                const batchRows = enrichedBatch.map((item: any, idx: number) => {
                   const dateStr = new Date(item.timestamp).toLocaleString('id-ID');
                   // Global index
-                  return `${offset + idx + 1},"${dateStr}","=""${item.barcode}""","${item.excel_filename || ''}","${item.employee_name}","${item.shift}","${item.role}","${item.status}","${item.destination || ''}","${item.description || ''}"`;
+                  return `${offset + idx + 1},"${dateStr}","=""${item.order_id || ''}""","=""${item.barcode}""","${item.excel_filename || ''}","${item.employee_name}","${item.shift}","${item.role}","${item.status}","${item.destination || ''}","${item.description || ''}"`;
                }).join('\n');
 
                accumulatedRows += (accumulatedRows ? '\n' : '') + batchRows;
@@ -7691,7 +7723,7 @@ if (filterPackingShift !== 'ALL') {
             const enrichedBatch = data.map((item: any) => ({ ...item, shift: shiftMap.get(item.employee_name) || '-' }));
             const batchRows = enrichedBatch.map((item: any, idx: number) => {
                const dateStr = new Date(item.timestamp).toLocaleString('id-ID');
-               return `${offset + idx + 1},"${dateStr}","=""${item.barcode}""","${item.employee_name}","${item.shift}","${item.role}","${item.status}","${item.destination || ''}","${item.description || ''}"`;
+               return `${offset + idx + 1},"${dateStr}","=""${item.order_id || ''}""","=""${item.barcode}""","${item.employee_name}","${item.shift}","${item.role}","${item.status}","${item.destination || ''}","${item.description || ''}"`;
             }).join('\n');
 
             accumulatedRows += (accumulatedRows ? '\n' : '') + batchRows;
@@ -7700,7 +7732,7 @@ if (filterPackingShift !== 'ALL') {
             const isLastBatch = (offset + FETCH_BATCH_SIZE >= totalRecords);
 
             if (currentFileCount >= FILE_SPLIT_LIMIT || isLastBatch) {
-               const blob = new Blob(["No,Timestamp,Barcode,Staff,Shift,Role,Status,Destination,Description\n" + accumulatedRows], { type: 'text/csv;charset=utf-8;' });
+               const blob = new Blob(["No,Timestamp,ID Pesanan,Barcode,Staff,Shift,Role,Status,Destination,Description\n" + accumulatedRows], { type: 'text/csv;charset=utf-8;' });
                const url = URL.createObjectURL(blob);
                const link = document.createElement("a");
                link.href = url;

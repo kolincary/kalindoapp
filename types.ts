@@ -30,6 +30,7 @@ export interface ScannedItem {
   report_keterangan?: string;
   report_msku?: string;
   report_qty?: string;
+  order_id?: string; // New field for ID Pesanan
 }
 
 export interface FailedItem extends ScannedItem {

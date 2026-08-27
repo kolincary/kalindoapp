@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Lock, ArrowLeft, User, Loader2, Eye, EyeOff, Shield, AlertCircle, Monitor, Box, Package } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 import { AdminUser } from '../types';
@@ -16,9 +16,72 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
   const [error, setError] = useState<string | null>(null);
   const [showPinModal, setShowPinModal] = useState(false);
   const [guestPin, setGuestPin] = useState('');
+  const [adminLockoutSeconds, setAdminLockoutSeconds] = useState(0);
+
+  const MAX_ADMIN_ATTEMPTS = 5;
+  const ADMIN_LOCKOUT_SEC = 60;
+
+  // Check existing admin lockout on mount
+  useEffect(() => {
+    try {
+      const lockUntil = sessionStorage.getItem('admin_login_lock_until');
+      if (lockUntil) {
+        const remaining = Math.ceil((parseInt(lockUntil, 10) - Date.now()) / 1000);
+        if (remaining > 0) {
+          setAdminLockoutSeconds(remaining);
+        } else {
+          sessionStorage.removeItem('admin_login_lock_until');
+          sessionStorage.removeItem('admin_login_attempts');
+        }
+      }
+    } catch (e) {}
+  }, []);
+
+  // Admin lockout countdown timer
+  useEffect(() => {
+    if (adminLockoutSeconds <= 0) return;
+
+    const timer = setInterval(() => {
+      setAdminLockoutSeconds(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          try {
+            sessionStorage.removeItem('admin_login_lock_until');
+            sessionStorage.removeItem('admin_login_attempts');
+          } catch (e) {}
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [adminLockoutSeconds]);
+
+  const recordAdminFailedAttempt = () => {
+    try {
+      const attempts = parseInt(sessionStorage.getItem('admin_login_attempts') || '0', 10) + 1;
+      sessionStorage.setItem('admin_login_attempts', attempts.toString());
+
+      if (attempts >= MAX_ADMIN_ATTEMPTS) {
+        const lockUntil = Date.now() + ADMIN_LOCKOUT_SEC * 1000;
+        sessionStorage.setItem('admin_login_lock_until', lockUntil.toString());
+        setAdminLockoutSeconds(ADMIN_LOCKOUT_SEC);
+      }
+    } catch (e) {}
+  };
+
+  const clearAdminFailedAttempts = () => {
+    try {
+      sessionStorage.removeItem('admin_login_attempts');
+      sessionStorage.removeItem('admin_login_lock_until');
+    } catch (e) {}
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (adminLockoutSeconds > 0) return;
+
     setError(null);
     setIsLoading(true);
 
@@ -31,6 +94,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
         });
 
         if (!rpcError && rpcData && rpcData.id) {
+          clearAdminFailedAttempts();
           const adminUser: AdminUser = {
             id: rpcData.id,
             username: rpcData.username,
@@ -52,6 +116,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
         .single();
 
       if (dbError) {
+        recordAdminFailedAttempt();
         if (dbError.code === 'PGRST116') {
           throw new Error("Username atau password salah.");
         } else if (dbError.code === '42P01') {
@@ -62,6 +127,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
       }
 
       if (data) {
+        clearAdminFailedAttempts();
         const adminUser: AdminUser = {
           id: data.id,
           username: data.username,
@@ -79,6 +145,8 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
 
   const handleGuestLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (adminLockoutSeconds > 0) return;
+
     setError(null);
     setIsLoading(true);
 
@@ -92,6 +160,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
         .maybeSingle();
 
       if (!dbError && data) {
+        clearAdminFailedAttempts();
         const guestAdmin: AdminUser = {
           id: data.id,
           username: data.username,
@@ -103,6 +172,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
 
       // Fallback guest check
       if (guestPin === '1088') {
+        clearAdminFailedAttempts();
         const guestAdmin: AdminUser = {
           id: -1,
           username: 'Tamu',
@@ -110,6 +180,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
         };
         onSuccess(guestAdmin);
       } else {
+        recordAdminFailedAttempt();
         setError("PIN Tamu salah.");
         setShowPinModal(false);
         setGuestPin('');
@@ -225,17 +296,25 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
               </div>
             </div>
 
+            {adminLockoutSeconds > 0 && (
+              <div className="bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-300 p-3 rounded-2xl text-xs flex items-center gap-2 border border-amber-200 dark:border-amber-800">
+                <AlertCircle size={16} className="shrink-0 text-amber-500" />
+                <span>Terlalu banyak percobaan gagal. Tunggu <b>{adminLockoutSeconds}s</b></span>
+              </div>
+            )}
+
             <button
               type="submit"
-              disabled={isLoading}
-              className="w-full py-3.5 px-4 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-400 text-white font-semibold rounded-2xl shadow-md hover:shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 text-sm mt-2"
+              disabled={isLoading || adminLockoutSeconds > 0}
+              className="w-full py-3.5 px-4 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-400 dark:disabled:bg-gray-700 text-white font-semibold rounded-2xl shadow-md hover:shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 text-sm mt-2 disabled:cursor-not-allowed"
             >
-              {isLoading ? <Loader2 size={18} className="animate-spin" /> : 'Verifikasi Akses'}
+              {isLoading ? <Loader2 size={18} className="animate-spin" /> : adminLockoutSeconds > 0 ? `Terkunci (${adminLockoutSeconds}s)` : 'Verifikasi Akses'}
             </button>
             <button
               type="button"
+              disabled={isLoading || adminLockoutSeconds > 0}
               onClick={() => setShowPinModal(true)}
-              className="w-full py-2.5 px-4 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-semibold rounded-2xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 text-sm mt-2"
+              className="w-full py-2.5 px-4 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 disabled:opacity-50 text-gray-700 dark:text-gray-300 font-semibold rounded-2xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 text-sm mt-2 disabled:cursor-not-allowed"
             >
               Masuk sebagai tamu
             </button>
@@ -355,17 +434,25 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
                 </div>
               </div>
 
+              {adminLockoutSeconds > 0 && (
+                <div className="bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-300 p-3.5 rounded-2xl text-xs sm:text-sm flex items-center gap-2.5 border border-amber-200 dark:border-amber-800">
+                  <AlertCircle size={18} className="shrink-0 text-amber-500" />
+                  <span>Terlalu banyak percobaan gagal. Tunggu <b>{adminLockoutSeconds}s</b></span>
+                </div>
+              )}
+
               <button
                 type="submit"
-                disabled={isLoading}
-                className="w-full py-3.5 px-4 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-400 text-white font-semibold rounded-2xl shadow-md hover:shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 text-sm pt-3.5 mt-4"
+                disabled={isLoading || adminLockoutSeconds > 0}
+                className="w-full py-3.5 px-4 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-400 dark:disabled:bg-gray-700 text-white font-semibold rounded-2xl shadow-md hover:shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 text-sm pt-3.5 mt-4 disabled:cursor-not-allowed"
               >
-                {isLoading ? <Loader2 size={18} className="animate-spin" /> : 'Verifikasi Akses'}
+                {isLoading ? <Loader2 size={18} className="animate-spin" /> : adminLockoutSeconds > 0 ? `Terkunci (${adminLockoutSeconds}s)` : 'Verifikasi Akses'}
               </button>
               <button
                 type="button"
+                disabled={isLoading || adminLockoutSeconds > 0}
                 onClick={() => setShowPinModal(true)}
-                className="w-full py-2.5 px-4 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-semibold rounded-2xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 text-sm mt-2"
+                className="w-full py-2.5 px-4 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 disabled:opacity-50 text-gray-700 dark:text-gray-300 font-semibold rounded-2xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 text-sm mt-2 disabled:cursor-not-allowed"
               >
                 Masuk sebagai tamu
               </button>

@@ -124,8 +124,8 @@ const App: React.FC = () => {
         // Fire and Forget - Backup to Google Drive
         console.log("Triggering Automatic Backup (Traffic Based)...");
 
-        // Use active Supabase URL from environment or localStorage
-        const primaryUrl = import.meta.env.VITE_SUPABASE_URL || localStorage.getItem('supabase_url') || 'https://cruiirntmgpgcwgdlxea.supabase.co';
+        // Use active Supabase URL from environment
+        const primaryUrl = import.meta.env.VITE_SUPABASE_URL || 'https://iwvbrigjydmhbwbnbbbk.supabase.co';
 
         // No await here on purpose, let it run in background
         fetch(`${primaryUrl}/functions/v1/backup-to-drive`, {
