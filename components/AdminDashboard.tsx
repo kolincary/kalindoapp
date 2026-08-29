@@ -13,7 +13,10 @@ import { DataComparisonView } from './DataComparisonView';
 import { SpecialScanView } from './SpecialScanView';
 import { InjectExpiredResiView } from './InjectExpiredResiView';
 import { PrintFormsView } from './PrintFormsView';
+import { ResiFormatterView } from './ResiFormatterView';
 import {
+   Sparkles,
+   Wrench,
    Save,
    Database,
    LogOut,
@@ -151,6 +154,7 @@ const SIDEBAR_MENUS_LIST = [
   { id: 'EXPORT_DATA', label: 'Export Data' },
   { id: 'PRINT_FORMS', label: 'Print Form Cetak' },
   { id: 'FAKE_REPORT', label: 'Invoice Palsu' },
+  { id: 'RESI_FORMATTER', label: 'Format Resi & Strip' },
 ];
 
 // AdminView type moved to types.ts
@@ -238,6 +242,7 @@ const VIEW_PERMISSIONS: Partial<Record<AdminView, string | string[]>> = {
    'EXPORT_DATA': 'view_dashboard',
    'BATCH_DATA': 'manage_batches',
    'USER_MONITORING': 'view_dashboard',
+   'RESI_FORMATTER': ['manage_database', 'view_dashboard', 'manage_batches'],
 };
 
 // --- HELPERS ---
@@ -741,6 +746,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (activeView === 'CHECK_INVOICE') return 'Cek Invoice';
       if (activeView === 'FAKE_REPORT') return 'Invoice Palsu';
       if (activeView === 'BATCH_DATA_2') return 'Progress Order';
+      if (activeView === 'RESI_FORMATTER') return 'Format Resi & Strip';
       return activeView.replace(/_/g, ' ');
    };
    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -4670,6 +4676,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       await executeSaveBatch();
    };
 
+   const formatBarcodeWithKnownPrefixes = (barcode: string): string => {
+      if (!barcode) return '';
+      const clean = barcode.replace(/@/g, '').trim().toUpperCase();
+      const prefixes = ['LXAD', 'JNEB', 'JNAP', 'SPXID', 'CM', 'GTL', 'JP', 'TKP', 'SAP'];
+      for (const p of prefixes) {
+         if (clean.startsWith(`${p}-`)) return clean;
+         if (clean.startsWith(p)) {
+            const rest = clean.slice(p.length);
+            if (rest.length > 0 && !rest.startsWith('-')) {
+               return `${p}-${rest}`;
+            }
+         }
+      }
+      return clean;
+   };
+
    const executeSaveBatch = async () => {
       setIsSavingBatch(true);
       try {
@@ -4679,9 +4701,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             .map(line => {
                const parts = line.split(/\s+/);
                if (parts.length >= 2) {
-                  return { order_id: parts[0], barcode: parts[1] };
+                  return { order_id: parts[0], barcode: formatBarcodeWithKnownPrefixes(parts[1]) };
                } else {
-                  return { order_id: null, barcode: parts[0] };
+                  return { order_id: null, barcode: formatBarcodeWithKnownPrefixes(parts[0]) };
                }
             });
 
@@ -5538,7 +5560,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   for (let i = 1; i < jsonData.length; i++) {
                      const row = jsonData[i];
                      if (row && row.length > awbIndex && row[awbIndex]) {
-                        const bc = String(row[awbIndex]).replace(/@/g, '').trim().toUpperCase();
+                        const bc = formatBarcodeWithKnownPrefixes(String(row[awbIndex]).replace(/@/g, '').trim().toUpperCase());
                         const ordId = (orderIdIndex !== -1 && row[orderIdIndex]) ? String(row[orderIdIndex]).replace(/@/g, '').trim().toUpperCase() : null;
                         if (bc) {
                            let rowBatchName = `${sheetName.trim()} [${baseFileName}]-${datePart}-${randomPart}`;
@@ -8549,6 +8571,7 @@ if (filterPackingShift !== 'ALL') {
                      <SidebarItem hiddenMenus={currentAdmin?.username === 'Tamu' ? ['BATCH_DATA_3', ...(hiddenMenus || [])] : hiddenMenus} view="BATCH_DATA_3" icon={Database} label="Batch management" requiredPerm="manage_batches" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="CANCEL_DATA" icon={AlertTriangle} label="Data Cancel" requiredPerm="manage_cancel_data" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="TRACK_RESI" icon={ShieldCheck} label="Tracking Resi" requiredPerm="view_dashboard" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
+                     <SidebarItem hiddenMenus={hiddenMenus} view="RESI_FORMATTER" icon={Sparkles} label="Format Resi & Strip" requiredPerm="" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      {(() => {
                         const isDevModeNew = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
                         return isDevModeNew ? (
@@ -16624,6 +16647,13 @@ INV-789012`}
                         {activeView === 'INJECT_EXPIRED_RESI' && (
                            <div className="w-full h-full bg-white dark:bg-gray-800 overflow-y-auto">
                               <InjectExpiredResiView isDarkMode={isDarkMode} />
+                           </div>
+                        )}
+
+                        {/* RESI FORMATTER & STRIP VIEW */}
+                        {activeView === 'RESI_FORMATTER' && (
+                           <div className="w-full h-full bg-white dark:bg-gray-800 overflow-y-auto">
+                              <ResiFormatterView isDarkMode={isDarkMode} />
                            </div>
                         )}
 

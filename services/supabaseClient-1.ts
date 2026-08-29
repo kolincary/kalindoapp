@@ -2,8 +2,8 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Active Supabase credentials (.env / current project)
-const ACTIVE_URL = 'https://iwvbrigjydmhbwbnbbbk.supabase.co';
-const ACTIVE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3dmJyaWdqeWRtaGJ3Ym5iYmJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NzQ5MzksImV4cCI6MjA4NTU1MDkzOX0.RkdZ2vZDWGvY6VTQLE3JYfpMEvIBOrO7b6xyGFoRf1k';
+const ACTIVE_URL = 'https://cruiirntmgpgcwgdlxea.supabase.co';
+const ACTIVE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNydWlpcm50bWdwZ2N3Z2RseGVhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2MzIzNjYsImV4cCI6MjEwMDIwODM2Nn0.kMKv0UMfGktATuUNuxpxY8ieoCeTsYe_7limODsN1hE';
 
 const DEFAULT_URL = (import.meta as any).env?.VITE_SUPABASE_URL || ACTIVE_URL;
 const DEFAULT_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || ACTIVE_KEY;
@@ -21,7 +21,7 @@ const getConfig = () => {
       let key = localStorage.getItem('supabase_key') || DEFAULT_KEY;
 
       // Automatically purge old stale URL from localStorage if it points to old projects
-      if (url && !url.includes('iwvbrigjydmhbwbnbbbk')) {
+      if (url && !url.includes('cruiirntmgpgcwgdlxea') && !url.includes('iwvbrigjydmhbwbnbbbk')) {
          localStorage.removeItem('supabase_url');
          localStorage.removeItem('supabase_key');
          url = DEFAULT_URL;

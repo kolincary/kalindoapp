@@ -14,5 +14,6 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Cloud Firestore and get a reference to the specific database 'project-ks'
-export const db = getFirestore(app, "project-ks");
+// Initialize Cloud Firestore and get a reference to the specific database 'ksapp-sby'
+const databaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || "ksapp-sby";
+export const db = getFirestore(app, databaseId);
