@@ -2,8 +2,8 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Active Supabase credentials (.env / current project)
-const ACTIVE_URL = 'https://cruiirntmgpgcwgdlxea.supabase.co';
-const ACTIVE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNydWlpcm50bWdwZ2N3Z2RseGVhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2MzIzNjYsImV4cCI6MjEwMDIwODM2Nn0.kMKv0UMfGktATuUNuxpxY8ieoCeTsYe_7limODsN1hE';
+const ACTIVE_URL = 'https://lxhwyrzxgqvosecnhfli.supabase.co';
+const ACTIVE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4aHd5cnp4Z3F2b3NlY25oZmxpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1NzQ3MjEsImV4cCI6MjA4NTE1MDcyMX0.32gBAnMHN9R4eWl-Tu2NxivrM7c7Kqctk9XEvdpKf94';
 
 const DEFAULT_URL = (import.meta as any).env?.VITE_SUPABASE_URL || ACTIVE_URL;
 const DEFAULT_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || ACTIVE_KEY;
@@ -15,7 +15,7 @@ const DEFAULT_SPECIAL_OLD_URL = 'https://opdcyccwracapxfxisfw.supabase.co';
 const DEFAULT_SPECIAL_OLD_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9wZGN5Y2N3cmFjYXB4Znhpc2Z3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3NzkyMDUsImV4cCI6MjA5NTM1NTIwNX0.p4gmiTKIjcljdjoqzQn-S6z5YyrU9XvZPPKgnNF5_Cs';
 
 // Verified Supabase project domains whitelist for safe configuration
-const ALLOWED_PROJECT_REFS = ['cruiirntmgpgcwgdlxea', 'iwvbrigjydmhbwbnbbbk', 'ymolrxscthxxtlmnxmob', 'opdcyccwracapxfxisfw'];
+const ALLOWED_PROJECT_REFS = ['lxhwyrzxgqvosecnhfli', 'cruiirntmgpgcwgdlxea', 'iwvbrigjydmhbwbnbbbk', 'ymolrxscthxxtlmnxmob', 'opdcyccwracapxfxisfw'];
 
 // Helper to get config securely
 const getConfig = () => {
