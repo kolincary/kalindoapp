@@ -8,8 +8,8 @@ interface LoginScreenProps {
   onAdminLoginRequest?: () => void;
 }
 
-// Provided Google Client ID
-const GOOGLE_CLIENT_ID = '547501643468-7t1n1fb6b5stv0cbqqovlgfhqrj8cpjh.apps.googleusercontent.com';
+// Provided Google Client ID with env override
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '547501643468-7t1n1fb6b5stv0cbqqovlgfhqrj8cpjh.apps.googleusercontent.com';
 
 declare global {
   interface Window {
@@ -23,6 +23,25 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onAdmi
   const [googleReady, setGoogleReady] = useState(false);
   const googleBtnRef = useRef<HTMLDivElement>(null);
   const googleBtnRefMobile = useRef<HTMLDivElement>(null);
+
+  // Fallback OAuth Login via redirect
+  const handleOAuthLogin = async () => {
+    setIsRedirecting(true);
+    setErrorMsg(null);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin,
+        },
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      console.error("OAuth Login Error:", err);
+      setErrorMsg(err.message || "Failed to sign in with Google OAuth.");
+      setIsRedirecting(false);
+    }
+  };
 
   // Check for existing session on mount
   useEffect(() => {
@@ -59,6 +78,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onAdmi
         if (error) throw error;
       } catch (err: any) {
         console.error("Google Login Error:", err);
+        if (err?.message?.includes('Unacceptable audience') || err?.message?.includes('audience')) {
+          setErrorMsg("Client ID belum didaftarkan di Supabase Auth Provider. Mengalihkan ke login Google OAuth...");
+          await handleOAuthLogin();
+          return;
+        }
         setErrorMsg(err.message || "Failed to sign in with Google.");
         setIsRedirecting(false);
       }
@@ -242,11 +266,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onAdmi
 
                 {!googleReady && (
                   <button
-                    onClick={() => {
-                      if (window.google?.accounts?.id) {
-                        window.google.accounts.id.prompt();
-                      }
-                    }}
+                    onClick={handleOAuthLogin}
                     className="w-full h-[50px] bg-[#1a73e8] hover:bg-[#1557b0] text-white font-semibold rounded-full shadow-md hover:shadow-lg transition-all active:scale-[0.99] flex items-center justify-center gap-3 px-4"
                   >
                     <div className="w-7 h-7 rounded-full bg-white flex items-center justify-center shrink-0">
@@ -381,11 +401,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onAdmi
 
                   {!googleReady && (
                     <button
-                      onClick={() => {
-                        if (window.google?.accounts?.id) {
-                          window.google.accounts.id.prompt();
-                        }
-                      }}
+                      onClick={handleOAuthLogin}
                       className="w-full h-[50px] bg-[#1a73e8] hover:bg-[#1557b0] text-white font-semibold rounded-full shadow-md hover:shadow-lg transition-all active:scale-[0.99] flex items-center justify-center gap-3 px-4"
                     >
                       <div className="w-7 h-7 rounded-full bg-white flex items-center justify-center shrink-0">
