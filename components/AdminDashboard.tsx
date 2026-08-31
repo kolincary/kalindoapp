@@ -3804,12 +3804,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                rawBarcode = rawBarcode.slice(2);
             }
 
-            // Format LXAD & JNAP barcodes without hyphen: LXADxxxxxxxx -> LXAD-xxxxxxxxx, JNAPxxxxxxxx -> JNAP-xxxxxxxxx across all roles
+            // Format LXAD, JNAP & JNEB barcodes without hyphen: LXADxxxxxxxx -> LXAD-xxxxxxxxx, JNAPxxxxxxxx -> JNAP-xxxxxxxxx, JNEBxxxxxxxx -> JNEB-xxxxxxxxx across all roles
             if (/^LXAD[^-]/i.test(rawBarcode)) {
                rawBarcode = 'LXAD-' + rawBarcode.substring(4);
             }
             if (/^JNAP[^-]/i.test(rawBarcode)) {
                rawBarcode = 'JNAP-' + rawBarcode.substring(4);
+            }
+            if (/^JNEB[^-]/i.test(rawBarcode)) {
+               rawBarcode = 'JNEB-' + rawBarcode.substring(4);
             }
 
             if (activeView === 'LEADER_2_DATA') {
@@ -4679,7 +4682,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const formatBarcodeWithKnownPrefixes = (barcode: string): string => {
       if (!barcode) return '';
       const clean = barcode.replace(/@/g, '').trim().toUpperCase();
-      const prefixes = ['LXAD', 'JNEB', 'JNAP', 'SPXID', 'CM', 'GTL', 'JP', 'TKP', 'SAP'];
+      const prefixes = ['LXAD', 'JNEB', 'JNAP'];
       for (const p of prefixes) {
          if (clean.startsWith(`${p}-`)) return clean;
          if (clean.startsWith(p)) {
@@ -4859,12 +4862,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          cleaned = '00' + cleaned;
       }
 
-      // Format LXAD & JNAP barcodes without hyphen: LXAD123456 -> LXAD-123456, JNAP123456 -> JNAP-123456
+      // Format LXAD, JNAP & JNEB barcodes without hyphen: LXAD123456 -> LXAD-123456, JNAP123456 -> JNAP-123456, JNEB123456 -> JNEB-123456
       if (/^LXAD[^-]/i.test(cleaned)) {
          cleaned = 'LXAD-' + cleaned.substring(4);
       }
       if (/^JNAP[^-]/i.test(cleaned)) {
          cleaned = 'JNAP-' + cleaned.substring(4);
+      }
+      if (/^JNEB[^-]/i.test(cleaned)) {
+         cleaned = 'JNEB-' + cleaned.substring(4);
       }
 
       return cleaned;
@@ -7665,6 +7671,9 @@ if (filterPackingShift !== 'ALL') {
             }
             if (/^JNAP[^-]/i.test(rawBarcode)) {
                rawBarcode = 'JNAP-' + rawBarcode.substring(4);
+            }
+            if (/^JNEB[^-]/i.test(rawBarcode)) {
+               rawBarcode = 'JNEB-' + rawBarcode.substring(4);
             }
             return {
                ...item,
