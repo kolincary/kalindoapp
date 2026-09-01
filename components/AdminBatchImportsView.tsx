@@ -14,7 +14,8 @@ import {
   Eye,
   Copy,
   Check,
-  FileText
+  FileText,
+  Layers
 } from 'lucide-react';
 
 interface AdminBatchImportItem {
@@ -36,6 +37,23 @@ export function AdminBatchImportsView() {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchBy, setSearchBy] = useState<'excelFilename' | 'batchId' | 'staffName' | 'id' | 'barcode'>('excelFilename');
   const [limitCount, setLimitCount] = useState<number>(100);
+
+  // Mass Search State
+  const [searchMode, setSearchMode] = useState<'SINGLE' | 'MASS'>('SINGLE');
+  const [massSearchText, setMassSearchText] = useState('');
+  const [massSearchApplied, setMassSearchApplied] = useState<string[]>([]);
+
+  const getParsedMassBarcodes = (text: string): string[] => {
+    if (!text || !text.trim()) return [];
+    return Array.from(
+      new Set(
+        text
+          .split(/[\r\n,;\t]+/)
+          .map(b => b.replace(/@/g, '').trim().toUpperCase())
+          .filter(b => b.length >= 3)
+      )
+    );
+  };
   
   // Edit State
   const [editingItem, setEditingItem] = useState<AdminBatchImportItem | null>(null);
@@ -130,6 +148,59 @@ export function AdminBatchImportsView() {
     } catch (err: any) {
       console.error('Error searching firestore:', err);
       setErrorMsg(err.message || 'Gagal mencari data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleMassSearch = async () => {
+    const parsed = getParsedMassBarcodes(massSearchText);
+    setMassSearchApplied(parsed);
+    if (parsed.length === 0) {
+      alert("Silakan paste setidaknya 1 barcode valid.");
+      return;
+    }
+    
+    setLoading(true);
+    setErrorMsg('');
+    try {
+      const matchedMap = new Map<string, AdminBatchImportItem>();
+      
+      // 1. In chunks of 30, query array-contains-any in Firestore
+      for (let i = 0; i < parsed.length; i += 30) {
+        const chunk = parsed.slice(i, i + 30);
+        try {
+          const q = query(
+            collection(db, 'admin_batch_imports'),
+            where('barcodes', 'array-contains-any', chunk)
+          );
+          const snap = await getDocs(q);
+          snap.forEach(docSnap => {
+            matchedMap.set(docSnap.id, { id: docSnap.id, ...(docSnap.data() as Record<string, any>) } as AdminBatchImportItem);
+          });
+        } catch (e) {
+          console.warn("Array contains any failed, continuing fallback...", e);
+        }
+      }
+
+      // 2. Also scan recent batch imports from Firestore for any items containing the parsed barcodes
+      const qRecent = query(collection(db, 'admin_batch_imports'), orderBy('timestamp', 'desc'), limit(limitCount > 0 ? limitCount : 1000));
+      const snapRecent = await getDocs(qRecent);
+      snapRecent.forEach(docSnap => {
+        const item = { id: docSnap.id, ...(docSnap.data() as Record<string, any>) } as AdminBatchImportItem;
+        if (Array.isArray(item.barcodes) && item.barcodes.some(b => parsed.includes((b || '').toString().trim().toUpperCase()))) {
+          matchedMap.set(item.id, item);
+        }
+      });
+
+      const data = Array.from(matchedMap.values()).sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+      setItems(data);
+      if (data.length === 0) {
+        setErrorMsg(`Tidak ditemukan data batch import yang memuat ${parsed.length} barcode yang dicari.`);
+      }
+    } catch (err: any) {
+      console.error('Error mass searching firestore:', err);
+      setErrorMsg(err.message || 'Gagal mencari data massal');
     } finally {
       setLoading(false);
     }
@@ -302,63 +373,172 @@ export function AdminBatchImportsView() {
           </div>
         </div>
 
-        {/* Filter & Search Bar */}
-        <div className="bg-gray-50 dark:bg-gray-700/40 p-4 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-wrap items-center gap-3">
-          <form onSubmit={handleSearch} className="flex flex-wrap gap-2 items-center flex-1">
-            
-            <select 
-              value={searchBy}
-              onChange={(e) => setSearchBy(e.target.value as any)}
-              className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-emerald-500 text-sm h-[42px]"
-            >
-              <option value="excelFilename">Excel Filename</option>
-              <option value="barcode">Nomor Resi / Barcode</option>
-              <option value="batchId">Batch ID</option>
-              <option value="staffName">Staff Name</option>
-              <option value="id">Doc ID</option>
-            </select>
-            
-            <div className="relative flex items-center flex-1 min-w-[160px]">
-              <Search className="absolute left-3 text-gray-400 w-4 h-4" />
-              <input 
-                type="text" 
-                placeholder={searchBy === 'barcode' ? "Cari nomor resi / barcode (misal: 004647886474)..." : "Cari data import batch..."}
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 pr-8 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-emerald-500 text-sm h-[42px] w-full"
-              />
-              {searchTerm && (
-                 <button 
-                    type="button"
-                    onClick={() => { setSearchTerm(''); fetchRecentData(); }}
-                    className="absolute right-2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-full transition-colors"
-                    title="Hapus pencarian"
-                 >
-                    <X className="w-4 h-4" />
-                 </button>
-              )}
+        {/* Filter & Search Bar with Single / Mass Mode */}
+        <div className="bg-gray-50 dark:bg-gray-700/40 p-4 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col gap-3">
+          <div className="flex flex-col lg:flex-row gap-3 items-start lg:items-center justify-between w-full">
+            {/* Mode Switcher */}
+            <div className="flex items-center p-1 bg-gray-200 dark:bg-gray-800 rounded-xl border border-gray-300 dark:border-gray-600 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchMode('SINGLE');
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  searchMode === 'SINGLE'
+                    ? 'bg-white dark:bg-gray-700 text-emerald-600 dark:text-emerald-400 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+              >
+                <Search className="w-3.5 h-3.5" />
+                <span>Single Search</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchMode('MASS');
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  searchMode === 'MASS'
+                    ? 'bg-amber-500 text-white shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Mass Search (Paste Vertikal)</span>
+                {massSearchApplied.length > 0 && (
+                  <span className="ml-1 px-1.5 py-0.2 bg-white text-amber-700 rounded-full text-[10px] font-extrabold">
+                    {massSearchApplied.length}
+                  </span>
+                )}
+              </button>
             </div>
-            
-            <button 
-              type="submit"
-              className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-medium text-sm h-[42px] transition-colors flex items-center gap-1.5"
-            >
-              <Search className="w-4 h-4" />
-              Cari
-            </button>
-            
-            <button 
-              type="button"
-              onClick={() => {
-                setSearchTerm('');
-                fetchRecentData();
-              }}
-              title="Refresh / Reset Filter"
-              className="p-2.5 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors h-[42px] flex items-center justify-center"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            </button>
-          </form>
+
+            {/* Single Search Mode Form */}
+            {searchMode === 'SINGLE' && (
+              <form onSubmit={handleSearch} className="flex flex-wrap gap-2 items-center flex-1 w-full">
+                <select 
+                  value={searchBy}
+                  onChange={(e) => setSearchBy(e.target.value as any)}
+                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-emerald-500 text-sm h-[42px]"
+                >
+                  <option value="excelFilename">Excel Filename</option>
+                  <option value="barcode">Nomor Resi / Barcode</option>
+                  <option value="batchId">Batch ID</option>
+                  <option value="staffName">Staff Name</option>
+                  <option value="id">Doc ID</option>
+                </select>
+                
+                <div className="relative flex items-center flex-1 min-w-[160px]">
+                  <Search className="absolute left-3 text-gray-400 w-4 h-4" />
+                  <input 
+                    type="text" 
+                    placeholder={searchBy === 'barcode' ? "Cari nomor resi / barcode (misal: 004647886474)..." : "Cari data import batch..."}
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-9 pr-8 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-emerald-500 text-sm h-[42px] w-full"
+                  />
+                  {searchTerm && (
+                    <button 
+                      type="button"
+                      onClick={() => { setSearchTerm(''); fetchRecentData(); }}
+                      className="absolute right-2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-full transition-colors cursor-pointer"
+                      title="Hapus pencarian"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+                
+                <button 
+                  type="submit"
+                  className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-medium text-sm h-[42px] transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Search className="w-4 h-4" />
+                  Cari
+                </button>
+                
+                <button 
+                  type="button"
+                  onClick={() => {
+                    setSearchTerm('');
+                    fetchRecentData();
+                  }}
+                  title="Refresh / Reset Filter"
+                  className="p-2.5 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors h-[42px] flex items-center justify-center cursor-pointer"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                </button>
+              </form>
+            )}
+          </div>
+
+          {/* Mass Search Expandable Panel */}
+          {searchMode === 'MASS' && (
+            <div className="w-full bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-2xl p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                  <span className="text-xs font-bold text-amber-900 dark:text-amber-300">
+                    Paste Daftar Barcode Vertikal (Atas ke Bawah):
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {massSearchText.trim() && (
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-amber-200 dark:bg-amber-900 text-amber-800 dark:text-amber-200">
+                      {getParsedMassBarcodes(massSearchText).length} Barcode Terdeteksi
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <textarea
+                value={massSearchText}
+                onChange={(e) => setMassSearchText(e.target.value)}
+                rows={4}
+                placeholder={`Paste barcode vertikal di sini...
+Contoh:
+SPXID066536875668
+SPXID069983704608
+11004285496374
+LXAD-1234567890`}
+                className="w-full p-3 bg-white dark:bg-gray-900 border border-amber-300 dark:border-amber-800 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none font-mono text-xs text-gray-900 dark:text-white resize-y"
+              />
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-1">
+                <div className="text-[11px] text-amber-700 dark:text-amber-400 font-medium">
+                  {massSearchApplied.length > 0 ? (
+                    <span>Menampilkan hasil pencarian untuk <b>{massSearchApplied.length}</b> barcode massal.</span>
+                  ) : (
+                    <span>Paste daftar barcode di atas lalu klik &quot;Cari Massal&quot;.</span>
+                  )}
+                </div>
+                <div className="flex items-center justify-end gap-2">
+                  {(massSearchText || massSearchApplied.length > 0) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMassSearchText('');
+                        setMassSearchApplied([]);
+                        fetchRecentData();
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 transition-all cursor-pointer"
+                    >
+                      Reset
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleMassSearch}
+                    disabled={loading}
+                    className="flex items-center justify-center gap-1.5 px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-md shadow-amber-500/20 active:scale-98 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    <span>Cari Massal ({getParsedMassBarcodes(massSearchText).length})</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
