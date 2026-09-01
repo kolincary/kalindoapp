@@ -1852,6 +1852,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [batchDataList, setBatchDataList] = useState<any[]>([]);
    const [isLoadingBatchData, setIsLoadingBatchData] = useState(false);
    const [batchSearch, setBatchSearch] = useState('');
+   const [batchSearchMode, setBatchSearchMode] = useState<'SINGLE' | 'MASS'>('SINGLE');
+   const [batchMassSearchInput, setBatchMassSearchInput] = useState('');
+   const [batchMassSearchApplied, setBatchMassSearchApplied] = useState<string[]>([]);
+
+   const getParsedMassBarcodes = (text: string): string[] => {
+      if (!text || !text.trim()) return [];
+      return Array.from(
+         new Set(
+            text
+               .split(/[\r\n,;\t]+/)
+               .map(b => b.replace(/@/g, '').trim().toUpperCase())
+               .filter(b => b.length >= 3)
+         )
+      );
+   };
    
    interface AdminBatchImport {
       id: string;
@@ -3044,10 +3059,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   query = query.gte('created_at', startOfDay.toISOString()).lte('created_at', endOfDay.toISOString());
                }
 
-               if (batchSearch) {
-                  const fuzzySearch = batchSearch.trim().replace(/\s+/g, '%');
-                  query = query.or(`batch_no.ilike.%${fuzzySearch}%,excel_filename.ilike.%${fuzzySearch}%`);
-               }
+               if (batchSearchMode === 'MASS' && batchMassSearchApplied.length > 0) {
+                   const { data: matchedItems } = await supabase
+                      .from('batch_items')
+                      .select('batch_id')
+                      .in('barcode', batchMassSearchApplied.slice(0, 1000));
+                   const matchedBatchIds = Array.from(new Set((matchedItems || []).map((m: any) => m.batch_id).filter(Boolean)));
+                   if (matchedBatchIds.length > 0) {
+                      query = query.in('id', matchedBatchIds);
+                   } else {
+                      query = query.in('id', ['00000000-0000-0000-0000-000000000000']);
+                   }
+                } else if (batchSearch) {
+                   const fuzzySearch = batchSearch.trim().replace(/\s+/g, '%');
+                   query = query.or(`batch_no.ilike.%${fuzzySearch}%,excel_filename.ilike.%${fuzzySearch}%`);
+                }
 
                const { data: batches, error } = await query.order('created_at', { ascending: false }).limit(9999);
                if (error) throw error;
@@ -3211,14 +3237,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          };
          fetchBatchSummaryData();
       }
-   }, [activeView, activeBatchTab, batchDateFilter, batchTimeFilter, batchSearch, refreshSummaryTrigger]);
+   }, [activeView, activeBatchTab, batchDateFilter, batchTimeFilter, batchSearch, batchSearchMode, batchMassSearchApplied, refreshSummaryTrigger]);
 
    useEffect(() => {
       const delayDebounceFn = setTimeout(() => {
          if ((activeView === 'BATCH_DATA' || activeView === 'BATCH_DATA_2' || activeView === 'BATCH_DATA_3')) fetchBatchData(batchPage);
       }, 500);
       return () => clearTimeout(delayDebounceFn);
-   }, [batchSearch, batchDateFilter, batchTimeFilter, batchPage, activeView]);
+   }, [batchSearch, batchSearchMode, batchMassSearchApplied, batchDateFilter, batchTimeFilter, batchPage, activeView]);
 
    // 4. Data Fetching for Packing/Sortir
    useEffect(() => {
@@ -4181,7 +4207,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             .gte('batches.created_at', startOfDay.toISOString())
             .lte('batches.created_at', endOfDay.toISOString());
 
-         if (batchSearch) {
+         if (batchSearchMode === 'MASS' && batchMassSearchApplied.length > 0) {
+            query = query.in('barcode', batchMassSearchApplied.slice(0, 1000));
+         } else if (batchSearch) {
             const fuzzySearch = batchSearch.trim().replace(/\s+/g, '%');
             const { data: matchingBatches } = await supabase.from('batches').select('id').or(`batch_no.ilike.%${fuzzySearch}%,excel_filename.ilike.%${fuzzySearch}%`).limit(100);
             const matchingBatchIds = matchingBatches?.map(b => b.id) || [];
@@ -11694,129 +11722,253 @@ INV-789012`}
 
 {activeBatchTab !== 'MASS_SEARCH' && (
 <div className="flex flex-col w-full h-full overflow-hidden">
-{/* COMMON BATCH DATA SEARCH BAR */}
-                              <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row gap-3 bg-white dark:bg-gray-800 items-center justify-between shrink-0">
-                                 <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-                                    <div className="relative w-full sm:w-80">
-                                       <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                                       <input
-                                          type="text"
-                                          placeholder="Cari Batch ID atau Barcode..."
-                                          value={batchSearch}
-                                          onChange={(e) => {
-                                             const val = e.target.value;
-                                             setBatchSearch(val);
-                                             setBatchPage(1);
-                                             
-                                             // Auto-switch staff tab if barcode found in REKAP_ADMIN
-                                             if (activeBatchTab === 'REKAP_ADMIN' && val.trim().length >= 5) {
-                                                const searchStr = val.trim().toUpperCase();
-                                                const foundItem = adminImports.find(item => item.barcodes?.some(b => (b||'').toString().toUpperCase().includes(searchStr)));
-                                                if (foundItem && foundItem.staffName && foundItem.staffName !== activeStaffTab) {
-                                                   setActiveStaffTab(foundItem.staffName);
-                                                }
-                                             }
-
-                                             if (val.toLowerCase().includes('devmodenew')) {
-                                                const isCurrentlyOn = showFsSyncDevMode;
-                                                setShowFsSyncDevMode(!isCurrentlyOn);
-                                                setSuccessToast(!isCurrentlyOn ? "⚡ Dev Mode Secret Panel Activated!" : "⚡ Dev Mode Secret Panel Deactivated!");
-                                                setBatchSearch(val.replace(/devmodenew/gi, '').trim());
-                                             }
-                                          }}
-                                          className="w-full pl-10 pr-10 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-                                       />
-                                       {batchSearch && (
+{/* COMMON BATCH DATA SEARCH BAR (SINGLE / MASS PASTE VERTIKAL) */}
+                              <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col gap-3 bg-white dark:bg-gray-800 shrink-0">
+                                 <div className="flex flex-col lg:flex-row gap-3 items-start lg:items-center justify-between w-full">
+                                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full lg:w-auto">
+                                       {/* Mode Switcher: Single vs Mass */}
+                                       <div className="flex items-center p-1 bg-gray-100 dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 shrink-0">
                                           <button
+                                             type="button"
                                              onClick={() => {
-                                                setBatchSearch('');
+                                                setBatchSearchMode('SINGLE');
                                                 setBatchPage(1);
                                              }}
-                                             className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                                batchSearchMode === 'SINGLE'
+                                                   ? 'bg-white dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                             }`}
                                           >
-                                             <X size={16} />
+                                             <Search size={14} />
+                                             <span>Single Search</span>
                                           </button>
-                                       )}
-                                    </div>
-                                    <div className="relative flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 outline-none focus-within:ring-2 focus-within:ring-indigo-500 w-full sm:w-auto h-10 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 select-none overflow-hidden">
-                                       <CalendarIcon size={18} className="text-gray-400 shrink-0 pointer-events-none" />
-                                       <input
-                                          type="date"
-                                          value={batchDateFilter}
-                                          onChange={(e) => {
-                                             setBatchDateFilter(e.target.value);
-                                             setBatchPage(1);
-                                          }}
-                                          className="bg-transparent text-gray-700 dark:text-gray-200 outline-none w-full h-full text-sm cursor-pointer select-none [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                                       />
-                                       {batchDateFilter && (
                                           <button
                                              type="button"
-                                             onClick={(e) => {
-                                                e.preventDefault();
-                                                e.stopPropagation();
-                                                setBatchDateFilter('');
+                                             onClick={() => {
+                                                setBatchSearchMode('MASS');
                                                 setBatchPage(1);
                                              }}
-                                             className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 ml-1 h-full flex items-center justify-center relative z-20 cursor-pointer"
-                                             title="Reset Filter"
+                                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                                batchSearchMode === 'MASS'
+                                                   ? 'bg-amber-500 text-white shadow-sm'
+                                                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                             }`}
                                           >
-                                             <X size={16} />
+                                             <Layers size={14} />
+                                             <span>Mass Search (Paste Vertikal)</span>
+                                             {batchMassSearchApplied.length > 0 && (
+                                                <span className="ml-1 px-1.5 py-0.2 bg-white text-amber-700 rounded-full text-[10px] font-extrabold">
+                                                   {batchMassSearchApplied.length}
+                                                </span>
+                                             )}
                                           </button>
-                                       )}
-                                    </div>
-                                    <div className="relative flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 outline-none focus-within:ring-2 focus-within:ring-indigo-500 w-full sm:w-auto h-10 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 select-none overflow-hidden">
-                                       <Clock size={18} className="text-gray-400 shrink-0 pointer-events-none" />
-                                       <input
-                                          type="time"
-                                          step="1"
-                                          value={batchTimeFilter}
-                                          onChange={(e) => {
-                                             setBatchTimeFilter(e.target.value);
-                                             setBatchPage(1);
-                                          }}
-                                          className="bg-transparent text-gray-700 dark:text-gray-200 outline-none w-full h-full text-sm cursor-pointer select-none [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                                       />
-                                       {batchTimeFilter && (
-                                          <button
-                                             type="button"
-                                             onClick={(e) => {
-                                                e.preventDefault();
-                                                e.stopPropagation();
-                                                setBatchTimeFilter('');
-                                                setBatchPage(1);
-                                             }}
-                                             className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 ml-1 h-full flex items-center justify-center relative z-20 cursor-pointer"
-                                             title="Reset Filter"
-                                          >
-                                             <X size={16} />
-                                          </button>
-                                       )}
-                                    </div>
-                                 </div>
-                                 <div className="flex items-center gap-3 w-full sm:w-auto mt-2 sm:mt-0 justify-between sm:justify-end">
-                                    {activeBatchTab === 'ITEMS' && (selectedBatchItemIds.length > 0 || isSelectAllBatchFiltered) && (
-                                       <>
-                                          <button
-                                             onClick={() => setIsMoveDateBatchItemsModalOpen(true)}
-                                             className="flex items-center gap-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 rounded-xl font-bold text-xs hover:bg-blue-100 transition-all animate-[slideDown_0.2s_ease-out]"
-                                          >
-                                             <CalendarIcon size={16} /> Pindah Tanggal
-                                          </button>
-                                          <button
-                                             onClick={handleBulkDeleteBatchItems}
-                                             className="flex items-center gap-2 px-4 py-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-xl font-bold text-xs hover:bg-red-100 transition-all animate-[slideDown_0.2s_ease-out]"
-                                          >
-                                             <Trash2 size={16} /> Hapus Terpilih ({isSelectAllBatchFiltered ? batchTotalRows : selectedBatchItemIds.length})
-                                          </button>
-                                       </>
-                                    )}
-                                    {activeBatchTab !== 'REKAP_ADMIN' && activeBatchTab !== 'AUDIT_KOMPARASI' && (
-                                       <div className="text-xs text-gray-500 font-bold bg-white dark:bg-gray-800 px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 shadow-sm">
-                                          Total: {activeBatchTab === 'ITEMS' ? batchDataList.filter(item => (showFsSyncDevMode || showSecretMenu) ? true : !item.is_scanned).length.toLocaleString() : activeBatchTab === 'SUMMARY' ? batchSummaryData.filter(batch => (showFsSyncDevMode || showSecretMenu) ? true : !(batchProgressMap[batch.id] && batchProgressMap[batch.id].total > 0 && batchProgressMap[batch.id].scanned >= batchProgressMap[batch.id].total)).length.toLocaleString() : adminImports.filter(item => item.staffName === activeStaffTab).length.toLocaleString()} data
                                        </div>
-                                    )}
+
+                                       {/* Single Input Mode */}
+                                       {batchSearchMode === 'SINGLE' && (
+                                          <div className="relative w-full sm:w-80">
+                                             <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                             <input
+                                                type="text"
+                                                placeholder="Cari Batch ID atau Barcode..."
+                                                value={batchSearch}
+                                                onChange={(e) => {
+                                                   const val = e.target.value;
+                                                   setBatchSearch(val);
+                                                   setBatchPage(1);
+                                                   
+                                                   // Auto-switch staff tab if barcode found in REKAP_ADMIN
+                                                   if (activeBatchTab === 'REKAP_ADMIN' && val.trim().length >= 5) {
+                                                      const searchStr = val.trim().toUpperCase();
+                                                      const foundItem = adminImports.find(item => item.barcodes?.some(b => (b||'').toString().toUpperCase().includes(searchStr)));
+                                                      if (foundItem && foundItem.staffName && foundItem.staffName !== activeStaffTab) {
+                                                         setActiveStaffTab(foundItem.staffName);
+                                                      }
+                                                   }
+
+                                                   if (val.toLowerCase().includes('devmodenew')) {
+                                                      const isCurrentlyOn = showFsSyncDevMode;
+                                                      setShowFsSyncDevMode(!isCurrentlyOn);
+                                                      setSuccessToast(!isCurrentlyOn ? "⚡ Dev Mode Secret Panel Activated!" : "⚡ Dev Mode Secret Panel Deactivated!");
+                                                      setBatchSearch(val.replace(/devmodenew/gi, '').trim());
+                                                   }
+                                                }}
+                                                className="w-full pl-10 pr-10 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-xs sm:text-sm"
+                                             />
+                                             {batchSearch && (
+                                                <button
+                                                   onClick={() => {
+                                                      setBatchSearch('');
+                                                      setBatchPage(1);
+                                                   }}
+                                                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                                                >
+                                                   <X size={16} />
+                                                </button>
+                                             )}
+                                          </div>
+                                       )}
+                                    </div>
+
+                                    {/* Date & Time Filters */}
+                                    <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-between lg:justify-end">
+                                       <div className="relative flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 outline-none focus-within:ring-2 focus-within:ring-indigo-500 h-10 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 select-none overflow-hidden text-xs sm:text-sm">
+                                          <CalendarIcon size={18} className="text-gray-400 shrink-0 pointer-events-none" />
+                                          <input
+                                             type="date"
+                                             value={batchDateFilter}
+                                             onChange={(e) => {
+                                                setBatchDateFilter(e.target.value);
+                                                setBatchPage(1);
+                                             }}
+                                             className="bg-transparent text-gray-700 dark:text-gray-200 outline-none w-full h-full text-sm cursor-pointer select-none [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                                          />
+                                          {batchDateFilter && (
+                                             <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                   e.preventDefault();
+                                                   e.stopPropagation();
+                                                   setBatchDateFilter('');
+                                                   setBatchPage(1);
+                                                }}
+                                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 ml-1 h-full flex items-center justify-center relative z-20 cursor-pointer"
+                                                title="Reset Filter Tanggal"
+                                             >
+                                                <X size={16} />
+                                             </button>
+                                          )}
+                                       </div>
+
+                                       <div className="relative flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 outline-none focus-within:ring-2 focus-within:ring-indigo-500 h-10 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 select-none overflow-hidden text-xs sm:text-sm">
+                                          <Clock size={18} className="text-gray-400 shrink-0 pointer-events-none" />
+                                          <input
+                                             type="time"
+                                             step="1"
+                                             value={batchTimeFilter}
+                                             onChange={(e) => {
+                                                setBatchTimeFilter(e.target.value);
+                                                setBatchPage(1);
+                                             }}
+                                             className="bg-transparent text-gray-700 dark:text-gray-200 outline-none w-full h-full text-sm cursor-pointer select-none [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                                          />
+                                          {batchTimeFilter && (
+                                             <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                   e.preventDefault();
+                                                   e.stopPropagation();
+                                                   setBatchTimeFilter('');
+                                                   setBatchPage(1);
+                                                }}
+                                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 ml-1 h-full flex items-center justify-center relative z-20 cursor-pointer"
+                                                title="Reset Filter Jam"
+                                             >
+                                                <X size={16} />
+                                             </button>
+                                          )}
+                                       </div>
+
+                                       <div className="flex items-center gap-3 mt-2 sm:mt-0">
+                                          {activeBatchTab === 'ITEMS' && (selectedBatchItemIds.length > 0 || isSelectAllBatchFiltered) && (
+                                             <>
+                                                <button
+                                                   onClick={() => setIsMoveDateBatchItemsModalOpen(true)}
+                                                   className="flex items-center gap-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 rounded-xl font-bold text-xs hover:bg-blue-100 transition-all"
+                                                >
+                                                   <CalendarIcon size={16} /> Pindah Tanggal
+                                                </button>
+                                                <button
+                                                   onClick={handleBulkDeleteBatchItems}
+                                                   className="flex items-center gap-2 px-4 py-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-xl font-bold text-xs hover:bg-red-100 transition-all"
+                                                >
+                                                   <Trash2 size={16} /> Hapus Terpilih ({isSelectAllBatchFiltered ? batchTotalRows : selectedBatchItemIds.length})
+                                                </button>
+                                             </>
+                                          )}
+                                          {activeBatchTab !== 'REKAP_ADMIN' && activeBatchTab !== 'AUDIT_KOMPARASI' && (
+                                             <div className="text-xs text-gray-500 font-bold bg-white dark:bg-gray-800 px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 shadow-sm">
+                                                Total: {activeBatchTab === 'ITEMS' ? batchDataList.filter(item => (showFsSyncDevMode || showSecretMenu) ? true : !item.is_scanned).length.toLocaleString() : activeBatchTab === 'SUMMARY' ? batchSummaryData.filter(batch => (showFsSyncDevMode || showSecretMenu) ? true : !(batchProgressMap[batch.id] && batchProgressMap[batch.id].total > 0 && batchProgressMap[batch.id].scanned >= batchProgressMap[batch.id].total)).length.toLocaleString() : adminImports.filter(item => item.staffName === activeStaffTab).length.toLocaleString()} data
+                                             </div>
+                                          )}
+                                       </div>
+                                    </div>
                                  </div>
+
+                                 {/* Mass Search Dropdown/Textarea Expand Panel */}
+                                 {batchSearchMode === 'MASS' && (
+                                    <div className="w-full bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-2xl p-4 space-y-3">
+                                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                          <div className="flex items-center gap-2">
+                                             <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                                             <span className="text-xs font-bold text-amber-900 dark:text-amber-300">
+                                                Paste Daftar Barcode Vertikal (Atas ke Bawah):
+                                             </span>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                             {batchMassSearchInput.trim() && (
+                                                <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-amber-200 dark:bg-amber-900 text-amber-800 dark:text-amber-200">
+                                                   {getParsedMassBarcodes(batchMassSearchInput).length} Barcode Terdeteksi
+                                                </span>
+                                             )}
+                                          </div>
+                                       </div>
+
+                                       <textarea
+                                          value={batchMassSearchInput}
+                                          onChange={(e) => setBatchMassSearchInput(e.target.value)}
+                                          rows={4}
+                                          placeholder={`Paste barcode vertikal di sini...
+Contoh:
+SPXID066536875668
+SPXID069983704608
+11004285496374
+LXAD-1234567890`}
+                                          className="w-full p-3 bg-white dark:bg-gray-900 border border-amber-300 dark:border-amber-800 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none font-mono text-xs text-gray-900 dark:text-white resize-y"
+                                       />
+
+                                       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-1">
+                                          <div className="text-[11px] text-amber-700 dark:text-amber-400 font-medium">
+                                             {batchMassSearchApplied.length > 0 ? (
+                                                <span>Menampilkan hasil filter untuk <b>{batchMassSearchApplied.length}</b> barcode massal.</span>
+                                             ) : (
+                                                <span>Paste daftar barcode di atas lalu klik &quot;Cari Massal&quot;.</span>
+                                             )}
+                                          </div>
+                                          <div className="flex items-center justify-end gap-2">
+                                             {(batchMassSearchInput || batchMassSearchApplied.length > 0) && (
+                                                <button
+                                                   type="button"
+                                                   onClick={() => {
+                                                      setBatchMassSearchInput('');
+                                                      setBatchMassSearchApplied([]);
+                                                      setBatchPage(1);
+                                                   }}
+                                                   className="px-3 py-1.5 rounded-xl text-xs font-bold text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 transition-all cursor-pointer"
+                                                >
+                                                   Reset
+                                                </button>
+                                             )}
+                                             <button
+                                                type="button"
+                                                onClick={() => {
+                                                   const parsed = getParsedMassBarcodes(batchMassSearchInput);
+                                                   setBatchMassSearchApplied(parsed);
+                                                   setBatchPage(1);
+                                                   if (parsed.length === 0) {
+                                                      alert("Silakan paste setidaknya 1 barcode valid.");
+                                                   }
+                                                }}
+                                                className="flex items-center justify-center gap-1.5 px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-md shadow-amber-500/20 active:scale-98 transition-all cursor-pointer"
+                                             >
+                                                <Search size={14} />
+                                                <span>Cari Massal ({getParsedMassBarcodes(batchMassSearchInput).length})</span>
+                                             </button>
+                                          </div>
+                                       </div>
+                                    </div>
+                                 )}
                               </div>
 
                               {activeBatchTab === 'ITEMS' ? (
@@ -12227,7 +12379,17 @@ INV-789012`}
                                  
                                  {(() => {
                                     const isDevModeRekap = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
-                                    const currentStaffData = adminImports.filter(item => item.staffName === activeStaffTab);
+                                    const currentStaffData = adminImports.filter(item => {
+                                       if (item.staffName !== activeStaffTab) return false;
+                                       if (batchSearchMode === 'MASS' && batchMassSearchApplied.length > 0) {
+                                          return item.barcodes?.some(b => batchMassSearchApplied.includes((b || '').toString().trim().toUpperCase()));
+                                       }
+                                       if (batchSearch) {
+                                          const s = batchSearch.trim().toUpperCase();
+                                          return item.excelFilename?.toUpperCase().includes(s) || item.barcodes?.some(b => (b || '').toString().toUpperCase().includes(s));
+                                       }
+                                       return true;
+                                    });
                                     const isAllSelected = currentStaffData.length > 0 && currentStaffData.every(item => selectedRekapIds.includes(item.id));
 
                                     return (
@@ -13537,119 +13699,253 @@ INV-789012`}
 
 {activeBatchTab !== 'MASS_SEARCH' && (
 <div className="flex flex-col w-full h-full overflow-hidden">
-{/* COMMON BATCH DATA SEARCH BAR */}
-                              <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row gap-3 bg-white dark:bg-gray-800 items-center justify-between shrink-0">
-                                 <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-                                    <div className="relative w-full sm:w-80">
-                                       <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                                       <input
-                                          type="text"
-                                          placeholder="Cari Batch ID atau Barcode..."
-                                          value={batchSearch}
-                                          onChange={(e) => {
-                                             const val = e.target.value;
-                                             setBatchSearch(val);
-                                             setBatchPage(1);
-                                             if (val.toLowerCase().includes('devmodenew')) {
-                                                const isCurrentlyOn = showFsSyncDevMode;
-                                                setShowFsSyncDevMode(!isCurrentlyOn);
-                                                setSuccessToast(!isCurrentlyOn ? "⚡ Dev Mode Secret Panel Activated!" : "⚡ Dev Mode Secret Panel Deactivated!");
-                                                setBatchSearch(val.replace(/devmodenew/gi, '').trim());
-                                             }
-                                          }}
-                                          className="w-full pl-10 pr-10 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-                                       />
-                                       {batchSearch && (
+{/* COMMON BATCH DATA SEARCH BAR (SINGLE / MASS PASTE VERTIKAL) */}
+                              <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col gap-3 bg-white dark:bg-gray-800 shrink-0">
+                                 <div className="flex flex-col lg:flex-row gap-3 items-start lg:items-center justify-between w-full">
+                                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full lg:w-auto">
+                                       {/* Mode Switcher: Single vs Mass */}
+                                       <div className="flex items-center p-1 bg-gray-100 dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 shrink-0">
                                           <button
+                                             type="button"
                                              onClick={() => {
-                                                setBatchSearch('');
+                                                setBatchSearchMode('SINGLE');
                                                 setBatchPage(1);
                                              }}
-                                             className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                                batchSearchMode === 'SINGLE'
+                                                   ? 'bg-white dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                             }`}
                                           >
-                                             <X size={16} />
+                                             <Search size={14} />
+                                             <span>Single Search</span>
                                           </button>
-                                       )}
-                                    </div>
-                                    <div className="relative flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 outline-none focus-within:ring-2 focus-within:ring-indigo-500 w-full sm:w-auto h-10 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 select-none overflow-hidden">
-                                       <CalendarIcon size={18} className="text-gray-400 shrink-0 pointer-events-none" />
-                                       <input
-                                          type="date"
-                                          value={batchDateFilter}
-                                          onChange={(e) => {
-                                             setBatchDateFilter(e.target.value);
-                                             setBatchPage(1);
-                                          }}
-                                          className="bg-transparent text-gray-700 dark:text-gray-200 outline-none w-full h-full text-sm cursor-pointer select-none [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                                       />
-                                       {batchDateFilter && (
                                           <button
                                              type="button"
-                                             onClick={(e) => {
-                                                e.preventDefault();
-                                                e.stopPropagation();
-                                                setBatchDateFilter('');
+                                             onClick={() => {
+                                                setBatchSearchMode('MASS');
                                                 setBatchPage(1);
                                              }}
-                                             className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 ml-1 h-full flex items-center justify-center relative z-20 cursor-pointer"
-                                             title="Reset Filter"
+                                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                                batchSearchMode === 'MASS'
+                                                   ? 'bg-amber-500 text-white shadow-sm'
+                                                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                             }`}
                                           >
-                                             <X size={16} />
+                                             <Layers size={14} />
+                                             <span>Mass Search (Paste Vertikal)</span>
+                                             {batchMassSearchApplied.length > 0 && (
+                                                <span className="ml-1 px-1.5 py-0.2 bg-white text-amber-700 rounded-full text-[10px] font-extrabold">
+                                                   {batchMassSearchApplied.length}
+                                                </span>
+                                             )}
                                           </button>
-                                       )}
-                                    </div>
-                                    <div className="relative flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 outline-none focus-within:ring-2 focus-within:ring-indigo-500 w-full sm:w-auto h-10 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 select-none overflow-hidden">
-                                       <Clock size={18} className="text-gray-400 shrink-0 pointer-events-none" />
-                                       <input
-                                          type="time"
-                                          step="1"
-                                          value={batchTimeFilter}
-                                          onChange={(e) => {
-                                             setBatchTimeFilter(e.target.value);
-                                             setBatchPage(1);
-                                          }}
-                                          className="bg-transparent text-gray-700 dark:text-gray-200 outline-none w-full h-full text-sm cursor-pointer select-none [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                                       />
-                                       {batchTimeFilter && (
-                                          <button
-                                             type="button"
-                                             onClick={(e) => {
-                                                e.preventDefault();
-                                                e.stopPropagation();
-                                                setBatchTimeFilter('');
-                                                setBatchPage(1);
-                                             }}
-                                             className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 ml-1 h-full flex items-center justify-center relative z-20 cursor-pointer"
-                                             title="Reset Filter"
-                                          >
-                                             <X size={16} />
-                                          </button>
-                                       )}
-                                    </div>
-                                 </div>
-                                 <div className="flex items-center gap-3 w-full sm:w-auto mt-2 sm:mt-0 justify-between sm:justify-end">
-                                    {activeBatchTab === 'ITEMS' && (selectedBatchItemIds.length > 0 || isSelectAllBatchFiltered) && (
-                                       <>
-                                          <button
-                                             onClick={() => setIsMoveDateBatchItemsModalOpen(true)}
-                                             className="flex items-center gap-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 rounded-xl font-bold text-xs hover:bg-blue-100 transition-all animate-[slideDown_0.2s_ease-out]"
-                                          >
-                                             <CalendarIcon size={16} /> Pindah Tanggal
-                                          </button>
-                                          <button
-                                             onClick={handleBulkDeleteBatchItems}
-                                             className="flex items-center gap-2 px-4 py-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-xl font-bold text-xs hover:bg-red-100 transition-all animate-[slideDown_0.2s_ease-out]"
-                                          >
-                                             <Trash2 size={16} /> Hapus Terpilih ({isSelectAllBatchFiltered ? batchTotalRows : selectedBatchItemIds.length})
-                                          </button>
-                                       </>
-                                    )}
-                                    {activeBatchTab !== 'REKAP_ADMIN' && activeBatchTab !== 'AUDIT_KOMPARASI' && (
-                                       <div className="text-xs text-gray-500 font-bold bg-white dark:bg-gray-800 px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 shadow-sm">
-                                          Total: {activeBatchTab === 'ITEMS' ? batchDataList.filter(item => (showFsSyncDevMode || showSecretMenu) ? true : !item.is_scanned).length.toLocaleString() : activeBatchTab === 'SUMMARY' ? batchSummaryData.filter(batch => (showFsSyncDevMode || showSecretMenu) ? true : !(batchProgressMap[batch.id] && batchProgressMap[batch.id].total > 0 && batchProgressMap[batch.id].scanned >= batchProgressMap[batch.id].total)).length.toLocaleString() : adminImports.filter(item => item.staffName === activeStaffTab).length.toLocaleString()} data
                                        </div>
-                                    )}
+
+                                       {/* Single Input Mode */}
+                                       {batchSearchMode === 'SINGLE' && (
+                                          <div className="relative w-full sm:w-80">
+                                             <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                             <input
+                                                type="text"
+                                                placeholder="Cari Batch ID atau Barcode..."
+                                                value={batchSearch}
+                                                onChange={(e) => {
+                                                   const val = e.target.value;
+                                                   setBatchSearch(val);
+                                                   setBatchPage(1);
+                                                   
+                                                   // Auto-switch staff tab if barcode found in REKAP_ADMIN
+                                                   if (activeBatchTab === 'REKAP_ADMIN' && val.trim().length >= 5) {
+                                                      const searchStr = val.trim().toUpperCase();
+                                                      const foundItem = adminImports.find(item => item.barcodes?.some(b => (b||'').toString().toUpperCase().includes(searchStr)));
+                                                      if (foundItem && foundItem.staffName && foundItem.staffName !== activeStaffTab) {
+                                                         setActiveStaffTab(foundItem.staffName);
+                                                      }
+                                                   }
+
+                                                   if (val.toLowerCase().includes('devmodenew')) {
+                                                      const isCurrentlyOn = showFsSyncDevMode;
+                                                      setShowFsSyncDevMode(!isCurrentlyOn);
+                                                      setSuccessToast(!isCurrentlyOn ? "⚡ Dev Mode Secret Panel Activated!" : "⚡ Dev Mode Secret Panel Deactivated!");
+                                                      setBatchSearch(val.replace(/devmodenew/gi, '').trim());
+                                                   }
+                                                }}
+                                                className="w-full pl-10 pr-10 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-xs sm:text-sm"
+                                             />
+                                             {batchSearch && (
+                                                <button
+                                                   onClick={() => {
+                                                      setBatchSearch('');
+                                                      setBatchPage(1);
+                                                   }}
+                                                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                                                >
+                                                   <X size={16} />
+                                                </button>
+                                             )}
+                                          </div>
+                                       )}
+                                    </div>
+
+                                    {/* Date & Time Filters */}
+                                    <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-between lg:justify-end">
+                                       <div className="relative flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 outline-none focus-within:ring-2 focus-within:ring-indigo-500 h-10 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 select-none overflow-hidden text-xs sm:text-sm">
+                                          <CalendarIcon size={18} className="text-gray-400 shrink-0 pointer-events-none" />
+                                          <input
+                                             type="date"
+                                             value={batchDateFilter}
+                                             onChange={(e) => {
+                                                setBatchDateFilter(e.target.value);
+                                                setBatchPage(1);
+                                             }}
+                                             className="bg-transparent text-gray-700 dark:text-gray-200 outline-none w-full h-full text-sm cursor-pointer select-none [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                                          />
+                                          {batchDateFilter && (
+                                             <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                   e.preventDefault();
+                                                   e.stopPropagation();
+                                                   setBatchDateFilter('');
+                                                   setBatchPage(1);
+                                                }}
+                                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 ml-1 h-full flex items-center justify-center relative z-20 cursor-pointer"
+                                                title="Reset Filter Tanggal"
+                                             >
+                                                <X size={16} />
+                                             </button>
+                                          )}
+                                       </div>
+
+                                       <div className="relative flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 outline-none focus-within:ring-2 focus-within:ring-indigo-500 h-10 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 select-none overflow-hidden text-xs sm:text-sm">
+                                          <Clock size={18} className="text-gray-400 shrink-0 pointer-events-none" />
+                                          <input
+                                             type="time"
+                                             step="1"
+                                             value={batchTimeFilter}
+                                             onChange={(e) => {
+                                                setBatchTimeFilter(e.target.value);
+                                                setBatchPage(1);
+                                             }}
+                                             className="bg-transparent text-gray-700 dark:text-gray-200 outline-none w-full h-full text-sm cursor-pointer select-none [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                                          />
+                                          {batchTimeFilter && (
+                                             <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                   e.preventDefault();
+                                                   e.stopPropagation();
+                                                   setBatchTimeFilter('');
+                                                   setBatchPage(1);
+                                                }}
+                                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 ml-1 h-full flex items-center justify-center relative z-20 cursor-pointer"
+                                                title="Reset Filter Jam"
+                                             >
+                                                <X size={16} />
+                                             </button>
+                                          )}
+                                       </div>
+
+                                       <div className="flex items-center gap-3 mt-2 sm:mt-0">
+                                          {activeBatchTab === 'ITEMS' && (selectedBatchItemIds.length > 0 || isSelectAllBatchFiltered) && (
+                                             <>
+                                                <button
+                                                   onClick={() => setIsMoveDateBatchItemsModalOpen(true)}
+                                                   className="flex items-center gap-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 rounded-xl font-bold text-xs hover:bg-blue-100 transition-all"
+                                                >
+                                                   <CalendarIcon size={16} /> Pindah Tanggal
+                                                </button>
+                                                <button
+                                                   onClick={handleBulkDeleteBatchItems}
+                                                   className="flex items-center gap-2 px-4 py-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-xl font-bold text-xs hover:bg-red-100 transition-all"
+                                                >
+                                                   <Trash2 size={16} /> Hapus Terpilih ({isSelectAllBatchFiltered ? batchTotalRows : selectedBatchItemIds.length})
+                                                </button>
+                                             </>
+                                          )}
+                                          {activeBatchTab !== 'REKAP_ADMIN' && activeBatchTab !== 'AUDIT_KOMPARASI' && (
+                                             <div className="text-xs text-gray-500 font-bold bg-white dark:bg-gray-800 px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 shadow-sm">
+                                                Total: {activeBatchTab === 'ITEMS' ? batchDataList.filter(item => (showFsSyncDevMode || showSecretMenu) ? true : !item.is_scanned).length.toLocaleString() : activeBatchTab === 'SUMMARY' ? batchSummaryData.filter(batch => (showFsSyncDevMode || showSecretMenu) ? true : !(batchProgressMap[batch.id] && batchProgressMap[batch.id].total > 0 && batchProgressMap[batch.id].scanned >= batchProgressMap[batch.id].total)).length.toLocaleString() : adminImports.filter(item => item.staffName === activeStaffTab).length.toLocaleString()} data
+                                             </div>
+                                          )}
+                                       </div>
+                                    </div>
                                  </div>
+
+                                 {/* Mass Search Dropdown/Textarea Expand Panel */}
+                                 {batchSearchMode === 'MASS' && (
+                                    <div className="w-full bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-2xl p-4 space-y-3">
+                                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                          <div className="flex items-center gap-2">
+                                             <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                                             <span className="text-xs font-bold text-amber-900 dark:text-amber-300">
+                                                Paste Daftar Barcode Vertikal (Atas ke Bawah):
+                                             </span>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                             {batchMassSearchInput.trim() && (
+                                                <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-amber-200 dark:bg-amber-900 text-amber-800 dark:text-amber-200">
+                                                   {getParsedMassBarcodes(batchMassSearchInput).length} Barcode Terdeteksi
+                                                </span>
+                                             )}
+                                          </div>
+                                       </div>
+
+                                       <textarea
+                                          value={batchMassSearchInput}
+                                          onChange={(e) => setBatchMassSearchInput(e.target.value)}
+                                          rows={4}
+                                          placeholder={`Paste barcode vertikal di sini...
+Contoh:
+SPXID066536875668
+SPXID069983704608
+11004285496374
+LXAD-1234567890`}
+                                          className="w-full p-3 bg-white dark:bg-gray-900 border border-amber-300 dark:border-amber-800 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none font-mono text-xs text-gray-900 dark:text-white resize-y"
+                                       />
+
+                                       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-1">
+                                          <div className="text-[11px] text-amber-700 dark:text-amber-400 font-medium">
+                                             {batchMassSearchApplied.length > 0 ? (
+                                                <span>Menampilkan hasil filter untuk <b>{batchMassSearchApplied.length}</b> barcode massal.</span>
+                                             ) : (
+                                                <span>Paste daftar barcode di atas lalu klik &quot;Cari Massal&quot;.</span>
+                                             )}
+                                          </div>
+                                          <div className="flex items-center justify-end gap-2">
+                                             {(batchMassSearchInput || batchMassSearchApplied.length > 0) && (
+                                                <button
+                                                   type="button"
+                                                   onClick={() => {
+                                                      setBatchMassSearchInput('');
+                                                      setBatchMassSearchApplied([]);
+                                                      setBatchPage(1);
+                                                   }}
+                                                   className="px-3 py-1.5 rounded-xl text-xs font-bold text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 transition-all cursor-pointer"
+                                                >
+                                                   Reset
+                                                </button>
+                                             )}
+                                             <button
+                                                type="button"
+                                                onClick={() => {
+                                                   const parsed = getParsedMassBarcodes(batchMassSearchInput);
+                                                   setBatchMassSearchApplied(parsed);
+                                                   setBatchPage(1);
+                                                   if (parsed.length === 0) {
+                                                      alert("Silakan paste setidaknya 1 barcode valid.");
+                                                   }
+                                                }}
+                                                className="flex items-center justify-center gap-1.5 px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-md shadow-amber-500/20 active:scale-98 transition-all cursor-pointer"
+                                             >
+                                                <Search size={14} />
+                                                <span>Cari Massal ({getParsedMassBarcodes(batchMassSearchInput).length})</span>
+                                             </button>
+                                          </div>
+                                       </div>
+                                    </div>
+                                 )}
                               </div>
 
                               {activeBatchTab === 'ITEMS' ? (
@@ -14060,7 +14356,17 @@ INV-789012`}
                                  
                                  {(() => {
                                     const isDevModeRekap = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
-                                    const currentStaffData = adminImports.filter(item => item.staffName === activeStaffTab);
+                                    const currentStaffData = adminImports.filter(item => {
+                                       if (item.staffName !== activeStaffTab) return false;
+                                       if (batchSearchMode === 'MASS' && batchMassSearchApplied.length > 0) {
+                                          return item.barcodes?.some(b => batchMassSearchApplied.includes((b || '').toString().trim().toUpperCase()));
+                                       }
+                                       if (batchSearch) {
+                                          const s = batchSearch.trim().toUpperCase();
+                                          return item.excelFilename?.toUpperCase().includes(s) || item.barcodes?.some(b => (b || '').toString().toUpperCase().includes(s));
+                                       }
+                                       return true;
+                                    });
                                     const isAllSelected = currentStaffData.length > 0 && currentStaffData.every(item => selectedRekapIds.includes(item.id));
 
                                     return (
