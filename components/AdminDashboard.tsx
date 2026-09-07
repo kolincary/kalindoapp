@@ -1392,43 +1392,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          const startMs = new Date(`${start}T00:00:00`).getTime();
          const endMs = new Date(`${end}T23:59:59.999`).getTime();
 
-         // 1. Fetch Supabase count & role breakdown using Keyset Cursor Pagination (O(1) seek, zero timeout)
-         const sbRoles: Record<string, number> = {};
-         let totalSbCount = 0;
-         let lastId: any = null;
-         let hasMore = true;
+         // 1. Fetch Supabase count & role breakdown
+         let allSbData: any[] = [];
+         let page = 0;
          const pageSize = 1000;
+         let hasMore = true;
 
          while (hasMore) {
-            let query = supabase
+            const { data, error } = await supabase
                .from('scanned_items')
-               .select('id, role')
+               .select('role')
                .gte('timestamp', startMs)
                .lte('timestamp', endMs)
-               .order('id', { ascending: true })
-               .limit(pageSize);
+               .order('timestamp', { ascending: true })
+               .range(page * pageSize, (page + 1) * pageSize - 1);
 
-            if (lastId !== null) {
-               query = query.gt('id', lastId);
-            }
-
-            const { data, error } = await query;
             if (error) {
-               console.error("Supabase count query error:", error);
+               console.error("Supabase count error:", error);
                break;
             }
             if (data && data.length > 0) {
-               totalSbCount += data.length;
-               lastId = data[data.length - 1].id;
-               data.forEach(row => {
-                  const r = (row.role || 'MISSING_ROLE').toUpperCase();
-                  sbRoles[r] = (sbRoles[r] || 0) + 1;
-               });
+               allSbData = allSbData.concat(data);
                if (data.length < pageSize) hasMore = false;
+               else page++;
             } else {
                hasMore = false;
             }
          }
+
+         const sbRoles: Record<string, number> = {};
+         allSbData.forEach(row => {
+            const r = (row.role || 'MISSING_ROLE').toUpperCase();
+            sbRoles[r] = (sbRoles[r] || 0) + 1;
+         });
 
          // 2. Fetch Firestore count & role breakdown
          const activeFsQuery = fsQuery(
@@ -1447,11 +1443,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
          const report = {
             dateStr: start === end ? start : `${start} s/d ${end}`,
-            sbTotal: totalSbCount,
+            sbTotal: allSbData.length,
             fsTotal: fsSnap.docs.length,
             sbRoles,
             fsRoles,
-            matched: totalSbCount === fsSnap.docs.length
+            matched: allSbData.length === fsSnap.docs.length
          };
 
          setSyncAuditReport(report);
@@ -1505,7 +1501,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setSyncTotalCountFs(0);
       setSyncBatchCurrentFs(0);
       setSyncBatchTotalFs(0);
-      setSyncStatusMsgFs('⚡ Mengambil dan menyinkronkan data Supabase (Multi-Batch Paralel)...');
+      setSyncStatusMsgFs('Mengambil data dari Supabase dan menyinkronkan ke Firestore...');
 
       try {
          const targetCollection = syncCollectionName.trim() || 'scanned_items';
@@ -1522,9 +1518,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             if (!isNaN(parsed)) endTs = parsed;
          }
 
-         let lastId: any = null;
+         let page = 0;
          const pageSize = 1000;
-         const BATCH_SIZE = 450; // Firestore limit is 500 per batch. 450 is maximum safe capacity.
+         const BATCH_SIZE = 400; // Optimal safe batch size for Firestore
          let hasMore = true;
          let grandProcessed = 0;
          let batchCurrent = 0;
@@ -1534,13 +1530,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             let query = supabase
                .from('scanned_items')
                .select('*')
-               .order('id', { ascending: true })
-               .limit(pageSize);
+               .order('timestamp', { ascending: true })
+               .range(page * pageSize, (page + 1) * pageSize - 1);
 
             if (startTs !== null) query = query.gte('timestamp', startTs);
             if (endTs !== null) query = query.lte('timestamp', endTs);
             if (syncRole && syncRole !== 'SEMUA') query = query.eq('role', syncRole);
-            if (lastId !== null) query = query.gt('id', lastId);
 
             const { data, error } = await query;
             if (error) {
@@ -1552,8 +1547,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                break;
             }
 
-            lastId = data[data.length - 1].id;
-
             // Update role breakdown
             data.forEach((item: any) => {
                const r = (item.role || 'UNKNOWN').toUpperCase();
@@ -1561,10 +1554,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             });
             setSyncRoleBreakdownFs({ ...roleBreakdown });
 
-            // Stream write to Firestore with Multi-Batch Parallel Commits (450 docs/batch)
+            // Stream write to Firestore in chunks of BATCH_SIZE (400)
             const numChunks = Math.ceil(data.length / BATCH_SIZE);
-            const commitPromises: Promise<any>[] = [];
-
             for (let c = 0; c < numChunks; c++) {
                const chunkItems = data.slice(c * BATCH_SIZE, (c + 1) * BATCH_SIZE);
                const batch = writeBatch(db);
@@ -1583,19 +1574,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   batch.set(docRef, cleanItem, { merge: true });
                }
 
-               commitPromises.push(batch.commit());
+               await batch.commit();
+               grandProcessed += chunkItems.length;
+               batchCurrent++;
+
+               setSyncProcessedCountFs(grandProcessed);
+               setSyncBatchCurrentFs(batchCurrent);
+               setSyncStatusMsgFs(`Sedang menyinkronkan: ${grandProcessed} data tersimpan di Firestore...`);
             }
-
-            await Promise.all(commitPromises);
-            grandProcessed += data.length;
-            batchCurrent += numChunks;
-
-            setSyncProcessedCountFs(grandProcessed);
-            setSyncBatchCurrentFs(batchCurrent);
-            setSyncStatusMsgFs(`⚡ Multi-Batch Paralel: ${grandProcessed} data tersinkron ke Firestore...`);
 
             if (data.length < pageSize) {
                hasMore = false;
+            } else {
+               page++;
             }
          }
 
@@ -1615,7 +1606,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
    };
 
-   // 13. Day Range Sync with Keyset Cursor Pagination & Multi-Batch Parallel Writes (Super Fast & Safe)
+   // 13. Day Range Sync with Sequential 400-Doc Commits (Ultra-Stable & Safe)
    const handleSyncSupabaseToFirestoreByDayRange = async () => {
       if (isSyncingFs) return;
       if (!syncStartDate || !syncEndDate) {
@@ -1662,7 +1653,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          curr.setDate(curr.getDate() + 1);
       }
 
-      setSyncStatusMsgFs(`🚀 Memulai Sinkronisasi Turbo (${datesToProcess.length} hari: ${datesToProcess[0].displayStr} s/d ${datesToProcess[datesToProcess.length - 1].displayStr})...`);
+      setSyncStatusMsgFs(`🚀 Memulai Sinkronisasi Rentang (${datesToProcess.length} hari: ${datesToProcess[0].displayStr} s/d ${datesToProcess[datesToProcess.length - 1].displayStr})...`);
 
       let grandTotalProcessed = 0;
 
@@ -1675,14 +1666,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             try {
                retryAttempt++;
                const statusPrefix = retryAttempt > 1 ? `[Retry #${retryAttempt}] ` : '';
-               setSyncStatusMsgFs(`${statusPrefix}⚡ Mengambil data tanggal ${dateInfo.displayStr} (${i + 1}/${datesToProcess.length} hari)...`);
+               setSyncStatusMsgFs(`${statusPrefix}Mengambil data tanggal ${dateInfo.displayStr} (${i + 1}/${datesToProcess.length} hari)...`);
 
                const startTs = new Date(`${dateInfo.dateStr}T00:00:00`).getTime();
                const endTs = new Date(`${dateInfo.dateStr}T23:59:59.999`).getTime();
 
-               let lastId: any = null;
+               let page = 0;
                const pageSize = 1000;
-               const BATCH_SIZE = 450; // Maximum safe batch size (under 500 limit)
+               const BATCH_SIZE = 400; // Optimal safe batch size for Firestore
                let hasMore = true;
                let dayProcessed = 0;
                let dayBatches = 0;
@@ -1693,12 +1684,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                      .select('*')
                      .gte('timestamp', startTs)
                      .lte('timestamp', endTs)
-                     .order('id', { ascending: true })
-                     .limit(pageSize);
-
-                  if (lastId !== null) {
-                     query = query.gt('id', lastId);
-                  }
+                     .order('timestamp', { ascending: true })
+                     .range(page * pageSize, (page + 1) * pageSize - 1);
 
                   if (syncRole && syncRole !== 'SEMUA') {
                      query = query.eq('role', syncRole);
@@ -1714,12 +1701,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                      break;
                   }
 
-                  lastId = data[data.length - 1].id;
-
-                  // Parallel Multi-Batch Commit to Firestore
+                  // Write to Firestore in batches of BATCH_SIZE (400)
                   const numChunks = Math.ceil(data.length / BATCH_SIZE);
-                  const commitPromises: Promise<any>[] = [];
-
                   for (let c = 0; c < numChunks; c++) {
                      const chunkItems = data.slice(c * BATCH_SIZE, (c + 1) * BATCH_SIZE);
                      const batch = writeBatch(db);
@@ -1738,19 +1721,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         batch.set(docRef, cleanItem, { merge: true });
                      }
 
-                     commitPromises.push(batch.commit());
+                     await batch.commit();
+                     dayProcessed += chunkItems.length;
+                     dayBatches++;
+
+                     setSyncProcessedCountFs(grandTotalProcessed + dayProcessed);
+                     setSyncStatusMsgFs(`[${dateInfo.displayStr} (${i + 1}/${datesToProcess.length} hari)] Batch ${dayBatches} selesai (+${dayProcessed} data)`);
                   }
 
-                  // Execute all batch commits simultaneously
-                  await Promise.all(commitPromises);
-                  dayProcessed += data.length;
-                  dayBatches += numChunks;
-
-                  setSyncProcessedCountFs(grandTotalProcessed + dayProcessed);
-                  setSyncStatusMsgFs(`⚡ [${dateInfo.displayStr} (${i + 1}/${datesToProcess.length} hari)] +${dayProcessed} data tersinkron hari ini`);
-                  
                   if (data.length < pageSize) {
                      hasMore = false;
+                  } else {
+                     page++;
                   }
                }
 
@@ -1774,7 +1756,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          }
       }
 
-      setSyncStatusMsgFs(`✅ Sinkronisasi Turbo Selesai! Total ${grandTotalProcessed} data dikirim ke collection '${targetCollection}'.`);
+      setSyncStatusMsgFs(`✅ Sinkronisasi Selesai! Total ${grandTotalProcessed} data dikirim ke collection '${targetCollection}'.`);
       setSuccessToast(`Sinkronisasi Selesai! Total ${grandTotalProcessed} data terkirim ke Firestore.`);
       setIsSyncingFs(false);
    };
