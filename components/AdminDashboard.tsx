@@ -1392,36 +1392,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          const startMs = new Date(`${start}T00:00:00`).getTime();
          const endMs = new Date(`${end}T23:59:59.999`).getTime();
 
-         // 1. Fetch Supabase count & role breakdown
-         let allSbData: any[] = [];
-         let page = 0;
-         const pageSize = 1000;
+         // 1. Fetch Supabase count & role breakdown using Keyset Cursor Pagination (O(1) seek, zero timeout)
+         const sbRoles: Record<string, number> = {};
+         let totalSbCount = 0;
+         let lastId: any = null;
          let hasMore = true;
+         const pageSize = 1000;
 
          while (hasMore) {
-            const { data, error } = await supabase
+            let query = supabase
                .from('scanned_items')
-               .select('role')
+               .select('id, role')
                .gte('timestamp', startMs)
                .lte('timestamp', endMs)
                .order('id', { ascending: true })
-               .range(page * pageSize, (page + 1) * pageSize - 1);
+               .limit(pageSize);
 
-            if (error) break;
+            if (lastId !== null) {
+               query = query.gt('id', lastId);
+            }
+
+            const { data, error } = await query;
+            if (error) {
+               console.error("Supabase count query error:", error);
+               break;
+            }
             if (data && data.length > 0) {
-               allSbData = allSbData.concat(data);
+               totalSbCount += data.length;
+               lastId = data[data.length - 1].id;
+               data.forEach(row => {
+                  const r = (row.role || 'MISSING_ROLE').toUpperCase();
+                  sbRoles[r] = (sbRoles[r] || 0) + 1;
+               });
                if (data.length < pageSize) hasMore = false;
-               else page++;
             } else {
                hasMore = false;
             }
          }
-
-         const sbRoles: Record<string, number> = {};
-         allSbData.forEach(row => {
-            const r = (row.role || 'MISSING_ROLE').toUpperCase();
-            sbRoles[r] = (sbRoles[r] || 0) + 1;
-         });
 
          // 2. Fetch Firestore count & role breakdown
          const activeFsQuery = fsQuery(
@@ -1440,11 +1447,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
          const report = {
             dateStr: start === end ? start : `${start} s/d ${end}`,
-            sbTotal: allSbData.length,
+            sbTotal: totalSbCount,
             fsTotal: fsSnap.docs.length,
             sbRoles,
             fsRoles,
-            matched: allSbData.length === fsSnap.docs.length
+            matched: totalSbCount === fsSnap.docs.length
          };
 
          setSyncAuditReport(report);
@@ -1498,111 +1505,105 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setSyncTotalCountFs(0);
       setSyncBatchCurrentFs(0);
       setSyncBatchTotalFs(0);
-      setSyncStatusMsgFs('Mengambil data dari Supabase...');
+      setSyncStatusMsgFs('Mengambil data dari Supabase dan streaming ke Firestore...');
 
       try {
          const targetCollection = syncCollectionName.trim() || 'scanned_items';
 
-         let allItems: any[] = [];
-         let page = 0;
+         let startTs: number | null = null;
+         if (syncStartDate) {
+            const parsed = new Date(`${syncStartDate}T00:00:00`).getTime();
+            if (!isNaN(parsed)) startTs = parsed;
+         }
+
+         let endTs: number | null = null;
+         if (syncEndDate) {
+            const parsed = new Date(`${syncEndDate}T23:59:59.999`).getTime();
+            if (!isNaN(parsed)) endTs = parsed;
+         }
+
+         let lastId: any = null;
          const pageSize = 1000;
+         const BATCH_SIZE = 350;
          let hasMore = true;
+         let grandProcessed = 0;
+         let batchCurrent = 0;
+         const roleBreakdown: Record<string, number> = {};
 
          while (hasMore) {
             let query = supabase
                .from('scanned_items')
                .select('*')
-               .order('id', { ascending: true });
+               .order('id', { ascending: true })
+               .limit(pageSize);
 
-            if (syncStartDate) {
-               const startTs = new Date(`${syncStartDate}T00:00:00`).getTime();
-               if (!isNaN(startTs)) {
-                  query = query.gte('timestamp', startTs);
-               }
-            }
-            if (syncEndDate) {
-               const endTs = new Date(`${syncEndDate}T23:59:59.999`).getTime();
-               if (!isNaN(endTs)) {
-                  query = query.lte('timestamp', endTs);
-               }
-            }
-            if (syncRole && syncRole !== 'SEMUA') {
-               query = query.eq('role', syncRole);
-            }
+            if (startTs !== null) query = query.gte('timestamp', startTs);
+            if (endTs !== null) query = query.lte('timestamp', endTs);
+            if (syncRole && syncRole !== 'SEMUA') query = query.eq('role', syncRole);
+            if (lastId !== null) query = query.gt('id', lastId);
 
-            const { data, error } = await query.range(page * pageSize, (page + 1) * pageSize - 1);
+            const { data, error } = await query;
             if (error) {
                throw new Error(`Gagal mengambil data dari Supabase: ${error.message}`);
             }
 
-            if (data && data.length > 0) {
-               allItems = allItems.concat(data);
-               if (data.length < pageSize) {
-                  hasMore = false;
-               } else {
-                  page++;
+            if (!data || data.length === 0) {
+               hasMore = false;
+               break;
+            }
+
+            lastId = data[data.length - 1].id;
+
+            // Update role breakdown
+            data.forEach((item: any) => {
+               const r = (item.role || 'UNKNOWN').toUpperCase();
+               roleBreakdown[r] = (roleBreakdown[r] || 0) + 1;
+            });
+            setSyncRoleBreakdownFs({ ...roleBreakdown });
+
+            // Stream write to Firestore in chunks of BATCH_SIZE (350)
+            const numChunks = Math.ceil(data.length / BATCH_SIZE);
+            for (let c = 0; c < numChunks; c++) {
+               const chunkItems = data.slice(c * BATCH_SIZE, (c + 1) * BATCH_SIZE);
+               const batch = writeBatch(db);
+
+               for (const item of chunkItems) {
+                  const docId = item.id ? String(item.id) : `${item.barcode || 'item'}_${item.role || ''}_${Date.now()}`;
+                  const docRef = doc(db, targetCollection, docId);
+
+                  const cleanItem: Record<string, any> = {};
+                  Object.keys(item).forEach((key) => {
+                     if (item[key] !== undefined) {
+                        cleanItem[key] = item[key];
+                     }
+                  });
+
+                  batch.set(docRef, cleanItem, { merge: true });
                }
-            } else {
+
+               await batch.commit();
+               grandProcessed += chunkItems.length;
+               batchCurrent++;
+
+               setSyncProcessedCountFs(grandProcessed);
+               setSyncBatchCurrentFs(batchCurrent);
+               setSyncStatusMsgFs(`Sedang menyinkronkan: ${grandProcessed} data terkirim ke Firestore...`);
+               await new Promise((resolve) => setTimeout(resolve, 30));
+            }
+
+            if (data.length < pageSize) {
                hasMore = false;
             }
          }
 
-         if (allItems.length === 0) {
+         setSyncTotalCountFs(grandProcessed);
+         setSyncProgressFs(100);
+         if (grandProcessed === 0) {
             setSyncStatusMsgFs('⚠️ Tidak ada data Supabase yang ditemukan untuk filter ini.');
-            setIsSyncingFs(false);
-            return;
+         } else {
+            setSyncStatusMsgFs(`✅ Sinkronisasi Berhasil! Total ${grandProcessed} data dikirim ke collection '${targetCollection}'.`);
+            setSuccessToast(`Sinkronisasi Supabase ➔ Firestore selesai (${grandProcessed} data)!`);
          }
-
-         const totalCount = allItems.length;
-         const roleBreakdown: Record<string, number> = {};
-         allItems.forEach((item: any) => {
-            const r = (item.role || 'UNKNOWN').toUpperCase();
-            roleBreakdown[r] = (roleBreakdown[r] || 0) + 1;
-         });
-         setSyncRoleBreakdownFs(roleBreakdown);
-
-         const BATCH_SIZE = 350;
-         const totalBatches = Math.ceil(totalCount / BATCH_SIZE);
-
-         setSyncTotalCountFs(totalCount);
-         setSyncBatchTotalFs(totalBatches);
-         setSyncStatusMsgFs(`Ditemukan ${totalCount} data. Memulai sinkronisasi dalam ${totalBatches} batch...`);
-
-         let processed = 0;
-         for (let b = 0; b < totalBatches; b++) {
-            const batchItems = allItems.slice(b * BATCH_SIZE, (b + 1) * BATCH_SIZE);
-            const batch = writeBatch(db);
-
-            for (const item of batchItems) {
-               const docId = item.id ? String(item.id) : `${item.barcode || 'item'}_${item.role || ''}_${Date.now()}`;
-               const docRef = doc(db, targetCollection, docId);
-
-               const cleanItem: Record<string, any> = {};
-               Object.keys(item).forEach((key) => {
-                  if (item[key] !== undefined) {
-                     cleanItem[key] = item[key];
-                  }
-               });
-
-               batch.set(docRef, cleanItem, { merge: true });
-            }
-
-            await batch.commit();
-            processed += batchItems.length;
-
-            const batchNum = b + 1;
-            const progressPct = Math.round((processed / totalCount) * 100);
-
-            setSyncProcessedCountFs(processed);
-            setSyncBatchCurrentFs(batchNum);
-            setSyncProgressFs(progressPct);
-            setSyncStatusMsgFs(`Selesai Batch ${batchNum} dari ${totalBatches} (${processed} / ${totalCount} data disinkronkan)`);
-
-            await new Promise((resolve) => setTimeout(resolve, 50));
-         }
-
-         setSyncStatusMsgFs(`✅ Sinkronisasi Berhasil! Total ${totalCount} data dikirim ke collection '${targetCollection}'.`);
-         setSuccessToast(`Sinkronisasi Supabase ➔ Firestore selesai (${totalCount} data)!`);
       } catch (err: any) {
          console.error('Error syncing Supabase to Firestore:', err);
          setSyncStatusMsgFs(`❌ Gagal Sinkronisasi: ${err.message || 'Error tidak diketahui'}`);
@@ -1610,8 +1611,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          setIsSyncingFs(false);
       }
    };
-   // 13. Failed Scans State
-      const handleSyncSupabaseToFirestoreByDayRange = async () => {
+
+   // 13. Day Range Sync with Keyset Cursor Pagination (Fast, Zero Timeout)
+   const handleSyncSupabaseToFirestoreByDayRange = async () => {
       if (isSyncingFs) return;
       if (!syncStartDate || !syncEndDate) {
          alert('Silakan pilih Tanggal Mulai dan Tanggal Akhir!');
@@ -1675,10 +1677,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                const startTs = new Date(`${dateInfo.dateStr}T00:00:00`).getTime();
                const endTs = new Date(`${dateInfo.dateStr}T23:59:59.999`).getTime();
 
-               let allItems: any[] = [];
-               let page = 0;
+               let lastId: any = null;
                const pageSize = 1000;
+               const BATCH_SIZE = 350;
                let hasMore = true;
+               let dayProcessed = 0;
+               let dayBatches = 0;
 
                while (hasMore) {
                   let query = supabase
@@ -1687,7 +1691,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                      .gte('timestamp', startTs)
                      .lte('timestamp', endTs)
                      .order('id', { ascending: true })
-                     .range(page * pageSize, (page + 1) * pageSize - 1);
+                     .limit(pageSize);
+
+                  if (lastId !== null) {
+                     query = query.gt('id', lastId);
+                  }
 
                   if (syncRole && syncRole !== 'SEMUA') {
                      query = query.eq('role', syncRole);
@@ -1698,77 +1706,60 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                      throw new Error(`Gagal mengambil data dari Supabase: ${error.message}`);
                   }
 
-                  if (data && data.length > 0) {
-                     allItems = allItems.concat(data);
-                     if (data.length < pageSize) {
-                        hasMore = false;
-                     } else {
-                        page++;
+                  if (!data || data.length === 0) {
+                     hasMore = false;
+                     break;
+                  }
+
+                  lastId = data[data.length - 1].id;
+
+                  // Stream write to Firestore in chunks of BATCH_SIZE (350)
+                  const numChunks = Math.ceil(data.length / BATCH_SIZE);
+                  for (let c = 0; c < numChunks; c++) {
+                     const chunkItems = data.slice(c * BATCH_SIZE, (c + 1) * BATCH_SIZE);
+                     const batch = writeBatch(db);
+
+                     for (const item of chunkItems) {
+                        const docId = item.id ? String(item.id) : `${item.barcode || 'item'}_${item.role || ''}_${Date.now()}`;
+                        const docRef = doc(db, targetCollection, docId);
+
+                        const cleanItem: Record<string, any> = {};
+                        Object.keys(item).forEach((key) => {
+                           if (item[key] !== undefined) {
+                              cleanItem[key] = item[key];
+                           }
+                        });
+
+                        batch.set(docRef, cleanItem, { merge: true });
                      }
-                  } else {
+
+                     await batch.commit();
+                     dayProcessed += chunkItems.length;
+                     dayBatches++;
+
+                     setSyncProcessedCountFs(grandTotalProcessed + dayProcessed);
+                     setSyncStatusMsgFs(`[${dateInfo.displayStr} (${i + 1}/${datesToProcess.length} hari)] Batch ${dayBatches} selesai (+${dayProcessed} data hari ini)`);
+
+                     await new Promise((resolve) => setTimeout(resolve, 30));
+                  }
+
+                  if (data.length < pageSize) {
                      hasMore = false;
                   }
                }
 
-               if (allItems.length === 0) {
-                  setSyncStatusMsgFs(`ℹ️ Tanggal ${dateInfo.displayStr}: Tidak ada data Supabase ditemukan. Lanjut...`);
-                  daySuccess = true;
-                  await new Promise(resolve => setTimeout(resolve, 300));
-                  break;
-               }
-
-               const totalCount = allItems.length;
-               const roleBreakdown: Record<string, number> = {};
-               allItems.forEach((item: any) => {
-                  const r = (item.role || 'UNKNOWN').toUpperCase();
-                  roleBreakdown[r] = (roleBreakdown[r] || 0) + 1;
-               });
-               setSyncRoleBreakdownFs(roleBreakdown);
-
-               const BATCH_SIZE = 350;
-               const totalBatches = Math.ceil(totalCount / BATCH_SIZE);
-
-               setSyncTotalCountFs(totalCount);
-               setSyncBatchTotalFs(totalBatches);
-               setSyncStatusMsgFs(`Tanggal ${dateInfo.displayStr}: Ditemukan ${totalCount} data. Memproses ${totalBatches} batch...`);
-
-               let processed = 0;
-               for (let b = 0; b < totalBatches; b++) {
-                  const batchItems = allItems.slice(b * BATCH_SIZE, (b + 1) * BATCH_SIZE);
-                  const batch = writeBatch(db);
-
-                  for (const item of batchItems) {
-                     const docId = item.id ? String(item.id) : `${item.barcode || 'item'}_${item.role || ''}_${Date.now()}`;
-                     const docRef = doc(db, targetCollection, docId);
-
-                     const cleanItem: Record<string, any> = {};
-                     Object.keys(item).forEach((key) => {
-                        if (item[key] !== undefined) {
-                           cleanItem[key] = item[key];
-                        }
-                     });
-
-                     batch.set(docRef, cleanItem, { merge: true });
-                  }
-
-                  await batch.commit();
-                  processed += batchItems.length;
-
-                  const batchNum = b + 1;
-                  const progressPct = Math.round((processed / totalCount) * 100);
-
-                  setSyncProcessedCountFs(processed);
-                  setSyncBatchCurrentFs(batchNum);
-                  setSyncProgressFs(progressPct);
-                  setSyncStatusMsgFs(`[${dateInfo.displayStr}] Batch ${batchNum}/${totalBatches} selesai (${processed}/${totalCount} data)`);
-
-                  await new Promise((resolve) => setTimeout(resolve, 50));
-               }
-
-               grandTotalProcessed += processed;
+               grandTotalProcessed += dayProcessed;
                daySuccess = true;
-               setSyncStatusMsgFs(`✅ Tanggal ${dateInfo.displayStr} Berhasil! (${processed} data). Lanjut ke tanggal berikutnya...`);
-               await new Promise(resolve => setTimeout(resolve, 800));
+               const totalDays = datesToProcess.length;
+               const overallPct = Math.round(((i + 1) / totalDays) * 100);
+               setSyncProgressFs(overallPct);
+
+               if (dayProcessed === 0) {
+                  setSyncStatusMsgFs(`ℹ️ Tanggal ${dateInfo.displayStr}: Tidak ada data Supabase ditemukan. Lanjut...`);
+               } else {
+                  setSyncStatusMsgFs(`✅ Tanggal ${dateInfo.displayStr} Selesai! (${dayProcessed} data). Total sinkron: ${grandTotalProcessed} data.`);
+               }
+               await new Promise(resolve => setTimeout(resolve, 400));
             } catch (err: any) {
                console.error(`Error sync date ${dateInfo.displayStr}:`, err);
                const errMsg = err?.message || 'timeout/network error';
