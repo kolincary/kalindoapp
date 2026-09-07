@@ -2,8 +2,8 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Active Supabase credentials (.env / current project)
-const ACTIVE_URL = 'https://lxhwyrzxgqvosecnhfli.supabase.co';
-const ACTIVE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4aHd5cnp4Z3F2b3NlY25oZmxpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1NzQ3MjEsImV4cCI6MjA4NTE1MDcyMX0.32gBAnMHN9R4eWl-Tu2NxivrM7c7Kqctk9XEvdpKf94';
+const ACTIVE_URL = 'https://nufvlqrtpzfiqghsxsze.supabase.co';
+const ACTIVE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51ZnZscXJ0cHpmaXFnaHN4c3plIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg3NjUwNDksImV4cCI6MjEwNDM0MTA0OX0.ckrLJhBmaGP3nBL_l3OjOntEliCuz4wtlJM3kgwZs_Y';
 
 const DEFAULT_URL = (import.meta as any).env?.VITE_SUPABASE_URL || ACTIVE_URL;
 const DEFAULT_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || ACTIVE_KEY;
@@ -15,7 +15,7 @@ const DEFAULT_SPECIAL_OLD_URL = 'https://opdcyccwracapxfxisfw.supabase.co';
 const DEFAULT_SPECIAL_OLD_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9wZGN5Y2N3cmFjYXB4Znhpc2Z3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3NzkyMDUsImV4cCI6MjA5NTM1NTIwNX0.p4gmiTKIjcljdjoqzQn-S6z5YyrU9XvZPPKgnNF5_Cs';
 
 // Verified Supabase project domains whitelist for safe configuration
-const ALLOWED_PROJECT_REFS = ['lxhwyrzxgqvosecnhfli', 'cruiirntmgpgcwgdlxea', 'iwvbrigjydmhbwbnbbbk', 'ymolrxscthxxtlmnxmob', 'opdcyccwracapxfxisfw'];
+const ALLOWED_PROJECT_REFS = ['nufvlqrtpzfiqghsxsze', 'lxhwyrzxgqvosecnhfli', 'cruiirntmgpgcwgdlxea', 'iwvbrigjydmhbwbnbbbk', 'ymolrxscthxxtlmnxmob', 'opdcyccwracapxfxisfw'];
 
 // Helper to get config securely
 const getConfig = () => {
@@ -23,7 +23,7 @@ const getConfig = () => {
       // Purge any unsafe or stale custom URLs from localStorage to prevent storage hijacking / data exfiltration
       const customUrl = localStorage.getItem('supabase_url');
       if (customUrl) {
-         const isAllowed = ALLOWED_PROJECT_REFS.some(ref => customUrl.includes(ref));
+         const isAllowed = ALLOWED_PROJECT_REFS.some(ref => customUrl.includes(ref)) && !customUrl.includes('lxhwyrzxgqvosecnhfli');
          if (!isAllowed) {
             localStorage.removeItem('supabase_url');
             localStorage.removeItem('supabase_key');
