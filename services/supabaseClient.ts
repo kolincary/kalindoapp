@@ -15,7 +15,7 @@ const DEFAULT_SPECIAL_OLD_URL = 'https://opdcyccwracapxfxisfw.supabase.co';
 const DEFAULT_SPECIAL_OLD_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9wZGN5Y2N3cmFjYXB4Znhpc2Z3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3NzkyMDUsImV4cCI6MjA5NTM1NTIwNX0.p4gmiTKIjcljdjoqzQn-S6z5YyrU9XvZPPKgnNF5_Cs';
 
 // Verified Supabase project domains whitelist for safe configuration
-const ALLOWED_PROJECT_REFS = ['nufvlqrtpzfiqghsxsze', 'lxhwyrzxgqvosecnhfli', 'cruiirntmgpgcwgdlxea', 'iwvbrigjydmhbwbnbbbk', 'ymolrxscthxxtlmnxmob', 'opdcyccwracapxfxisfw'];
+const ALLOWED_PROJECT_REFS = ['nufvlqrtpzfiqghsxsze', 'cruiirntmgpgcwgdlxea', 'iwvbrigjydmhbwbnbbbk', 'ymolrxscthxxtlmnxmob', 'opdcyccwracapxfxisfw'];
 
 // Helper to get config securely
 const getConfig = () => {
