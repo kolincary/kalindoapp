@@ -97,12 +97,29 @@ export let supabaseSpecialOld: SupabaseClient = createClient(activeConfig.specia
  */
 export const refreshSupabaseClients = () => {
   activeConfig = getConfig();
-  supabase = createClient(activeConfig.url, activeConfig.key);
+  supabase = createClient(activeConfig.url, activeConfig.key, {
+    auth: {
+      storageKey: `sb-${extractProjectRef(activeConfig.url)}-auth-token`,
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  });
   supabaseNew = createClient(activeConfig.newUrl, activeConfig.newKey, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      storageKey: `sb-sec-${extractProjectRef(activeConfig.newUrl)}`
+    }
   });
   supabaseSpecialOld = createClient(activeConfig.specialOldUrl, activeConfig.specialOldKey, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      storageKey: `sb-spec-${extractProjectRef(activeConfig.specialOldUrl)}`
+    }
   });
 };
 
@@ -125,7 +142,12 @@ export const testSupabaseConnection = async (
     }
 
     const testClient = createClient(cleanUrl, cleanKey, {
-      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        storageKey: `test-${extractProjectRef(cleanUrl)}-${Date.now()}`
+      }
     });
 
     // Check table accessibility and count
@@ -134,11 +156,30 @@ export const testSupabaseConnection = async (
       .select('*', { count: 'exact', head: true });
 
     if (error) {
+      const errMsg = (error.message || '').toLowerCase();
+      const errCode = error.code || '';
+
+      // 401 Unauthorized diagnostics
+      if (errCode === '401' || errMsg.includes('jwt') || errMsg.includes('unauthorized') || errMsg.includes('invalid api key')) {
+        return {
+          success: false,
+          message: 'Error 401 (Unauthorized): Anon Key tidak valid untuk project ini atau schema public belum diberi hak akses (GRANT). Pastikan menyalin Anon Key dari Project Settings > API project Supabase baru dan jalankan perintah Grant Permission.'
+        };
+      }
+
+      // Permission denied
+      if (errMsg.includes('permission denied') || errCode === '42501') {
+        return {
+          success: false,
+          message: 'Error 42501 (Permission Denied): PostgREST belum memiliki izin akses ke schema public. Jalankan perintah Grant Permissions di SQL Editor atau via CMD.'
+        };
+      }
+
       // If table doesn't exist yet, check if project is reachable
-      if (error.code === '42P01' || error.message.includes('relation "public.scanned_items" does not exist')) {
+      if (errCode === '42P01' || errMsg.includes('relation "public.scanned_items" does not exist')) {
         return {
           success: true,
-          message: 'Terkoneksi ke Supabase! (Catatan: Tabel scanned_items belum dibuat, silakan jalankan Master SQL Schema).',
+          message: 'Terkoneksi ke Supabase! (Catatan: Tabel scanned_items belum dibuat, silakan jalankan Master SQL Schema atau restore database).',
           rowCount: 0
         };
       }
