@@ -1505,7 +1505,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setSyncTotalCountFs(0);
       setSyncBatchCurrentFs(0);
       setSyncBatchTotalFs(0);
-      setSyncStatusMsgFs('Mengambil data dari Supabase dan streaming ke Firestore...');
+      setSyncStatusMsgFs('⚡ Mengambil dan menyinkronkan data Supabase (Multi-Batch Paralel)...');
 
       try {
          const targetCollection = syncCollectionName.trim() || 'scanned_items';
@@ -1524,7 +1524,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
          let lastId: any = null;
          const pageSize = 1000;
-         const BATCH_SIZE = 350;
+         const BATCH_SIZE = 450; // Firestore limit is 500 per batch. 450 is maximum safe capacity.
          let hasMore = true;
          let grandProcessed = 0;
          let batchCurrent = 0;
@@ -1561,8 +1561,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             });
             setSyncRoleBreakdownFs({ ...roleBreakdown });
 
-            // Stream write to Firestore in chunks of BATCH_SIZE (350)
+            // Stream write to Firestore with Multi-Batch Parallel Commits (450 docs/batch)
             const numChunks = Math.ceil(data.length / BATCH_SIZE);
+            const commitPromises: Promise<any>[] = [];
+
             for (let c = 0; c < numChunks; c++) {
                const chunkItems = data.slice(c * BATCH_SIZE, (c + 1) * BATCH_SIZE);
                const batch = writeBatch(db);
@@ -1581,15 +1583,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   batch.set(docRef, cleanItem, { merge: true });
                }
 
-               await batch.commit();
-               grandProcessed += chunkItems.length;
-               batchCurrent++;
-
-               setSyncProcessedCountFs(grandProcessed);
-               setSyncBatchCurrentFs(batchCurrent);
-               setSyncStatusMsgFs(`Sedang menyinkronkan: ${grandProcessed} data terkirim ke Firestore...`);
-               await new Promise((resolve) => setTimeout(resolve, 30));
+               commitPromises.push(batch.commit());
             }
+
+            await Promise.all(commitPromises);
+            grandProcessed += data.length;
+            batchCurrent += numChunks;
+
+            setSyncProcessedCountFs(grandProcessed);
+            setSyncBatchCurrentFs(batchCurrent);
+            setSyncStatusMsgFs(`⚡ Multi-Batch Paralel: ${grandProcessed} data tersinkron ke Firestore...`);
 
             if (data.length < pageSize) {
                hasMore = false;
@@ -1612,7 +1615,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
    };
 
-   // 13. Day Range Sync with Keyset Cursor Pagination (Fast, Zero Timeout)
+   // 13. Day Range Sync with Keyset Cursor Pagination & Multi-Batch Parallel Writes (Super Fast & Safe)
    const handleSyncSupabaseToFirestoreByDayRange = async () => {
       if (isSyncingFs) return;
       if (!syncStartDate || !syncEndDate) {
@@ -1659,7 +1662,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          curr.setDate(curr.getDate() + 1);
       }
 
-      setSyncStatusMsgFs(`🚀 Memulai Sinkronisasi Rentang (${datesToProcess.length} hari: ${datesToProcess[0].displayStr} s/d ${datesToProcess[datesToProcess.length - 1].displayStr})...`);
+      setSyncStatusMsgFs(`🚀 Memulai Sinkronisasi Turbo (${datesToProcess.length} hari: ${datesToProcess[0].displayStr} s/d ${datesToProcess[datesToProcess.length - 1].displayStr})...`);
 
       let grandTotalProcessed = 0;
 
@@ -1672,14 +1675,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             try {
                retryAttempt++;
                const statusPrefix = retryAttempt > 1 ? `[Retry #${retryAttempt}] ` : '';
-               setSyncStatusMsgFs(`${statusPrefix}Mengambil data Supabase tanggal ${dateInfo.displayStr} (${i + 1}/${datesToProcess.length} hari)...`);
+               setSyncStatusMsgFs(`${statusPrefix}⚡ Mengambil data tanggal ${dateInfo.displayStr} (${i + 1}/${datesToProcess.length} hari)...`);
 
                const startTs = new Date(`${dateInfo.dateStr}T00:00:00`).getTime();
                const endTs = new Date(`${dateInfo.dateStr}T23:59:59.999`).getTime();
 
                let lastId: any = null;
                const pageSize = 1000;
-               const BATCH_SIZE = 350;
+               const BATCH_SIZE = 450; // Maximum safe batch size (under 500 limit)
                let hasMore = true;
                let dayProcessed = 0;
                let dayBatches = 0;
@@ -1713,8 +1716,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                   lastId = data[data.length - 1].id;
 
-                  // Stream write to Firestore in chunks of BATCH_SIZE (350)
+                  // Parallel Multi-Batch Commit to Firestore
                   const numChunks = Math.ceil(data.length / BATCH_SIZE);
+                  const commitPromises: Promise<any>[] = [];
+
                   for (let c = 0; c < numChunks; c++) {
                      const chunkItems = data.slice(c * BATCH_SIZE, (c + 1) * BATCH_SIZE);
                      const batch = writeBatch(db);
@@ -1733,16 +1738,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         batch.set(docRef, cleanItem, { merge: true });
                      }
 
-                     await batch.commit();
-                     dayProcessed += chunkItems.length;
-                     dayBatches++;
-
-                     setSyncProcessedCountFs(grandTotalProcessed + dayProcessed);
-                     setSyncStatusMsgFs(`[${dateInfo.displayStr} (${i + 1}/${datesToProcess.length} hari)] Batch ${dayBatches} selesai (+${dayProcessed} data hari ini)`);
-
-                     await new Promise((resolve) => setTimeout(resolve, 30));
+                     commitPromises.push(batch.commit());
                   }
 
+                  // Execute all batch commits simultaneously
+                  await Promise.all(commitPromises);
+                  dayProcessed += data.length;
+                  dayBatches += numChunks;
+
+                  setSyncProcessedCountFs(grandTotalProcessed + dayProcessed);
+                  setSyncStatusMsgFs(`⚡ [${dateInfo.displayStr} (${i + 1}/${datesToProcess.length} hari)] +${dayProcessed} data tersinkron hari ini`);
+                  
                   if (data.length < pageSize) {
                      hasMore = false;
                   }
@@ -1757,20 +1763,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                if (dayProcessed === 0) {
                   setSyncStatusMsgFs(`ℹ️ Tanggal ${dateInfo.displayStr}: Tidak ada data Supabase ditemukan. Lanjut...`);
                } else {
-                  setSyncStatusMsgFs(`✅ Tanggal ${dateInfo.displayStr} Selesai! (${dayProcessed} data). Total sinkron: ${grandTotalProcessed} data.`);
+                  setSyncStatusMsgFs(`✅ Tanggal ${dateInfo.displayStr} Selesai! (${dayProcessed} data). Total: ${grandTotalProcessed} data.`);
                }
-               await new Promise(resolve => setTimeout(resolve, 400));
             } catch (err: any) {
                console.error(`Error sync date ${dateInfo.displayStr}:`, err);
                const errMsg = err?.message || 'timeout/network error';
-               setSyncStatusMsgFs(`⚠️ Gagal Tanggal ${dateInfo.displayStr}: ${errMsg}. Mengulang otomatis dalam 3 detik...`);
-               await new Promise(resolve => setTimeout(resolve, 3000));
+               setSyncStatusMsgFs(`⚠️ Gagal Tanggal ${dateInfo.displayStr}: ${errMsg}. Mengulang otomatis dalam 2 detik...`);
+               await new Promise(resolve => setTimeout(resolve, 2000));
             }
          }
       }
 
-      setSyncStatusMsgFs(`✅ Sinkronisasi Berhasil! Total ${grandTotalProcessed} data dikirim ke collection '${targetCollection}'.`);
-      setSuccessToast(`Sinkronisasi Rentang Selesai! Total ${grandTotalProcessed} data dikirim ke Firestore.`);
+      setSyncStatusMsgFs(`✅ Sinkronisasi Turbo Selesai! Total ${grandTotalProcessed} data dikirim ke collection '${targetCollection}'.`);
+      setSuccessToast(`Sinkronisasi Selesai! Total ${grandTotalProcessed} data terkirim ke Firestore.`);
       setIsSyncingFs(false);
    };
 
@@ -10115,7 +10120,7 @@ if (filterPackingShift !== 'ALL') {
                                                    </span>
                                                 </div>
                                                 <p className="text-xs text-gray-400 mt-0.5">
-                                                   Sinkronisasi data dari <span className="text-emerald-400 font-semibold">Supabase</span> ke <span className="text-amber-400 font-semibold">Firestore</span> (Batch commit 350 data per siklus agar tidak berat).
+                                                   Sinkronisasi data dari <span className="text-emerald-400 font-semibold">Supabase</span> ke <span className="text-amber-400 font-semibold">Firestore</span> (Multi-Batch Paralel 450 data per batch — super cepat & aman).
                                                 </p>
                                              </div>
                                           </div>
