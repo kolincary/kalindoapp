@@ -14,6 +14,7 @@ import { SpecialScanView } from './SpecialScanView';
 import { InjectExpiredResiView } from './InjectExpiredResiView';
 import { PrintFormsView } from './PrintFormsView';
 import { ResiFormatterView } from './ResiFormatterView';
+import { SupabaseHotSwapView } from './SupabaseHotSwapView';
 import {
    Sparkles,
    Wrench,
@@ -11079,87 +11080,8 @@ if (filterPackingShift !== 'ALL') {
                         })()}
 
                         {activeView === 'SUPABASE_CONFIG' && (
-                           <div className="w-full h-full bg-white dark:bg-gray-800 flex flex-col p-6 overflow-y-auto">
-                              <div className="max-w-2xl mx-auto w-full space-y-8 animate-[slideUp_0.3s_ease-out]">
-                                 <div className="flex items-center gap-4 mb-2">
-                                    <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center">
-                                       <Database size={24} />
-                                    </div>
-                                    <div>
-                                       <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Konfigurasi Database</h2>
-                                       <p className="text-sm text-gray-500 dark:text-gray-400">Atur koneksi Supabase secara dinamis untuk pencarian antar instance.</p>
-                                    </div>
-                                 </div>
-
-                                 <div className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/50 p-4 rounded-xl flex gap-3 text-amber-700 dark:text-amber-400">
-                                    <AlertTriangle size={20} className="shrink-0" />
-                                    <p className="text-xs leading-relaxed">
-                                       <strong>Peringatan:</strong> Mengubah pengaturan ini akan langsung berdampak pada fitur pencarian (Search All) dan verifikasi data. Pastikan URL dan Anon Key valid.
-                                    </p>
-                                 </div>
-
-                                 <div className="space-y-6">
-                                    {/* Project 1 (Main) */}
-                                    <div className="space-y-4">
-                                       <h4 className="text-xs font-bold text-orange-600 dark:text-orange-400 uppercase tracking-widest px-1">🟠 DB Lama (Sebelum 1 Maret)</h4>
-                                       <div className="space-y-2">
-                                          <label className="text-[10px] font-bold text-gray-500 ml-1">SUPABASE URL</label>
-                                          <input
-                                             type="text"
-                                             value={supaUrl}
-                                             onChange={(e) => setSupaUrl(e.target.value)}
-                                             placeholder="https://xxxx.supabase.co"
-                                             className="w-full px-4 py-3 bg-white dark:bg-gray-800 border border-orange-200 dark:border-orange-700 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none text-sm font-mono transition-all"
-                                          />
-                                       </div>
-                                       <div className="space-y-2">
-                                          <label className="text-[10px] font-bold text-gray-500 ml-1">ANON KEY</label>
-                                          <textarea
-                                             value={supaKey}
-                                             onChange={(e) => setSupaKey(e.target.value)}
-                                             placeholder="eyJhbGci..."
-                                             rows={3}
-                                             className="w-full px-4 py-3 bg-white dark:bg-gray-800 border border-orange-200 dark:border-orange-700 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none text-xs font-mono transition-all resize-none"
-                                          />
-                                       </div>
-                                    </div>
-
-                                    {/* DB Baru (1 Maret ke depan) */}
-                                    <div className="space-y-4 pt-6 border-t border-gray-100 dark:border-gray-800">
-                                       <h4 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest px-1">🟢 DB Baru (1 Maret ke depan)</h4>
-                                       <div className="space-y-2">
-                                          <label className="text-[10px] font-bold text-gray-500 ml-1">SUPABASE URL</label>
-                                          <input
-                                             type="text"
-                                             value={supaNewUrl}
-                                             onChange={(e) => setSupaNewUrl(e.target.value)}
-                                             placeholder="https://yyyy.supabase.co"
-                                             className="w-full px-4 py-3 bg-white dark:bg-gray-800 border border-emerald-200 dark:border-emerald-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-mono transition-all"
-                                          />
-                                       </div>
-                                       <div className="space-y-2">
-                                          <label className="text-[10px] font-bold text-gray-500 ml-1">ANON KEY</label>
-                                          <textarea
-                                             value={supaNewKey}
-                                             onChange={(e) => setSupaNewKey(e.target.value)}
-                                             placeholder="eyJhbGci..."
-                                             rows={3}
-                                             className="w-full px-4 py-3 bg-white dark:bg-gray-800 border border-emerald-200 dark:border-emerald-700 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-xs font-mono transition-all resize-none"
-                                          />
-                                       </div>
-                                    </div>
-
-                                    {/* Save Button */}
-                                    <button
-                                       onClick={handleSaveSupabaseConfig}
-                                       disabled={isSavingConfig}
-                                       className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold text-lg transition-all active:scale-[0.98] shadow-lg shadow-blue-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
-                                    >
-                                       {isSavingConfig ? <Loader2 size={24} className="animate-spin" /> : <Save size={24} />}
-                                       Simpan & Terapkan Perubahan
-                                    </button>
-                                 </div>
-                              </div>
+                           <div className="w-full h-full bg-white dark:bg-gray-800 overflow-y-auto">
+                              <SupabaseHotSwapView />
                            </div>
                         )}
 
