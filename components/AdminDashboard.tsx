@@ -2091,6 +2091,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [auditPendingData, setAuditPendingData] = useState<any[]>([]);
    const [isLoadingAuditData, setIsLoadingAuditData] = useState(false);
    const [isBackgroundRefreshingAudit, setIsBackgroundRefreshingAudit] = useState(false);
+   const earlierLookbackCacheRef = useRef<Map<string, { timestamp: number; map: Map<string, string> }>>(new Map());
    const [adminImports, setAdminImports] = useState<AdminBatchImport[]>([]);
    const [isLoadingAdminImports, setIsLoadingAdminImports] = useState(false);
    const [activeStaffTab, setActiveStaffTab] = useState<string>('IRDA');
@@ -4307,32 +4308,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             q = fsQuery(q, where('timestamp', '>=', startOfDay.toISOString()), where('timestamp', '<=', endOfDay.toISOString()));
 
             // Also fetch earlier admin_batch_imports for cross-date matching (up to 30 days before)
-            try {
-               const lookbackStart = new Date(startOfDay.getTime() - 30 * 24 * 60 * 60 * 1000);
-               const lookbackQ = fsQuery(
-                  collection(db, 'admin_batch_imports'),
-                  where('timestamp', '>=', lookbackStart.toISOString()),
-                  where('timestamp', '<', startOfDay.toISOString())
-               );
-               const lookbackSnap = await getDocs(lookbackQ);
-               const eMap = new Map<string, string>();
-               lookbackSnap.forEach(docSnap => {
-                  const data = docSnap.data();
-                  const tsStr = data.timestamp;
-                  if (tsStr && Array.isArray(data.barcodes)) {
-                     const ts = new Date(tsStr);
-                     const dStr = `${String(ts.getDate()).padStart(2, '0')}/${String(ts.getMonth() + 1).padStart(2, '0')}`;
-                     data.barcodes.forEach((b: string) => {
-                        const cleanB = (b || '').toString().trim().toUpperCase();
-                        if (cleanB && !eMap.has(cleanB)) {
-                           eMap.set(cleanB, dStr);
-                        }
-                     });
-                  }
-               });
-               setEarlierAdminResiMap(eMap);
-            } catch (pastErr) {
-               console.error("Failed to fetch earlier admin imports:", pastErr);
+            const lookbackCacheKey = batchDateFilter;
+            const cachedLookback = earlierLookbackCacheRef.current.get(lookbackCacheKey);
+            const now = Date.now();
+
+            if (cachedLookback && (now - cachedLookback.timestamp < 5 * 60 * 1000)) {
+               setEarlierAdminResiMap(cachedLookback.map);
+            } else {
+               try {
+                  const lookbackStart = new Date(startOfDay.getTime() - 30 * 24 * 60 * 60 * 1000);
+                  const lookbackQ = fsQuery(
+                     collection(db, 'admin_batch_imports'),
+                     where('timestamp', '>=', lookbackStart.toISOString()),
+                     where('timestamp', '<', startOfDay.toISOString())
+                  );
+                  const lookbackSnap = await getDocs(lookbackQ);
+                  const eMap = new Map<string, string>();
+                  lookbackSnap.forEach(docSnap => {
+                     const data = docSnap.data();
+                     const tsStr = data.timestamp;
+                     if (tsStr && Array.isArray(data.barcodes)) {
+                        const ts = new Date(tsStr);
+                        const dStr = `${String(ts.getDate()).padStart(2, '0')}/${String(ts.getMonth() + 1).padStart(2, '0')}`;
+                        data.barcodes.forEach((b: string) => {
+                           const cleanB = (b || '').toString().trim().toUpperCase();
+                           if (cleanB && !eMap.has(cleanB)) {
+                              eMap.set(cleanB, dStr);
+                           }
+                        });
+                     }
+                  });
+                  earlierLookbackCacheRef.current.set(lookbackCacheKey, { timestamp: now, map: eMap });
+                  setEarlierAdminResiMap(eMap);
+               } catch (pastErr) {
+                  console.error("Failed to fetch earlier admin imports:", pastErr);
+               }
             }
          } else {
             setEarlierAdminResiMap(new Map());
@@ -4504,7 +4514,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                ? ['LOGISTIK', 'Logistik']
                : [role.toUpperCase(), role.charAt(0).toUpperCase() + role.slice(1).toLowerCase()];
 
-            // A. Fetch Same-day Scans (strictly within selected date range)
+            // A. Fetch Same-day Scans (strictly within selected date range) with 2,000 range chunks
             let sameDayData: any[] = [];
             const buildAuditQuery = (isCount = false) => {
                let q = supabase.from('scanned_items');
@@ -4518,23 +4528,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                
                q = q.gte('timestamp', d.startMs).lte('timestamp', d.endMs);
                if (!isCount) {
-                  q = q.order('timestamp', { ascending: true });
+                  q = q.order('timestamp', { ascending: false });
                }
                return q;
             };
 
-            const { count: auditCount } = await buildAuditQuery(true);
-            if (auditCount) {
-               const promises = [];
-               for (let i = 0; i < auditCount; i += 1000) {
-                  promises.push(buildAuditQuery(false).range(i, i + 999));
+            const [{ count: auditCount }, firstPage] = await Promise.all([
+               buildAuditQuery(true),
+               buildAuditQuery(false).range(0, 1999)
+            ]);
+
+            if (firstPage.data) {
+               sameDayData.push(...firstPage.data);
+            }
+
+            if (auditCount && auditCount > 2000) {
+               const remainingPromises = [];
+               for (let i = 2000; i < auditCount; i += 2000) {
+                  remainingPromises.push(buildAuditQuery(false).range(i, i + 1999));
                }
-               for (let i = 0; i < promises.length; i += 10) {
-                  const res = await Promise.all(promises.slice(i, i + 10));
+               for (let i = 0; i < remainingPromises.length; i += 10) {
+                  const res = await Promise.all(remainingPromises.slice(i, i + 10));
                   res.forEach(r => { if (r.error) throw r.error; r.data && sameDayData.push(...r.data); });
                }
             }
-            sameDayData.sort((a,b) => Number(b.timestamp) - Number(a.timestamp)); // descending
 
             // B. Identify remaining admin barcodes that were NOT scanned on the same day
             const sameDayBarcodes = new Set(
@@ -4542,10 +4559,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             );
             const remainingBarcodes = adminBarcodes.filter(bc => !sameDayBarcodes.has(bc));
 
-            // C. Fetch Future Scans for remaining barcodes
+            // C. Fetch Future Scans for remaining barcodes with 1,000 chunking
             let futureData: any[] = [];
             if (remainingBarcodes.length > 0) {
-               const chunkSize = 500;
+               const chunkSize = 1000;
                const chunks: string[][] = [];
                for (let i = 0; i < remainingBarcodes.length; i += chunkSize) {
                   chunks.push(remainingBarcodes.slice(i, i + chunkSize));
@@ -4653,6 +4670,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          fetchAuditData(false, adminBarcodesCache.length > 0 ? adminBarcodesCache : undefined);
       }
    }, [auditRoleFilter, adminBarcodesCache, activeView, activeBatchTab]);
+
+   // Realtime Live Stream Listener for Cek Selisih Resi (Auto update as scans occur)
+   useEffect(() => {
+      if ((activeView === 'BATCH_DATA' || activeView === 'BATCH_DATA_2' || activeView === 'BATCH_DATA_3') && activeBatchTab === 'AUDIT_KOMPARASI' && batchDateFilter) {
+         let debounceTimer: any = null;
+         const channelName = `realtime_audit_${batchDateFilter}_${auditRoleFilter}`;
+         
+         const channel = supabase
+            .channel(channelName)
+            .on(
+               'postgres_changes',
+               {
+                  event: '*',
+                  schema: 'public',
+                  table: 'scanned_items'
+               },
+               () => {
+                  clearTimeout(debounceTimer);
+                  debounceTimer = setTimeout(() => {
+                     fetchAuditData(false, adminBarcodesCache.length > 0 ? adminBarcodesCache : undefined);
+                  }, 1500);
+               }
+            )
+            .subscribe();
+
+         return () => {
+            clearTimeout(debounceTimer);
+            supabase.removeChannel(channel);
+         };
+      }
+   }, [activeView, activeBatchTab, batchDateFilter, auditRoleFilter, adminBarcodesCache]);
 
    // Memoized heavy computation for Audit Komparasi (Cek Selisih Resi)
    const auditComputedData = useMemo(() => {
@@ -14538,39 +14586,45 @@ LXAD-1234567890`}
                                                 <ShieldCheck size={24} />
                                              </div>
                                              <div>
-                                                <h2 className="text-base sm:text-lg font-bold text-gray-800 dark:text-white">Cek Selisih Resi</h2>
+                                                <div className="flex items-center gap-2">
+                                                   <h2 className="text-base sm:text-lg font-bold text-gray-800 dark:text-white">Cek Selisih Resi</h2>
+                                                   <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-700 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 shadow-sm">
+                                                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                                                      <span>LIVE SYNC</span>
+                                                   </div>
+                                                </div>
                                                 <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-0.5">Analisis komparatif antara data manifes admin dengan hasil scan tim lapangan</p>
                                              </div>
                                           </div>
-                                              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-                                                 {lastAuditFetchTime && (
-                                                    <span className="text-[11px] text-gray-500 dark:text-gray-400 font-semibold bg-gray-50 dark:bg-gray-850 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-700">
-                                                       Cache: {lastAuditFetchTime}
-                                                    </span>
-                                                 )}
-                                                 <button 
-                                                    onClick={() => fetchAuditData(true)} 
-                                                    disabled={isLoadingAuditData} 
-                                                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold text-xs sm:text-sm transition-all shadow-lg shadow-purple-100 dark:shadow-none h-11 flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                                                 >
-                                                    <RefreshCw size={16} className={(isLoadingAuditData || isBackgroundRefreshingAudit) ? 'animate-spin' : ''} />
-                                                    <span>Refresh Data</span>
-                                                 </button>
-                                                 <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 h-11 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700">
-                                                    <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Bandingkan:</span>
-                                                    <select 
-                                                       value={auditRoleFilter} 
-                                                       onChange={(e) => setAuditRoleFilter(e.target.value as any)}
-                                                       className="bg-transparent text-purple-700 dark:text-purple-400 font-bold text-xs sm:text-sm outline-none cursor-pointer"
-                                                    >
-                                                       <option value="PICKER">Picker</option>
-                                                       <option value="CHECKER">Checker</option>
-                                                       <option value="PACKING">Packing</option>
-                                                       <option value="LOGISTIK">Logistik</option>
-                                                    </select>
-                                                 </div>
-                                              </div>
-                                           </div>
+                                          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                                             {lastAuditFetchTime && (
+                                                <span className="text-[11px] text-gray-500 dark:text-gray-400 font-semibold bg-gray-50 dark:bg-gray-850 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-700">
+                                                   Cache: {lastAuditFetchTime}
+                                                </span>
+                                             )}
+                                             <button 
+                                                onClick={() => fetchAuditData(true)} 
+                                                disabled={isLoadingAuditData} 
+                                                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold text-xs sm:text-sm transition-all shadow-lg shadow-purple-100 dark:shadow-none h-11 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                                             >
+                                                <RefreshCw size={16} className={(isLoadingAuditData || isBackgroundRefreshingAudit) ? 'animate-spin' : ''} />
+                                                <span>{isBackgroundRefreshingAudit ? 'Syncing...' : 'Refresh Data'}</span>
+                                             </button>
+                                             <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 h-11 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700">
+                                                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Bandingkan:</span>
+                                                <select 
+                                                   value={auditRoleFilter} 
+                                                   onChange={(e) => setAuditRoleFilter(e.target.value as any)}
+                                                   className="bg-transparent text-purple-700 dark:text-purple-400 font-bold text-xs sm:text-sm outline-none cursor-pointer"
+                                                >
+                                                   <option value="PICKER">Picker</option>
+                                                   <option value="CHECKER">Checker</option>
+                                                   <option value="PACKING">Packing</option>
+                                                   <option value="LOGISTIK">Logistik</option>
+                                                </select>
+                                             </div>
+                                          </div>
+                                       </div>
 
                                            {/* ===== SECTION B: 3 COLUMNS STATS ===== */}
                                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
