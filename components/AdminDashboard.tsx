@@ -4295,60 +4295,58 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          const importsRef = collection(db, 'admin_batch_imports');
          let q = fsQuery(importsRef);
          
-         if (batchDateFilter) {
-            const startOfDay = new Date(batchDateFilter + 'T00:00:00');
-            let endOfDay = new Date(batchDateFilter + 'T23:59:59.999');
+         const startOfDay = new Date(batchDateFilter + 'T00:00:00');
+         let endOfDay = new Date(batchDateFilter + 'T23:59:59.999');
 
-            if (batchTimeFilter) {
-               const [hours, minutes, seconds] = batchTimeFilter.split(':');
-               startOfDay.setHours(parseInt(hours, 10), parseInt(minutes, 10), parseInt(seconds || '0', 10), 0);
-               endOfDay = new Date(startOfDay.getTime());
-               endOfDay.setHours(parseInt(hours, 10), parseInt(minutes, 10), parseInt(seconds || '0', 10), 999);
-            }
-            q = fsQuery(q, where('timestamp', '>=', startOfDay.toISOString()), where('timestamp', '<=', endOfDay.toISOString()));
+         if (batchTimeFilter) {
+            const [hours, minutes, seconds] = batchTimeFilter.split(':');
+            startOfDay.setHours(parseInt(hours, 10), parseInt(minutes, 10), parseInt(seconds || '0', 10), 0);
+            endOfDay = new Date(startOfDay.getTime());
+            endOfDay.setHours(parseInt(hours, 10), parseInt(minutes, 10), parseInt(seconds || '0', 10), 999);
+         }
+         q = fsQuery(q, where('timestamp', '>=', startOfDay.toISOString()), where('timestamp', '<=', endOfDay.toISOString()));
 
-            // Also fetch earlier admin_batch_imports for cross-date matching (up to 30 days before)
-            const lookbackCacheKey = batchDateFilter;
-            const cachedLookback = earlierLookbackCacheRef.current.get(lookbackCacheKey);
-            const now = Date.now();
+         // Also fetch earlier admin_batch_imports for cross-date matching (up to 30 days before)
+         const lookbackCacheKey = batchDateFilter;
+         const cachedLookback = earlierLookbackCacheRef.current.get(lookbackCacheKey);
+         const now = Date.now();
 
+         const lookbackPromise = (async () => {
             if (cachedLookback && (now - cachedLookback.timestamp < 5 * 60 * 1000)) {
                setEarlierAdminResiMap(cachedLookback.map);
-            } else {
-               try {
-                  const lookbackStart = new Date(startOfDay.getTime() - 30 * 24 * 60 * 60 * 1000);
-                  const lookbackQ = fsQuery(
-                     collection(db, 'admin_batch_imports'),
-                     where('timestamp', '>=', lookbackStart.toISOString()),
-                     where('timestamp', '<', startOfDay.toISOString())
-                  );
-                  const lookbackSnap = await getDocs(lookbackQ);
-                  const eMap = new Map<string, string>();
-                  lookbackSnap.forEach(docSnap => {
-                     const data = docSnap.data();
-                     const tsStr = data.timestamp;
-                     if (tsStr && Array.isArray(data.barcodes)) {
-                        const ts = new Date(tsStr);
-                        const dStr = `${String(ts.getDate()).padStart(2, '0')}/${String(ts.getMonth() + 1).padStart(2, '0')}`;
-                        data.barcodes.forEach((b: string) => {
-                           const cleanB = (b || '').toString().trim().toUpperCase();
-                           if (cleanB && !eMap.has(cleanB)) {
-                              eMap.set(cleanB, dStr);
-                           }
-                        });
-                     }
-                  });
-                  earlierLookbackCacheRef.current.set(lookbackCacheKey, { timestamp: now, map: eMap });
-                  setEarlierAdminResiMap(eMap);
-               } catch (pastErr) {
-                  console.error("Failed to fetch earlier admin imports:", pastErr);
-               }
+               return;
             }
-         } else {
-            setEarlierAdminResiMap(new Map());
-         }
+            try {
+               const lookbackStart = new Date(startOfDay.getTime() - 30 * 24 * 60 * 60 * 1000);
+               const lookbackQ = fsQuery(
+                  collection(db, 'admin_batch_imports'),
+                  where('timestamp', '>=', lookbackStart.toISOString()),
+                  where('timestamp', '<', startOfDay.toISOString())
+               );
+               const lookbackSnap = await getDocs(lookbackQ);
+               const eMap = new Map<string, string>();
+               lookbackSnap.forEach(docSnap => {
+                  const data = docSnap.data();
+                  const tsStr = data.timestamp;
+                  if (tsStr && Array.isArray(data.barcodes)) {
+                     const ts = new Date(tsStr);
+                     const dStr = `${String(ts.getDate()).padStart(2, '0')}/${String(ts.getMonth() + 1).padStart(2, '0')}`;
+                     data.barcodes.forEach((b: string) => {
+                        const cleanB = (b || '').toString().trim().toUpperCase();
+                        if (cleanB && !eMap.has(cleanB)) {
+                           eMap.set(cleanB, dStr);
+                        }
+                     });
+                  }
+               });
+               earlierLookbackCacheRef.current.set(lookbackCacheKey, { timestamp: now, map: eMap });
+               setEarlierAdminResiMap(eMap);
+            } catch (pastErr) {
+               console.error("Failed to fetch earlier admin imports:", pastErr);
+            }
+         })();
 
-         const querySnapshot = await getDocs(q);
+         const [querySnapshot] = await Promise.all([getDocs(q), lookbackPromise]);
          const fetched: AdminBatchImport[] = [];
          querySnapshot.forEach(docSnap => {
             fetched.push({ id: docSnap.id, ...docSnap.data() } as AdminBatchImport);
@@ -4499,7 +4497,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          };
 
          const d = getDates();
-         const dateKey = d ? `${d.startMs}_${d.endMs}` : 'ALL';
+         if (!d) return;
+         const dateKey = `${d.startMs}_${d.endMs}`;
          const roleCacheKey = `${dateKey}_${auditRoleFilter}`;
 
          const adminBarcodes = providedAdminBarcodes || Array.from(new Set(
@@ -4507,24 +4506,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          )) as string[];
 
          const fetchOptimizedData = async (role: string, fetchGudangAudit = false) => {
-            if (!d) return [];
             const roleList = role === 'PICKER' 
                ? ['PICKER', 'Picker', 'OJOL', 'Ojol'] 
                : role === 'LOGISTIK'
                ? ['LOGISTIK', 'Logistik']
                : [role.toUpperCase(), role.charAt(0).toUpperCase() + role.slice(1).toLowerCase()];
 
-            // A. Fetch Same-day Scans (strictly within selected date range) with 2,000 range chunks
-            let sameDayData: any[] = [];
+            // A. Fetch Same-day Scans
             const buildAuditQuery = (isCount = false) => {
                let q = supabase.from('scanned_items');
-               if (isCount) q = q.select('*', { count: 'exact', head: true });
-               else q = q.select('id, barcode, timestamp, status, menu_context, role');
+               if (isCount) {
+                  q = q.select('*', { count: 'exact', head: true });
+               } else {
+                  q = q.select('id, barcode, timestamp, status, menu_context, role');
+               }
                
-               if (roleList.length > 1) q = q.in('role', roleList);
-               else q = q.eq('role', role);
-               
-               if (fetchGudangAudit) q = q.or('status.eq.PENDING,menu_context.eq.PENDING,status.eq.READY,menu_context.eq.READY,status.eq.CANCEL,menu_context.eq.CANCEL');
+               if (fetchGudangAudit) {
+                  q = q.or('status.eq.PENDING,menu_context.eq.PENDING,status.eq.READY,menu_context.eq.READY,status.eq.CANCEL,menu_context.eq.CANCEL');
+               } else {
+                  if (roleList.length > 1) q = q.in('role', roleList);
+                  else q = q.eq('role', role);
+               }
                
                q = q.gte('timestamp', d.startMs).lte('timestamp', d.endMs);
                if (!isCount) {
@@ -4533,66 +4535,66 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                return q;
             };
 
-            const [{ count: auditCount }, firstPage] = await Promise.all([
-               buildAuditQuery(true),
-               buildAuditQuery(false).range(0, 1999)
-            ]);
+            const { count: auditCount } = await buildAuditQuery(true);
+            let sameDayData: any[] = [];
 
-            if (firstPage.data) {
-               sameDayData.push(...firstPage.data);
+            if (auditCount && auditCount > 0) {
+               const chunkSize = 1000;
+               const totalPages = Math.ceil(auditCount / chunkSize);
+               const concurrency = 4;
+
+               for (let i = 0; i < totalPages; i += concurrency) {
+                  const batchPromises = [];
+                  for (let j = i; j < Math.min(i + concurrency, totalPages); j++) {
+                     const from = j * chunkSize;
+                     const to = from + chunkSize - 1;
+                     batchPromises.push(buildAuditQuery(false).range(from, to));
+                  }
+                  const batchResults = await Promise.all(batchPromises);
+                  batchResults.forEach(r => {
+                     if (r.data) sameDayData.push(...r.data);
+                  });
+               }
             }
 
-            if (auditCount && auditCount > 2000) {
-               const remainingPromises = [];
-               for (let i = 2000; i < auditCount; i += 2000) {
-                  remainingPromises.push(buildAuditQuery(false).range(i, i + 1999));
-               }
-               for (let i = 0; i < remainingPromises.length; i += 10) {
-                  const res = await Promise.all(remainingPromises.slice(i, i + 10));
-                  res.forEach(r => { if (r.error) throw r.error; r.data && sameDayData.push(...r.data); });
-               }
-            }
-
-            // B. Identify remaining admin barcodes that were NOT scanned on the same day
+            // B. Identify remaining admin barcodes not scanned on same day
             const sameDayBarcodes = new Set(
                sameDayData.map(item => (item.barcode || '').toString().trim().toUpperCase()).filter(Boolean)
             );
             const remainingBarcodes = adminBarcodes.filter(bc => !sameDayBarcodes.has(bc));
 
-            // C. Fetch Future Scans for remaining barcodes with 1,000 chunking
-            let futureData: any[] = [];
+            // C. Fetch Cross-Date Scans (Past & Future) for remaining admin barcodes
+            let crossDateData: any[] = [];
             if (remainingBarcodes.length > 0) {
-               const chunkSize = 1000;
+               const chunkSize = 500;
                const chunks: string[][] = [];
                for (let i = 0; i < remainingBarcodes.length; i += chunkSize) {
                   chunks.push(remainingBarcodes.slice(i, i + chunkSize));
                }
 
-               const futureQueryBuilders = chunks.map(chunk => {
+               const queryBuilders = chunks.map(chunk => {
                   let q = supabase.from('scanned_items')
                      .select('id, barcode, timestamp, status, menu_context, role')
                      .in('barcode', chunk);
-                  if (roleList.length > 1) {
-                     q = q.in('role', roleList);
-                  } else {
-                     q = q.eq('role', role);
-                  }
+
                   if (fetchGudangAudit) {
                      q = q.or('status.eq.PENDING,menu_context.eq.PENDING,status.eq.READY,menu_context.eq.READY,status.eq.CANCEL,menu_context.eq.CANCEL');
+                  } else {
+                     if (roleList.length > 1) q = q.in('role', roleList);
+                     else q = q.eq('role', role);
                   }
                   return q;
                });
 
-               for (let i = 0; i < futureQueryBuilders.length; i += 10) {
-                  const results = await Promise.all(futureQueryBuilders.slice(i, i + 10));
+               for (let i = 0; i < queryBuilders.length; i += 10) {
+                  const results = await Promise.all(queryBuilders.slice(i, i + 10));
                   results.forEach(res => {
-                     if (res.error) console.error("Error fetching future scans:", res.error);
-                     else futureData = [...futureData, ...(res.data || [])];
+                     if (res.data) crossDateData.push(...res.data);
                   });
                }
             }
 
-            return [...sameDayData, ...futureData];
+            return [...sameDayData, ...crossDateData];
          };
 
          // 1. Initial Cache Check (SWR Phase 1: Stale)
