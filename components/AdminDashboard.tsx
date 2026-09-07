@@ -4675,6 +4675,155 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
    }, [auditRoleFilter, adminBarcodesCache, activeView, activeBatchTab]);
 
+   // Memoized heavy computation for Audit Komparasi (Cek Selisih Resi)
+   const auditComputedData = useMemo(() => {
+      if (!batchDateFilter) return null;
+
+      const adminResiArr = Array.from(new Set(
+         adminImports.flatMap(item => item.barcodes || []).map(b => (b || '').toString().trim().toUpperCase()).filter(Boolean)
+      )) as string[];
+      const adminResiSet = new Set<string>(adminResiArr);
+
+      // Compute date threshold for cross-date scan detection
+      const targetEndMs = (() => {
+         if (!batchDateFilter) return Infinity;
+         const end = new Date(batchDateFilter + 'T23:59:59.999');
+         if (batchTimeFilter) {
+            const [h, m, s] = batchTimeFilter.split(':');
+            end.setHours(+h, +m, +(s || '0'), 999);
+         }
+         return end.getTime();
+      })();
+
+      // Filter auditRoleData to relevant scans for this target date:
+      // 1. Scans matching Admin barcodes for target date (whether scanned H+0 or H+1+)
+      // 2. Scans performed ON target date (timestamp <= targetEndMs)
+      const relevantRoleData = auditRoleData.filter(d => {
+         const bc = (d.barcode || '').toString().trim().toUpperCase();
+         if (!bc) return false;
+         const isAdminResi = adminResiSet.has(bc);
+         const isSameDayScan = !targetEndMs || (d.timestamp && d.timestamp <= targetEndMs);
+         return isAdminResi || isSameDayScan;
+      });
+
+      // Map barcode to latest scan record
+      const roleResiMap = new Map<string, any>();
+      relevantRoleData.forEach(d => {
+         const bc = (d.barcode || '').toString().trim().toUpperCase();
+         if (bc && (!roleResiMap.has(bc) || (d.timestamp && d.timestamp > roleResiMap.get(bc).timestamp))) {
+            roleResiMap.set(bc, d);
+         }
+      });
+
+      const gudangCancelResiSet = new Set<string>(
+         auditPendingData
+            .filter(d => d.status === 'CANCEL' || d.menu_context === 'CANCEL')
+            .map(d => (d.barcode || '').toString().trim().toUpperCase())
+            .filter(Boolean)
+      );
+
+      const cancelImportOnlySet = new Set<string>(cancelledOrders.map(o => (o.barcode || '').trim().toUpperCase()).filter(Boolean));
+      const cancelBarcodeSet = new Set<string>([
+         ...Array.from(cancelImportOnlySet),
+         ...Array.from(gudangCancelResiSet)
+      ]);
+      const readyResiSet = new Set<string>(
+         auditPendingData
+            .filter(d => d.status === 'READY' || d.menu_context === 'READY')
+            .map(d => (d.barcode || '').toString().trim().toUpperCase())
+            .filter(Boolean)
+      );
+      
+      // Prevent Overlap: If a resi is Cancelled or Ready, it shouldn't be counted as a valid scan in Terkirim/Susulan.
+      cancelBarcodeSet.forEach(bc => roleResiMap.delete(bc));
+      readyResiSet.forEach(bc => roleResiMap.delete(bc));
+
+      // Remove Cancelled barcodes from the Ready set to avoid double-counting
+      cancelBarcodeSet.forEach(bc => readyResiSet.delete(bc));
+
+      const roleResi = new Set<string>(Array.from(roleResiMap.keys()));
+      const ojolResiSet = new Set<string>(relevantRoleData.filter(d => (d.role || '').toUpperCase() === 'OJOL').map(d => (d.barcode || '').toString().trim().toUpperCase()).filter(Boolean));
+      const pendingResi = new Set<string>(
+         auditPendingData
+            .filter(d => d.status === 'PENDING' || d.menu_context === 'PENDING')
+            .map(d => (d.barcode || '').toString().trim().toUpperCase())
+            .filter(Boolean)
+      );
+
+      const crossDateResiMap = new Map<string, string>(); // barcode -> dateStr
+      const sameDayResiSet = new Set<string>();
+      const crossDateResiSet = new Set<string>();
+
+      adminResiArr.forEach(r => {
+         if (roleResiMap.has(r)) {
+            const scanItem = roleResiMap.get(r);
+            const ts = scanItem.timestamp || 0;
+            if (targetEndMs && ts > targetEndMs) {
+               const dt = new Date(ts);
+               const dateStr = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}`;
+               crossDateResiMap.set(r, dateStr);
+               crossDateResiSet.add(r);
+            } else {
+               sameDayResiSet.add(r);
+            }
+         }
+      });
+
+      const cancelMatchedSet = new Set<string>(adminResiArr.filter(r => cancelBarcodeSet.has(r)));
+      const readyMatchedSet = new Set<string>(adminResiArr.filter(r => readyResiSet.has(r)));
+      const belumDiscan = adminResiArr.filter(r => !roleResi.has(r) && !cancelBarcodeSet.has(r) && !readyResiSet.has(r));
+      const matchResi = adminResiArr.filter(r => roleResi.has(r));
+      const scanEkstra = Array.from(roleResi).filter(r => !adminResiSet.has(r));
+      const susulanRoleList = Array.from(roleResi).filter(r => !adminResiSet.has(r) && earlierAdminResiMap.has(r));
+      const pureEkstraList = Array.from(roleResi).filter(r => !adminResiSet.has(r) && !earlierAdminResiMap.has(r));
+
+      return {
+         adminResiArr,
+         adminResiSet,
+         roleResiMap,
+         gudangCancelResiSet,
+         cancelImportOnlySet,
+         cancelBarcodeSet,
+         readyResiSet,
+         roleResi,
+         ojolResiSet,
+         pendingResi,
+         crossDateResiMap,
+         sameDayResiSet,
+         crossDateResiSet,
+         cancelMatchedSet,
+         readyMatchedSet,
+         belumDiscan,
+         matchResi,
+         scanEkstra,
+         susulanRoleList,
+         pureEkstraList
+      };
+   }, [adminImports, batchDateFilter, batchTimeFilter, auditRoleData, auditPendingData, cancelledOrders, earlierAdminResiMap]);
+
+   const {
+      adminResiArr = [] as string[],
+      adminResiSet = new Set<string>(),
+      roleResiMap = new Map<string, any>(),
+      gudangCancelResiSet = new Set<string>(),
+      cancelImportOnlySet = new Set<string>(),
+      cancelBarcodeSet = new Set<string>(),
+      readyResiSet = new Set<string>(),
+      roleResi = new Set<string>(),
+      ojolResiSet = new Set<string>(),
+      pendingResi = new Set<string>(),
+      crossDateResiMap = new Map<string, string>(),
+      sameDayResiSet = new Set<string>(),
+      crossDateResiSet = new Set<string>(),
+      cancelMatchedSet = new Set<string>(),
+      readyMatchedSet = new Set<string>(),
+      belumDiscan = [] as string[],
+      matchResi = [] as string[],
+      scanEkstra = [] as string[],
+      susulanRoleList = [] as string[],
+      pureEkstraList = [] as string[]
+   } = auditComputedData || {};
+
    const handleSaveBatch = async () => {
       if (!batchExcelFilename.trim()) {
          alert("Nama File Excel harus diisi!");
@@ -12613,108 +12762,7 @@ LXAD-1234567890`}
                                     </div>
                                  </div>
 
-                                 {(() => {
-                                    const adminResiArr = Array.from(new Set(
-                                       adminImports.flatMap(item => item.barcodes || []).map(b => (b || '').toString().trim().toUpperCase()).filter(Boolean)
-                                    )) as string[];
-                                    const adminResiSet = new Set<string>(adminResiArr);
-
-                                    // Compute date threshold for cross-date scan detection
-                                    const targetEndMs = (() => {
-                                       if (!batchDateFilter) return Infinity;
-                                       const end = new Date(batchDateFilter + 'T23:59:59.999');
-                                       if (batchTimeFilter) {
-                                          const [h, m, s] = batchTimeFilter.split(':');
-                                          end.setHours(+h, +m, +(s || '0'), 999);
-                                       }
-                                       return end.getTime();
-                                    })();
-
-                                    // Filter auditRoleData to relevant scans for this target date:
-                                    // 1. Scans matching Admin barcodes for target date (whether scanned H+0 or H+1+)
-                                    // 2. Scans performed ON target date (timestamp <= targetEndMs)
-                                    const relevantRoleData = auditRoleData.filter(d => {
-                                       const bc = (d.barcode || '').toString().trim().toUpperCase();
-                                       if (!bc) return false;
-                                       const isAdminResi = adminResiSet.has(bc);
-                                       const isSameDayScan = !targetEndMs || (d.timestamp && d.timestamp <= targetEndMs);
-                                       return isAdminResi || isSameDayScan;
-                                    });
-
-                                    // Map barcode to latest scan record
-                                    const roleResiMap = new Map<string, any>();
-                                    relevantRoleData.forEach(d => {
-                                       const bc = (d.barcode || '').toString().trim().toUpperCase();
-                                       if (bc && (!roleResiMap.has(bc) || (d.timestamp && d.timestamp > roleResiMap.get(bc).timestamp))) {
-                                          roleResiMap.set(bc, d);
-                                       }
-                                    });
-
-                                    const gudangCancelResiSet = new Set<string>(
-                                       auditPendingData
-                                          .filter(d => d.status === 'CANCEL' || d.menu_context === 'CANCEL')
-                                          .map(d => (d.barcode || '').toString().trim().toUpperCase())
-                                          .filter(Boolean)
-                                    );
-
-                                    const cancelImportOnlySet = new Set<string>(cancelledOrders.map(o => (o.barcode || '').trim().toUpperCase()).filter(Boolean));
-                                    const cancelBarcodeSet = new Set<string>([
-                                       ...Array.from(cancelImportOnlySet),
-                                       ...Array.from(gudangCancelResiSet)
-                                    ]);
-                                    const readyResiSet = new Set<string>(
-                                       auditPendingData
-                                          .filter(d => d.status === 'READY' || d.menu_context === 'READY')
-                                          .map(d => (d.barcode || '').toString().trim().toUpperCase())
-                                          .filter(Boolean)
-                                    );
-                                    
-                                    // Prevent Overlap: If a resi is Cancelled or Ready, it shouldn't be counted as a valid scan in Terkirim/Susulan.
-                                    cancelBarcodeSet.forEach(bc => roleResiMap.delete(bc));
-                                    readyResiSet.forEach(bc => roleResiMap.delete(bc));
-
-                                    // Remove Cancelled barcodes from the Ready set to avoid double-counting
-                                    cancelBarcodeSet.forEach(bc => readyResiSet.delete(bc));
-
-                                    const roleResi = new Set<string>(Array.from(roleResiMap.keys()));
-                                    const ojolResiSet = new Set<string>(relevantRoleData.filter(d => (d.role || '').toUpperCase() === 'OJOL').map(d => (d.barcode || '').toString().trim().toUpperCase()).filter(Boolean));
-                                    const pendingResi = new Set<string>(
-                                       auditPendingData
-                                          .filter(d => d.status === 'PENDING' || d.menu_context === 'PENDING')
-                                          .map(d => (d.barcode || '').toString().trim().toUpperCase())
-                                          .filter(Boolean)
-                                    );
-
-                                    const crossDateResiMap = new Map<string, string>(); // barcode -> dateStr
-                                    const sameDayResiSet = new Set<string>();
-                                    const crossDateResiSet = new Set<string>();
-
-                                    adminResiArr.forEach(r => {
-                                       if (roleResiMap.has(r)) {
-                                          const scanItem = roleResiMap.get(r);
-                                          const ts = scanItem.timestamp || 0;
-                                          if (targetEndMs && ts > targetEndMs) {
-                                             const dt = new Date(ts);
-                                             const dateStr = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}`;
-                                             crossDateResiMap.set(r, dateStr);
-                                             crossDateResiSet.add(r);
-                                          } else {
-                                             sameDayResiSet.add(r);
-                                          }
-                                       }
-                                    });
-
-                                    const cancelMatchedSet = new Set<string>(adminResiArr.filter(r => cancelBarcodeSet.has(r)));
-                                    const readyMatchedSet = new Set<string>(adminResiArr.filter(r => readyResiSet.has(r)));
-
-                                    const belumDiscan = adminResiArr.filter(r => !roleResi.has(r) && !cancelBarcodeSet.has(r) && !readyResiSet.has(r));
-                                    const matchResi = adminResiArr.filter(r => roleResi.has(r));
-                                    const scanEkstra = Array.from(roleResi).filter(r => !adminResiSet.has(r));
-                                    const susulanRoleList = Array.from(roleResi).filter(r => !adminResiSet.has(r) && earlierAdminResiMap.has(r));
-                                    const pureEkstraList = Array.from(roleResi).filter(r => !adminResiSet.has(r) && !earlierAdminResiMap.has(r));
-
-                                    return (
-                                       <>
+                                 <>
                                           {/* Panel Stock Opname Pagi & Stock Out Carry-Over */}
                                           <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-4 mb-4 shadow-lg border border-indigo-500/30">
                                              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 border-b border-indigo-500/20 pb-3">
@@ -13424,8 +13472,6 @@ LXAD-1234567890`}
                                              </div>
                                           </div>
                                        </>
-                                    );
-                                 })()}
                                </div>
                             ) : null}
                          </div>
@@ -14584,118 +14630,18 @@ LXAD-1234567890`}
                                        </div>
                                     </div>
                                  ) : (
-                                    (() => {
-                                       const adminResiArr = Array.from(new Set(
-                                          adminImports.flatMap(item => item.barcodes || []).map(b => (b || '').toString().trim().toUpperCase()).filter(Boolean)
-                                       )) as string[];
-                                       const adminResiSet = new Set<string>(adminResiArr);
-
-                                    // Compute date threshold for cross-date scan detection
-                                    const targetEndMs = (() => {
-                                       if (!batchDateFilter) return Infinity;
-                                       const end = new Date(batchDateFilter + 'T23:59:59.999');
-                                       if (batchTimeFilter) {
-                                          const [h, m, s] = batchTimeFilter.split(':');
-                                          end.setHours(+h, +m, +(s || '0'), 999);
-                                       }
-                                       return end.getTime();
-                                    })();
-
-                                    // Filter auditRoleData to relevant scans for this target date:
-                                    // 1. Scans matching Admin barcodes for target date (whether scanned H+0 or H+1+)
-                                    // 2. Scans performed ON target date (timestamp <= targetEndMs)
-                                    const relevantRoleData = auditRoleData.filter(d => {
-                                       const bc = (d.barcode || '').toString().trim().toUpperCase();
-                                       if (!bc) return false;
-                                       const isAdminResi = adminResiSet.has(bc);
-                                       const isSameDayScan = !targetEndMs || (d.timestamp && d.timestamp <= targetEndMs);
-                                       return isAdminResi || isSameDayScan;
-                                    });
-
-                                    // Map barcode to latest scan record
-                                    const roleResiMap = new Map<string, any>();
-                                    relevantRoleData.forEach(d => {
-                                       const bc = (d.barcode || '').toString().trim().toUpperCase();
-                                       if (bc && (!roleResiMap.has(bc) || (d.timestamp && d.timestamp > roleResiMap.get(bc).timestamp))) {
-                                          roleResiMap.set(bc, d);
-                                       }
-                                    });
-
-                                    const gudangCancelResiSet = new Set<string>(
-                                       auditPendingData
-                                          .filter(d => d.status === 'CANCEL' || d.menu_context === 'CANCEL')
-                                          .map(d => (d.barcode || '').toString().trim().toUpperCase())
-                                          .filter(Boolean)
-                                    );
-
-                                    const cancelImportOnlySet = new Set<string>(cancelledOrders.map(o => (o.barcode || '').trim().toUpperCase()).filter(Boolean));
-                                    const cancelBarcodeSet = new Set<string>([
-                                       ...Array.from(cancelImportOnlySet),
-                                       ...Array.from(gudangCancelResiSet)
-                                    ]);
-                                    const readyResiSet = new Set<string>(
-                                       auditPendingData
-                                          .filter(d => d.status === 'READY' || d.menu_context === 'READY')
-                                          .map(d => (d.barcode || '').toString().trim().toUpperCase())
-                                          .filter(Boolean)
-                                    );
-                                    
-                                    // Prevent Overlap: If a resi is Cancelled or Ready, it shouldn't be counted as a valid scan in Terkirim/Susulan.
-                                    cancelBarcodeSet.forEach(bc => roleResiMap.delete(bc));
-                                    readyResiSet.forEach(bc => roleResiMap.delete(bc));
-
-                                    // Remove Cancelled barcodes from the Ready set to avoid double-counting
-                                    cancelBarcodeSet.forEach(bc => readyResiSet.delete(bc));
-
-                                    const roleResi = new Set<string>(Array.from(roleResiMap.keys()));
-                                    const ojolResiSet = new Set<string>(relevantRoleData.filter(d => (d.role || '').toUpperCase() === 'OJOL').map(d => (d.barcode || '').toString().trim().toUpperCase()).filter(Boolean));
-                                    const pendingResi = new Set<string>(
-                                       auditPendingData
-                                          .filter(d => d.status === 'PENDING' || d.menu_context === 'PENDING')
-                                          .map(d => (d.barcode || '').toString().trim().toUpperCase())
-                                          .filter(Boolean)
-                                    );
-
-                                    const crossDateResiMap = new Map<string, string>(); // barcode -> dateStr
-                                    const sameDayResiSet = new Set<string>();
-                                    const crossDateResiSet = new Set<string>();
-
-                                    adminResiArr.forEach(r => {
-                                       if (roleResiMap.has(r)) {
-                                          const scanItem = roleResiMap.get(r);
-                                          const ts = scanItem.timestamp || 0;
-                                          if (targetEndMs && ts > targetEndMs) {
-                                             const dt = new Date(ts);
-                                             const dateStr = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}`;
-                                             crossDateResiMap.set(r, dateStr);
-                                             crossDateResiSet.add(r);
-                                          } else {
-                                             sameDayResiSet.add(r);
-                                          }
-                                       }
-                                    });
-
-                                    const cancelMatchedSet = new Set<string>(adminResiArr.filter(r => cancelBarcodeSet.has(r)));
-                                    const readyMatchedSet = new Set<string>(adminResiArr.filter(r => readyResiSet.has(r)));
-                                    const belumDiscan = adminResiArr.filter(r => !roleResi.has(r) && !cancelBarcodeSet.has(r) && !readyResiSet.has(r));
-                                    const matchResi = adminResiArr.filter(r => roleResi.has(r));
-                                    const scanEkstra = Array.from(roleResi).filter(r => !adminResiSet.has(r));
-                                    const susulanRoleList = Array.from(roleResi).filter(r => !adminResiSet.has(r) && earlierAdminResiMap.has(r));
-                                    const pureEkstraList = Array.from(roleResi).filter(r => !adminResiSet.has(r) && !earlierAdminResiMap.has(r));
-
-                                     return (
-                                        <>
-                                           {/* ===== SECTION A: HEADER & CONTROLS ===== */}
-                                           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                                              <div className="flex items-center gap-3">
-                                                 <div className="w-12 h-12 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-2xl flex items-center justify-center border border-purple-200 dark:border-purple-700 shadow-inner shrink-0">
-                                                    <ShieldCheck size={24} />
-                                                 </div>
-                                                 <div>
-                                                    <h2 className="text-base sm:text-lg font-bold text-gray-800 dark:text-white">Cek Selisih Resi</h2>
-                                                    <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-0.5">Analisis komparatif antara data manifes admin dengan hasil scan tim lapangan</p>
-                                                 </div>
-                                              </div>
+                                    <>
+                                       {/* ===== SECTION A: HEADER & CONTROLS ===== */}
+                                       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                                          <div className="flex items-center gap-3">
+                                             <div className="w-12 h-12 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-2xl flex items-center justify-center border border-purple-200 dark:border-purple-700 shadow-inner shrink-0">
+                                                <ShieldCheck size={24} />
+                                             </div>
+                                             <div>
+                                                <h2 className="text-base sm:text-lg font-bold text-gray-800 dark:text-white">Cek Selisih Resi</h2>
+                                                <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-0.5">Analisis komparatif antara data manifes admin dengan hasil scan tim lapangan</p>
+                                             </div>
+                                          </div>
                                               <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
                                                  {lastAuditFetchTime && (
                                                     <span className="text-[11px] text-gray-500 dark:text-gray-400 font-semibold bg-gray-50 dark:bg-gray-850 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-700">
@@ -15491,8 +15437,7 @@ LXAD-1234567890`}
                                               </div>
                                            </div>
                                          </>
-                                      );
-                                   })())}
+                                 )}
                                </div>
                             ) : null}
                          </div>
