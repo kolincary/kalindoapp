@@ -2091,6 +2091,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [auditPendingData, setAuditPendingData] = useState<any[]>([]);
    const [isLoadingAuditData, setIsLoadingAuditData] = useState(false);
    const [isBackgroundRefreshingAudit, setIsBackgroundRefreshingAudit] = useState(false);
+   const auditRequestIdRef = useRef<number>(0);
    const earlierLookbackCacheRef = useRef<Map<string, { timestamp: number; map: Map<string, string> }>>(new Map());
    const [adminImports, setAdminImports] = useState<AdminBatchImport[]>([]);
    const [isLoadingAdminImports, setIsLoadingAdminImports] = useState(false);
@@ -2185,6 +2186,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
    });
    const [batchTimeFilter, setBatchTimeFilter] = useState('');
+   const isAuditBusy = (activeBatchTab === 'AUDIT_KOMPARASI' || activeBatchTab === 'REKAP_ADMIN') && (isLoadingAuditData || isBackgroundRefreshingAudit || isLoadingAdminImports);
    // --- MODAL STATE ---
    const [isBatchImportModalOpen, setIsBatchImportModalOpen] = useState(false);
    const [isExcelImportModalOpen, setIsExcelImportModalOpen] = useState(false);
@@ -4482,6 +4484,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          setLastAuditFetchTime(null);
          return;
       }
+      const curReqId = ++auditRequestIdRef.current;
       try {
          const getDates = () => {
             if (!batchDateFilter) return null;
@@ -4506,6 +4509,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          )) as string[];
 
          const fetchOptimizedData = async (role: string, fetchGudangAudit = false) => {
+            if (fetchGudangAudit) {
+               // Direct fast fetch for Gudang status scans (Ready / Cancel / Pending) without expensive count
+               const { data: gudangRows } = await supabase.from('scanned_items')
+                  .select('id, barcode, timestamp, status, menu_context, role')
+                  .or('status.eq.PENDING,menu_context.eq.PENDING,status.eq.READY,menu_context.eq.READY,status.eq.CANCEL,menu_context.eq.CANCEL')
+                  .gte('timestamp', d.startMs)
+                  .lte('timestamp', d.endMs)
+                  .limit(3000);
+               return gudangRows || [];
+            }
+
             const roleList = role === 'PICKER' 
                ? ['PICKER', 'Picker', 'OJOL', 'Ojol'] 
                : role === 'LOGISTIK'
@@ -4520,13 +4534,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                } else {
                   q = q.select('id, barcode, timestamp, status, menu_context, role');
                }
-               
-               if (fetchGudangAudit) {
-                  q = q.or('status.eq.PENDING,menu_context.eq.PENDING,status.eq.READY,menu_context.eq.READY,status.eq.CANCEL,menu_context.eq.CANCEL');
-               } else {
-                  if (roleList.length > 1) q = q.in('role', roleList);
-                  else q = q.eq('role', role);
-               }
+               if (roleList.length > 1) q = q.in('role', roleList);
+               else q = q.eq('role', role);
                
                q = q.gte('timestamp', d.startMs).lte('timestamp', d.endMs);
                if (!isCount) {
@@ -4535,15 +4544,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                return q;
             };
 
-            const { count: auditCount } = await buildAuditQuery(true);
-            let sameDayData: any[] = [];
+            const [{ count: auditCount }, firstPage] = await Promise.all([
+               buildAuditQuery(true),
+               buildAuditQuery(false).range(0, 999)
+            ]);
 
-            if (auditCount && auditCount > 0) {
+            let sameDayData: any[] = [...(firstPage.data || [])];
+
+            if (auditCount && auditCount > 1000) {
                const chunkSize = 1000;
                const totalPages = Math.ceil(auditCount / chunkSize);
-               const concurrency = 4;
+               const concurrency = 6;
 
-               for (let i = 0; i < totalPages; i += concurrency) {
+               for (let i = 1; i < totalPages; i += concurrency) {
                   const batchPromises = [];
                   for (let j = i; j < Math.min(i + concurrency, totalPages); j++) {
                      const from = j * chunkSize;
@@ -4577,17 +4590,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                      .select('id, barcode, timestamp, status, menu_context, role')
                      .in('barcode', chunk);
 
-                  if (fetchGudangAudit) {
-                     q = q.or('status.eq.PENDING,menu_context.eq.PENDING,status.eq.READY,menu_context.eq.READY,status.eq.CANCEL,menu_context.eq.CANCEL');
-                  } else {
-                     if (roleList.length > 1) q = q.in('role', roleList);
-                     else q = q.eq('role', role);
-                  }
+                  if (roleList.length > 1) q = q.in('role', roleList);
+                  else q = q.eq('role', role);
                   return q;
                });
 
-               for (let i = 0; i < queryBuilders.length; i += 10) {
-                  const results = await Promise.all(queryBuilders.slice(i, i + 10));
+               for (let i = 0; i < queryBuilders.length; i += 6) {
+                  const results = await Promise.all(queryBuilders.slice(i, i + 6));
                   results.forEach(res => {
                      if (res.data) crossDateData.push(...res.data);
                   });
@@ -4626,6 +4635,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          }
 
          const results = await Promise.all(fetchPromises);
+         if (curReqId !== auditRequestIdRef.current) return; // Stale request, discard!
+
          const roleData = results[0];
 
          // Update cache and state with fresh data
@@ -4643,35 +4654,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       } catch (err) {
          console.error("Failed to fetch audit data:", err);
       } finally {
-         setIsLoadingAuditData(false);
-         setIsBackgroundRefreshingAudit(false);
+         if (curReqId === auditRequestIdRef.current) {
+            setIsLoadingAuditData(false);
+            setIsBackgroundRefreshingAudit(false);
+         }
       }
    };
 
    const [adminBarcodesCache, setAdminBarcodesCache] = useState<string[]>([]);
    
-   // Fetch admin imports only when relevant triggers change (not auditRoleFilter)
+   // Single unified trigger: Fetch admin imports first, then fetch audit data immediately
    useEffect(() => {
-      const loadAdminData = async () => {
+      let isMounted = true;
+      const loadData = async () => {
          if ((activeView === 'BATCH_DATA' || activeView === 'BATCH_DATA_2' || activeView === 'BATCH_DATA_3')) {
             if (activeBatchTab === 'REKAP_ADMIN' || activeBatchTab === 'AUDIT_KOMPARASI') {
                const barcodes = await fetchAdminImports();
+               if (!isMounted) return;
                setAdminBarcodesCache(barcodes);
                if (activeBatchTab === 'AUDIT_KOMPARASI') {
                   fetchCancelledOrders();
+                  fetchAuditData(false, barcodes);
                }
             }
          }
       };
-      loadAdminData();
+      loadData();
+      return () => { isMounted = false; };
    }, [activeView, activeBatchTab, batchDateFilter, batchTimeFilter, adminImportsTrigger]);
 
-   // Fetch audit data when admin barcodes are ready OR when auditRoleFilter changes
+   // Trigger audit fetch ONLY when auditRoleFilter changes (Picker -> Checker, etc.)
    useEffect(() => {
       if ((activeView === 'BATCH_DATA' || activeView === 'BATCH_DATA_2' || activeView === 'BATCH_DATA_3') && activeBatchTab === 'AUDIT_KOMPARASI') {
-         fetchAuditData(false, adminBarcodesCache.length > 0 ? adminBarcodesCache : undefined);
+         if (adminBarcodesCache.length > 0) {
+            fetchAuditData(false, adminBarcodesCache);
+         }
       }
-   }, [auditRoleFilter, adminBarcodesCache, activeView, activeBatchTab]);
+   }, [auditRoleFilter]);
 
    // Realtime Live Stream Listener for Cek Selisih Resi (Auto update as scans occur)
    useEffect(() => {
@@ -11623,26 +11642,30 @@ if (filterPackingShift !== 'ALL') {
                                  <div className="flex items-center gap-4 mt-6 border-b border-gray-200 dark:border-gray-700">
                                     <button 
                                        onClick={() => setActiveBatchTab('ITEMS')} 
-                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors ${activeBatchTab === 'ITEMS' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                                       disabled={isAuditBusy}
+                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors ${activeBatchTab === 'ITEMS' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'} ${isAuditBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                     >
                                        Data Items
                                     </button>
                                     <button 
                                        onClick={() => setActiveBatchTab('SUMMARY')} 
-                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors ${activeBatchTab === 'SUMMARY' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                                       disabled={isAuditBusy}
+                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors ${activeBatchTab === 'SUMMARY' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'} ${isAuditBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                     >
                                        Ringkasan Progress
                                     </button>
                                     <button 
                                        onClick={() => setActiveBatchTab('REKAP_ADMIN')} 
-                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'REKAP_ADMIN' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                                       disabled={isAuditBusy}
+                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'REKAP_ADMIN' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'} ${isAuditBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                     >
                                        Rekap Admin Print
                                        <span className="text-[9px] bg-red-500 text-white px-1.5 py-0.5 rounded-full shadow-sm">NEW</span>
                                     </button>
                                     <button 
                                        onClick={() => setActiveBatchTab('AUDIT_KOMPARASI')} 
-                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'AUDIT_KOMPARASI' ? 'border-purple-600 text-purple-600 dark:text-purple-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                                       disabled={isAuditBusy}
+                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'AUDIT_KOMPARASI' ? 'border-purple-600 text-purple-600 dark:text-purple-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'} ${isAuditBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                     >
                                        Cek Selisih Resi
                                        <span className="text-[9px] bg-red-500 text-white px-1.5 py-0.5 rounded-full animate-pulse shadow-sm">NEW</span>
@@ -11650,7 +11673,8 @@ if (filterPackingShift !== 'ALL') {
 
                                     <button 
                                        onClick={() => setActiveBatchTab('MASS_SEARCH')} 
-                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'MASS_SEARCH' ? 'border-amber-600 text-amber-600 dark:text-amber-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                                       disabled={isAuditBusy}
+                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'MASS_SEARCH' ? 'border-amber-600 text-amber-600 dark:text-amber-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'} ${isAuditBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                     >
                                        Pencarian Massal
                                        <span className="text-[9px] bg-red-500 text-white px-1.5 py-0.5 rounded-full shadow-sm">NEW</span>
@@ -11912,27 +11936,37 @@ INV-789012`}
 
                                     {/* Date & Time Filters */}
                                     <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-between lg:justify-end">
-                                       <div className="relative flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 outline-none focus-within:ring-2 focus-within:ring-indigo-500 h-10 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 select-none overflow-hidden text-xs sm:text-sm">
+                                       <div className={`relative flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 outline-none focus-within:ring-2 focus-within:ring-indigo-500 h-10 transition-all select-none overflow-hidden text-xs sm:text-sm ${
+                                          isAuditBusy ? 'opacity-50 cursor-not-allowed pointer-events-none bg-gray-100 dark:bg-gray-800/60' : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                                       }`}>
                                           <CalendarIcon size={18} className="text-gray-400 shrink-0 pointer-events-none" />
                                           <input
                                              type="date"
+                                             disabled={isAuditBusy}
                                              value={batchDateFilter}
                                              onChange={(e) => {
+                                                if (isAuditBusy) return;
                                                 setBatchDateFilter(e.target.value);
                                                 setBatchPage(1);
                                              }}
-                                             className="bg-transparent text-gray-700 dark:text-gray-200 outline-none w-full h-full text-sm cursor-pointer select-none [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                                             className={`bg-transparent text-gray-700 dark:text-gray-200 outline-none w-full h-full text-sm select-none [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 ${
+                                                isAuditBusy ? 'cursor-not-allowed pointer-events-none' : 'cursor-pointer [&::-webkit-calendar-picker-indicator]:cursor-pointer'
+                                             }`}
                                           />
                                           {batchDateFilter && (
                                              <button
                                                 type="button"
+                                                disabled={isAuditBusy}
                                                 onClick={(e) => {
                                                    e.preventDefault();
                                                    e.stopPropagation();
+                                                   if (isAuditBusy) return;
                                                    setBatchDateFilter('');
                                                    setBatchPage(1);
                                                 }}
-                                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 ml-1 h-full flex items-center justify-center relative z-20 cursor-pointer"
+                                                className={`text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 ml-1 h-full flex items-center justify-center relative z-20 ${
+                                                   isAuditBusy ? 'cursor-not-allowed pointer-events-none opacity-40' : 'cursor-pointer'
+                                                }`}
                                                 title="Reset Filter Tanggal"
                                              >
                                                 <X size={16} />
@@ -11940,28 +11974,38 @@ INV-789012`}
                                           )}
                                        </div>
 
-                                       <div className="relative flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 outline-none focus-within:ring-2 focus-within:ring-indigo-500 h-10 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 select-none overflow-hidden text-xs sm:text-sm">
+                                       <div className={`relative flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 outline-none focus-within:ring-2 focus-within:ring-indigo-500 h-10 transition-all select-none overflow-hidden text-xs sm:text-sm ${
+                                          isAuditBusy ? 'opacity-50 cursor-not-allowed pointer-events-none bg-gray-100 dark:bg-gray-800/60' : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                                       }`}>
                                           <Clock size={18} className="text-gray-400 shrink-0 pointer-events-none" />
                                           <input
                                              type="time"
                                              step="1"
+                                             disabled={isAuditBusy}
                                              value={batchTimeFilter}
                                              onChange={(e) => {
+                                                if (isAuditBusy) return;
                                                 setBatchTimeFilter(e.target.value);
                                                 setBatchPage(1);
                                              }}
-                                             className="bg-transparent text-gray-700 dark:text-gray-200 outline-none w-full h-full text-sm cursor-pointer select-none [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                                             className={`bg-transparent text-gray-700 dark:text-gray-200 outline-none w-full h-full text-sm select-none [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 ${
+                                                isAuditBusy ? 'cursor-not-allowed pointer-events-none' : 'cursor-pointer [&::-webkit-calendar-picker-indicator]:cursor-pointer'
+                                             }`}
                                           />
                                           {batchTimeFilter && (
                                              <button
                                                 type="button"
+                                                disabled={isAuditBusy}
                                                 onClick={(e) => {
                                                    e.preventDefault();
                                                    e.stopPropagation();
+                                                   if (isAuditBusy) return;
                                                    setBatchTimeFilter('');
                                                    setBatchPage(1);
                                                 }}
-                                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 ml-1 h-full flex items-center justify-center relative z-20 cursor-pointer"
+                                                className={`text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 ml-1 h-full flex items-center justify-center relative z-20 ${
+                                                   isAuditBusy ? 'cursor-not-allowed pointer-events-none opacity-40' : 'cursor-pointer'
+                                                }`}
                                                 title="Reset Filter Jam"
                                              >
                                                 <X size={16} />
@@ -12690,17 +12734,18 @@ LXAD-1234567890`}
                                              )}
                                              <button 
                                                 onClick={() => fetchAuditData(true)} 
-                                                disabled={isLoadingAuditData} 
-                                                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                                                disabled={isAuditBusy} 
+                                                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none flex items-center gap-1.5 cursor-pointer"
                                                 title="Ambil data scan terbaru dari database (Bypass Cache)"
                                              >
-                                                <RefreshCw size={14} className={(isLoadingAuditData || isBackgroundRefreshingAudit) ? 'animate-spin' : ''} /> Refresh Data Live
+                                                <RefreshCw size={14} className={isAuditBusy ? 'animate-spin' : ''} /> {isAuditBusy ? 'Syncing...' : 'Refresh Data Live'}
                                              </button>
                                              <span className="text-gray-500 ml-2">Bandingkan dengan:</span>
                                              <select 
                                                 value={auditRoleFilter} 
+                                                disabled={isAuditBusy}
                                                 onChange={(e) => setAuditRoleFilter(e.target.value as any)}
-                                                className="bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 rounded-lg px-3 py-1.5 font-bold outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer"
+                                                className="bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 rounded-lg px-3 py-1.5 font-bold outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
                                              >
                                                 <option value="PICKER">Picker</option>
                                                 <option value="CHECKER">Checker</option>
@@ -13494,19 +13539,22 @@ LXAD-1234567890`}
                                     {currentAdmin?.username !== 'Tamu' && (<>
 <button 
                                        onClick={() => setActiveBatchTab('ITEMS')} 
-                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors ${activeBatchTab === 'ITEMS' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                                       disabled={isAuditBusy}
+                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors ${activeBatchTab === 'ITEMS' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'} ${isAuditBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                     >
                                        Data Items
                                     </button>
                                     <button 
                                        onClick={() => setActiveBatchTab('SUMMARY')} 
-                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors ${activeBatchTab === 'SUMMARY' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                                       disabled={isAuditBusy}
+                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors ${activeBatchTab === 'SUMMARY' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'} ${isAuditBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                     >
                                        Ringkasan Progress
                                     </button>
                                     <button 
                                        onClick={() => setActiveBatchTab('REKAP_ADMIN')} 
-                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'REKAP_ADMIN' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                                       disabled={isAuditBusy}
+                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'REKAP_ADMIN' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'} ${isAuditBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                     >
                                        Rekap Admin Print
                                        <span className="text-[9px] bg-red-500 text-white px-1.5 py-0.5 rounded-full shadow-sm">NEW</span>
@@ -13514,7 +13562,8 @@ LXAD-1234567890`}
 </>)}
                                     <button 
                                        onClick={() => setActiveBatchTab('AUDIT_KOMPARASI')} 
-                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'AUDIT_KOMPARASI' ? 'border-purple-600 text-purple-600 dark:text-purple-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                                       disabled={isAuditBusy}
+                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'AUDIT_KOMPARASI' ? 'border-purple-600 text-purple-600 dark:text-purple-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'} ${isAuditBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                     >
                                        Cek Selisih Resi
                                        <span className="text-[9px] bg-red-500 text-white px-1.5 py-0.5 rounded-full animate-pulse shadow-sm">NEW</span>
@@ -13523,7 +13572,8 @@ LXAD-1234567890`}
                                     {currentAdmin?.username !== 'Tamu' && (
 <button 
                                        onClick={() => setActiveBatchTab('MASS_SEARCH')} 
-                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'MASS_SEARCH' ? 'border-amber-600 text-amber-600 dark:text-amber-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+                                       disabled={isAuditBusy}
+                                       className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'MASS_SEARCH' ? 'border-amber-600 text-amber-600 dark:text-amber-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'} ${isAuditBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                     >
                                        Pencarian Massal
                                        <span className="text-[9px] bg-red-500 text-white px-1.5 py-0.5 rounded-full shadow-sm">NEW</span>
@@ -13786,27 +13836,37 @@ INV-789012`}
 
                                     {/* Date & Time Filters */}
                                     <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-between lg:justify-end">
-                                       <div className="relative flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 outline-none focus-within:ring-2 focus-within:ring-indigo-500 h-10 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 select-none overflow-hidden text-xs sm:text-sm">
+                                       <div className={`relative flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 outline-none focus-within:ring-2 focus-within:ring-indigo-500 h-10 transition-all select-none overflow-hidden text-xs sm:text-sm ${
+                                          isAuditBusy ? 'opacity-50 cursor-not-allowed pointer-events-none bg-gray-100 dark:bg-gray-800/60' : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                                       }`}>
                                           <CalendarIcon size={18} className="text-gray-400 shrink-0 pointer-events-none" />
                                           <input
                                              type="date"
+                                             disabled={isAuditBusy}
                                              value={batchDateFilter}
                                              onChange={(e) => {
+                                                if (isAuditBusy) return;
                                                 setBatchDateFilter(e.target.value);
                                                 setBatchPage(1);
                                              }}
-                                             className="bg-transparent text-gray-700 dark:text-gray-200 outline-none w-full h-full text-sm cursor-pointer select-none [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                                             className={`bg-transparent text-gray-700 dark:text-gray-200 outline-none w-full h-full text-sm select-none [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 ${
+                                                isAuditBusy ? 'cursor-not-allowed pointer-events-none' : 'cursor-pointer [&::-webkit-calendar-picker-indicator]:cursor-pointer'
+                                             }`}
                                           />
                                           {batchDateFilter && (
                                              <button
                                                 type="button"
+                                                disabled={isAuditBusy}
                                                 onClick={(e) => {
                                                    e.preventDefault();
                                                    e.stopPropagation();
+                                                   if (isAuditBusy) return;
                                                    setBatchDateFilter('');
                                                    setBatchPage(1);
                                                 }}
-                                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 ml-1 h-full flex items-center justify-center relative z-20 cursor-pointer"
+                                                className={`text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 ml-1 h-full flex items-center justify-center relative z-20 ${
+                                                   isAuditBusy ? 'cursor-not-allowed pointer-events-none opacity-40' : 'cursor-pointer'
+                                                }`}
                                                 title="Reset Filter Tanggal"
                                              >
                                                 <X size={16} />
@@ -13814,28 +13874,38 @@ INV-789012`}
                                           )}
                                        </div>
 
-                                       <div className="relative flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 outline-none focus-within:ring-2 focus-within:ring-indigo-500 h-10 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 select-none overflow-hidden text-xs sm:text-sm">
+                                       <div className={`relative flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 outline-none focus-within:ring-2 focus-within:ring-indigo-500 h-10 transition-all select-none overflow-hidden text-xs sm:text-sm ${
+                                          isAuditBusy ? 'opacity-50 cursor-not-allowed pointer-events-none bg-gray-100 dark:bg-gray-800/60' : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                                       }`}>
                                           <Clock size={18} className="text-gray-400 shrink-0 pointer-events-none" />
                                           <input
                                              type="time"
                                              step="1"
+                                             disabled={isAuditBusy}
                                              value={batchTimeFilter}
                                              onChange={(e) => {
+                                                if (isAuditBusy) return;
                                                 setBatchTimeFilter(e.target.value);
                                                 setBatchPage(1);
                                              }}
-                                             className="bg-transparent text-gray-700 dark:text-gray-200 outline-none w-full h-full text-sm cursor-pointer select-none [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                                             className={`bg-transparent text-gray-700 dark:text-gray-200 outline-none w-full h-full text-sm select-none [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0 ${
+                                                isAuditBusy ? 'cursor-not-allowed pointer-events-none' : 'cursor-pointer [&::-webkit-calendar-picker-indicator]:cursor-pointer'
+                                             }`}
                                           />
                                           {batchTimeFilter && (
                                              <button
                                                 type="button"
+                                                disabled={isAuditBusy}
                                                 onClick={(e) => {
                                                    e.preventDefault();
                                                    e.stopPropagation();
+                                                   if (isAuditBusy) return;
                                                    setBatchTimeFilter('');
                                                    setBatchPage(1);
                                                 }}
-                                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 ml-1 h-full flex items-center justify-center relative z-20 cursor-pointer"
+                                                className={`text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 ml-1 h-full flex items-center justify-center relative z-20 ${
+                                                   isAuditBusy ? 'cursor-not-allowed pointer-events-none opacity-40' : 'cursor-pointer'
+                                                }`}
                                                 title="Reset Filter Jam"
                                              >
                                                 <X size={16} />
@@ -14606,18 +14676,21 @@ LXAD-1234567890`}
                                              )}
                                              <button 
                                                 onClick={() => fetchAuditData(true)} 
-                                                disabled={isLoadingAuditData} 
-                                                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold text-xs sm:text-sm transition-all shadow-lg shadow-purple-100 dark:shadow-none h-11 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                                                disabled={isAuditBusy} 
+                                                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold text-xs sm:text-sm transition-all shadow-lg shadow-purple-100 dark:shadow-none h-11 flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
                                              >
-                                                <RefreshCw size={16} className={(isLoadingAuditData || isBackgroundRefreshingAudit) ? 'animate-spin' : ''} />
-                                                <span>{isBackgroundRefreshingAudit ? 'Syncing...' : 'Refresh Data'}</span>
+                                                <RefreshCw size={16} className={isAuditBusy ? 'animate-spin' : ''} />
+                                                <span>{isAuditBusy ? 'Syncing...' : 'Refresh Data'}</span>
                                              </button>
-                                             <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 h-11 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700">
+                                             <div className={`flex items-center gap-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 h-11 transition-colors ${
+                                                isAuditBusy ? 'opacity-50 cursor-not-allowed pointer-events-none' : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                                             }`}>
                                                 <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Bandingkan:</span>
                                                 <select 
                                                    value={auditRoleFilter} 
+                                                   disabled={isAuditBusy}
                                                    onChange={(e) => setAuditRoleFilter(e.target.value as any)}
-                                                   className="bg-transparent text-purple-700 dark:text-purple-400 font-bold text-xs sm:text-sm outline-none cursor-pointer"
+                                                   className="bg-transparent text-purple-700 dark:text-purple-400 font-bold text-xs sm:text-sm outline-none cursor-pointer disabled:cursor-not-allowed"
                                                 >
                                                    <option value="PICKER">Picker</option>
                                                    <option value="CHECKER">Checker</option>
