@@ -54,8 +54,12 @@ const getConfig = () => {
 let config = getConfig();
 
 export let supabase = createClient(config.url, config.key);
-export let supabaseNew = createClient(config.newUrl, config.newKey);
-export let supabaseSpecialOld = createClient(config.specialOldUrl, config.specialOldKey);
+export let supabaseNew = createClient(config.newUrl, config.newKey, {
+   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+});
+export let supabaseSpecialOld = createClient(config.specialOldUrl, config.specialOldKey, {
+   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+});
 
 /**
  * Re-initialize Supabase clients safely.
@@ -63,8 +67,12 @@ export let supabaseSpecialOld = createClient(config.specialOldUrl, config.specia
 export const refreshSupabaseClients = () => {
    config = getConfig();
    supabase = createClient(config.url, config.key);
-   supabaseNew = createClient(config.newUrl, config.newKey);
-   supabaseSpecialOld = createClient(config.specialOldUrl, config.specialOldKey);
+   supabaseNew = createClient(config.newUrl, config.newKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+   });
+   supabaseSpecialOld = createClient(config.specialOldUrl, config.specialOldKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+   });
 };
 
 /**
