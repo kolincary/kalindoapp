@@ -3873,8 +3873,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   }
                });
 
-               // Gunakan data Firestore jika Supabase 0 data ATAU data Firestore lebih lengkap (misal data lama sudah sebagian di-clear dari Supabase)
-               if (enrichedData.length === 0 || fsItems.length > enrichedData.length) {
+               // Gunakan data Firestore hanya jika Supabase 0 data (kosong) dan Firestore memiliki data
+               if ((count || 0) === 0 && fsItems.length > 0) {
                   if (filterPackingStaff && filterPackingStaff !== 'ALL') {
                      fsItems = fsItems.filter(item => item.employee_name === filterPackingStaff || item.admin_name === filterPackingStaff);
                   }
