@@ -272,7 +272,8 @@ export const NameSelectionModal: React.FC<NameSelectionModalProps> = ({ onSelect
       case UserRole.SORTIR_BATCH:
       case UserRole.CHECKER:
          return 'from-teal-600 to-teal-800';
-      case UserRole.PACKING: return 'from-orange-500 to-red-600';
+      case UserRole.PACKING:
+      case UserRole.PACKING_2: return 'from-orange-500 to-red-600';
       case UserRole.GUDANG: return 'from-emerald-600 to-teal-800';
       default: return 'from-blue-600 to-blue-800';
     }
@@ -286,7 +287,8 @@ export const NameSelectionModal: React.FC<NameSelectionModalProps> = ({ onSelect
       case UserRole.SORTIR_BATCH:
       case UserRole.CHECKER: 
          return 'bg-teal-600 dark:bg-teal-400';
-      case UserRole.PACKING: return 'bg-orange-500 dark:bg-orange-400';
+      case UserRole.PACKING:
+      case UserRole.PACKING_2: return 'bg-orange-500 dark:bg-orange-400';
       case UserRole.GUDANG: return 'bg-emerald-600 dark:bg-emerald-400';
       default: return 'bg-blue-600 dark:bg-blue-500';
     }
@@ -332,7 +334,7 @@ export const NameSelectionModal: React.FC<NameSelectionModalProps> = ({ onSelect
                 <img
                   src={
                     role === UserRole.ADMIN ? '/assets/admin-bg.webp' :
-                    role === UserRole.PACKING ? '/assets/packing-bg.webp' :
+                    role === UserRole.PACKING || role === UserRole.PACKING_2 ? '/assets/packing-bg.webp' :
                     role === UserRole.GUDANG ? '/assets/gudang-bg.webp' :
                     role === UserRole.OJOL ? '/assets/ojol-bg.webp' :
                     role === UserRole.LEADER ? '/assets/leader-bg.webp' :

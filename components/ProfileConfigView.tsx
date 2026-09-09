@@ -14,6 +14,7 @@ const ROLE_BG_MAP: Record<string, string> = {
   'SORTIR': '/assets/sortir-bg.webp',
   'SORTIR_BATCH': '/assets/sortir-bg.webp',
   'PACKING': '/assets/packing-bg.webp',
+  'PACKING_2': '/assets/packing-bg.webp',
   'GUDANG': '/assets/gudang-bg.webp',
   'OJOL': '/assets/ojol-bg.webp',
   'LEADER': '/assets/leader-bg.webp',

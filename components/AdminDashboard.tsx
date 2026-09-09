@@ -108,7 +108,10 @@ import {
    Truck,
    PackageCheck,
    BarChart3,
-   Calculator
+   Calculator,
+   TrendingUp,
+   Activity,
+   Award,
 } from 'lucide-react';
 
 // --- TYPES & CONSTANTS ---
@@ -119,7 +122,8 @@ const SIDEBAR_MENUS_LIST = [
   { id: 'ADMIN_NOTES', label: 'Catatan Shift & Urgent' },
   { id: 'SEARCH_ALL', label: 'Search Data' },
   { id: 'SEARCH_ALL_FIRESTORE', label: 'Search Data 2' },
-  { id: 'PACKING_DATA', label: 'Data Packing' },
+  { id: 'PACKING_DATA', label: 'Data Packing Copy' },
+  { id: 'PACKING_2_DATA', label: 'Data Packing' },
   { id: 'SORTIR_DATA', label: 'Data Sortir' },
   { id: 'PICKER_DATA', label: 'Data Picker' },
   { id: 'CHECKER_DATA', label: 'Data Checker' },
@@ -160,7 +164,7 @@ const SIDEBAR_MENUS_LIST = [
 
 // AdminView type moved to types.ts
 
-const DEFAULT_ROLES = [UserRole.PICKER, UserRole.SORTIR, UserRole.PACKING, UserRole.GUDANG, UserRole.OJOL, UserRole.LEADER, UserRole.PICKER_2, UserRole.CHECKER, UserRole.ADMIN];
+const DEFAULT_ROLES = [UserRole.PICKER, UserRole.SORTIR, UserRole.PACKING, UserRole.PACKING_2, UserRole.GUDANG, UserRole.OJOL, UserRole.LEADER, UserRole.PICKER_2, UserRole.CHECKER, UserRole.ADMIN];
 const DEFAULT_SHIFTS = ['Shift Suhel', 'Shift Ade'];
 
 // High-level accounts that should be hidden from regular "Logistik" admins
@@ -181,6 +185,7 @@ const ADMIN_PERMISSIONS_LIST = [
    { id: 'manage_employees', label: 'Manage Employees' },
    { id: 'manage_admins', label: 'Manage Admin Users' },
    { id: 'view_packing', label: 'View Packing Data' },
+   { id: 'view_packing_2', label: 'View Packing 2 Data' },
    { id: 'view_gudang', label: 'View Gudang Data' },
    { id: 'view_sortir', label: 'View Sortir Data' },
    { id: 'manage_symbols', label: 'Manage Forbidden Symbols' },
@@ -211,6 +216,7 @@ const VIEW_PERMISSIONS: Partial<Record<AdminView, string | string[]>> = {
    'EMPLOYEES': 'manage_employees',
    'ADMIN_MANAGEMENT': 'manage_admins',
    'PACKING_DATA': 'view_packing',
+   'PACKING_2_DATA': 'view_packing_2',
    'GUDANG_PENDING': 'view_gudang',
    'GUDANG_CANCEL': 'view_gudang',
    'GUDANG_READY': 'view_gudang',
@@ -574,6 +580,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (perms.includes('view_dashboard')) return 'DASHBOARD';
       if (perms.includes('manage_employees')) return 'EMPLOYEES';
       if (perms.includes('view_packing')) return 'PACKING_DATA';
+      if (perms.includes('view_packing_2')) return 'PACKING_2_DATA';
       if (perms.includes('view_picker')) return 'PICKER_DATA';
       if (perms.includes('view_checker')) return 'CHECKER_DATA';
       if (perms.includes('view_leader_2')) return 'LEADER_2_DATA';
@@ -728,7 +735,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (activeView === 'MENU_VISIBILITY') return 'Menu Visibility';
       if (activeView === 'TRACK_RESI') return 'Tracking Resi';
       if (activeView === 'LEADER_2_DATA') return 'Rekap Leader';
-      if (activeView === 'PACKING_DATA') return 'Data Packing';
+      if (activeView === 'PACKING_DATA') return 'Data Packing Copy';
+      if (activeView === 'PACKING_2_DATA') return 'Data Packing';
       if (activeView === 'SORTIR_DATA') return 'Data Sortir';
       if (activeView === 'PICKER_DATA') return 'Data Picker';
       if (activeView === 'LOGISTIK_DATA') return 'Data Logistik';
@@ -1231,6 +1239,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    // 6. Packing/Sortir View State
    const [packingData, setPackingData] = useState<any[]>([]);
    const [packingStaffList, setPackingStaffList] = useState<string[]>([]);
+   const [packing2OverallTotal, setPacking2OverallTotal] = useState<number>(0);
+   const [isHalfCountMode, setIsHalfCountMode] = useState(false);
 
    const [filterPackingShift, setFilterPackingShift] = useState<string>('ALL');
    const [filterPackingStaff, setFilterPackingStaff] = useState<string>('ALL');
@@ -2131,9 +2141,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [hiddenMenus, setHiddenMenus] = useState<string[]>(() => {
       try {
          const stored = localStorage.getItem('hidden_admin_menus');
-         return stored ? JSON.parse(stored) : [];
+         let list: string[] = stored ? JSON.parse(stored) : [];
+         // Default: Sembunyikan 'PACKING_DATA' (Data Packing Copy), dan pastikan 'PACKING_2_DATA' (Data Packing) tetap muncul
+         if (!list.includes('PACKING_DATA')) {
+            list.push('PACKING_DATA');
+         }
+         list = list.filter(m => m !== 'PACKING_2_DATA');
+         return list;
       } catch {
-         return [];
+         return ['PACKING_DATA'];
       }
    });
    const [strictResiMode, setStrictResiMode] = useState(false);
@@ -2568,7 +2584,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const hasPermission = useCallback((permId: string) => {
       if (!currentAdmin) return false;
       if (currentAdmin.id === 0) return true; // Super Admin Bypass
-      if (currentAdmin.username.toLowerCase() === 'admin' || currentAdmin.username.toLowerCase() === 'superdev') return true; // Name-based Super Admin Bypass
+      const usernameLower = (currentAdmin.username || '').toLowerCase();
+      if (usernameLower === 'admin' || usernameLower === 'superdev') return true; // Name-based Super Admin Bypass
+
+      // Izin akses Data Packing untuk role logistik dan admin2
+      if ((permId === 'view_packing_2' || permId === 'view_packing') && (usernameLower === 'logistik' || usernameLower === 'admin2')) {
+         return true;
+      }
+
       if (currentAdmin.permissions?.includes(permId)) return true;
       // Allow implicit access if they have related management permissions?
       // e.g. manage_employees implies view_employees? Not for now.
@@ -2974,6 +2997,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (activeView === 'PACKING_DATA') {
          setFilterPackingRole('PACKING');
          setPage(1);
+      } else if (activeView === 'PACKING_2_DATA') {
+         setFilterPackingRole('PACKING');
+         setPage(1);
       } else if (activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT') {
          setFilterPackingRole('GUDANG');
          setFilterPackingShift('ALL'); // Reset shift since UI is hidden
@@ -3005,7 +3031,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
 
       // Data Refresh on View Switch
-      if (['EMPLOYEES', 'PACKING_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_REPORT', 'SCAN_ALL'].includes(activeView)) fetchEmployees();
+      if (['EMPLOYEES', 'PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_REPORT', 'SCAN_ALL'].includes(activeView)) fetchEmployees();
       if (activeView === 'ADMIN_MANAGEMENT') fetchAdmins();
       if (activeView === 'ACCESS') fetchBlockedStatus();
       if (activeView === 'ACCESS') fetchBlockedStatus();
@@ -3252,7 +3278,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
    // 4. Data Fetching for Packing/Sortir
    useEffect(() => {
-      if (activeView === 'PACKING_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'SCAN_ALL') {
+      if (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'SCAN_ALL') {
          fetchPackingData(page);
       }
    }, [page, rowsPerPage, filterPackingStaff, filterPackingShift, packingSearch, filterDate, filterPackingRole, activeView, filterCancelOnly, filterPickerType]);
@@ -3285,7 +3311,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    // 5. Dynamic Staff List Logic (Data Driven + Shift Filter)
    // FIXED: Loop fetch to get ALL distinct staff names for the day to ensure dropdown is complete.
    useEffect(() => {
-      if (activeView !== 'PACKING_DATA' && activeView !== 'SORTIR_DATA' && (activeView !== 'PICKER_DATA' && activeView !== 'CHECKER_DATA') && activeView !== 'LEADER_2_DATA' && activeView !== 'GUDANG_PENDING' && activeView !== 'GUDANG_READY' && activeView !== 'GUDANG_CANCEL' && activeView !== 'GUDANG_REPORT' && activeView !== 'SCAN_ALL') return;
+      if (activeView !== 'PACKING_DATA' && activeView !== 'PACKING_2_DATA' && activeView !== 'SORTIR_DATA' && (activeView !== 'PICKER_DATA' && activeView !== 'CHECKER_DATA') && activeView !== 'LEADER_2_DATA' && activeView !== 'GUDANG_PENDING' && activeView !== 'GUDANG_READY' && activeView !== 'GUDANG_CANCEL' && activeView !== 'GUDANG_REPORT' && activeView !== 'SCAN_ALL') return;
 
       let isMounted = true;
 
@@ -3298,7 +3324,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             let targetRole = 'ALL';
             if (activeView === 'SORTIR_DATA') targetRole = 'SORTIR';
-            else if (activeView === 'PACKING_DATA') targetRole = 'PACKING';
+            else if (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') targetRole = 'PACKING';
             else if (activeView === 'PICKER_DATA') targetRole = 'PICKER';
             else if (activeView === 'LOGISTIK_DATA') targetRole = 'LOGISTIK';
             else if (activeView === 'CHECKER_DATA') targetRole = 'CHECKER';
@@ -3462,6 +3488,104 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return { total: totalRows, activeStaff: uniqueStaff.size, latest: latestTime };
    }, [packingData, totalRows]);
 
+   // Analytics khusus staff pada menu Data Packing 2
+   const packing2StaffAnalytics = useMemo(() => {
+      if (activeView !== 'PACKING_2_DATA' || filterPackingStaff === 'ALL') return null;
+
+      const staffName = filterPackingStaff;
+      const staffTotal = isHalfCountMode ? Math.ceil(totalRows / 2) : totalRows;
+      const effectiveOverallTotal = isHalfCountMode ? Math.ceil(packing2OverallTotal / 2) : packing2OverallTotal;
+      const overallTotal = effectiveOverallTotal > 0 ? effectiveOverallTotal : (staffTotal > 0 ? staffTotal : 1);
+      const percentage = Math.min(100, Math.round((staffTotal / overallTotal) * 100)) || 0;
+
+      // Hourly distribution dari packingData
+      const hourlyMap: Record<number, number> = {};
+      for (let h = 0; h < 24; h++) hourlyMap[h] = 0;
+
+      let latestItem: any = null;
+      let latestTimeStr = '-';
+
+      if (packingData.length > 0) {
+         latestItem = packingData[0];
+         try {
+            latestTimeStr = new Date(latestItem.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+         } catch (e) {
+            latestTimeStr = '-';
+         }
+
+         packingData.forEach(item => {
+            try {
+               const date = new Date(item.timestamp);
+               const hour = date.getHours();
+               if (!isNaN(hour) && hour >= 0 && hour < 24) {
+                  hourlyMap[hour] = (hourlyMap[hour] || 0) + 1;
+               }
+            } catch (e) {}
+         });
+      }
+
+      // Cari jam-jam aktif
+      const activeHourEntries = Object.entries(hourlyMap).map(([h, count]) => ({ hour: parseInt(h), count }));
+      const activeHoursWithScans = activeHourEntries.filter(e => e.count > 0);
+      const activeHoursCount = Math.max(1, activeHoursWithScans.length);
+      
+      // Rata-rata scan per jam aktif
+      const avgPerHour = Math.round(staffTotal / activeHoursCount) || 0;
+
+      // Tentukan rentang jam untuk grafik (misal 07:00 - 21:00 atau rentang data aktif)
+      let minHour = 8;
+      let maxHour = 20;
+      if (activeHoursWithScans.length > 0) {
+         const minActive = Math.min(...activeHoursWithScans.map(e => e.hour));
+         const maxActive = Math.max(...activeHoursWithScans.map(e => e.hour));
+         minHour = Math.max(0, Math.min(minHour, minActive));
+         maxHour = Math.min(23, Math.max(maxHour, maxActive));
+      }
+
+      const hourlyChartData: { hour: string; rawHour: number; count: number }[] = [];
+      let maxCountInHour = 1;
+      for (let h = minHour; h <= maxHour; h++) {
+         const count = hourlyMap[h] || 0;
+         if (count > maxCountInHour) maxCountInHour = count;
+         hourlyChartData.push({
+            hour: `${h.toString().padStart(2, '0')}:00`,
+            rawHour: h,
+            count
+         });
+      }
+
+      // Status produktivitas
+      let speedTag = { label: '🟢 Normal', color: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 border-emerald-500/20' };
+      if (avgPerHour >= 120) {
+         speedTag = { label: '⚡ Super Cepat', color: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 border-amber-500/20' };
+      } else if (avgPerHour >= 60) {
+         speedTag = { label: '🔥 Sangat Produktif', color: 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10 border-indigo-500/20' };
+      }
+
+      // Shift staff
+      const staffEmployee = employees.find(e => e.name === staffName);
+      const shift = staffEmployee?.shift || (packingData[0]?.shift) || 'Shift 1';
+
+      // Inisial avatar
+      const initials = staffName.split(' ').map((n: string) => n[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || 'ST';
+
+      return {
+         staffName,
+         initials,
+         shift,
+         staffTotal,
+         overallTotal,
+         percentage,
+         avgPerHour,
+         activeHoursCount,
+         hourlyChartData,
+         maxCountInHour,
+         speedTag,
+         latestItem,
+         latestTimeStr
+      };
+   }, [activeView, filterPackingStaff, totalRows, packing2OverallTotal, packingData, employees, isHalfCountMode]);
+
    // Access Table Visible Roles Logic
    const accessTableVisibleRoles = useMemo(() => {
       if (isSuperAdmin) return availableRoles;
@@ -3469,7 +3593,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return ['SORTIR', 'PACKING', 'PICKER', 'CHECKER'];
    }, [availableRoles, isSuperAdmin]);
 
-   const [isHalfCountMode, setIsHalfCountMode] = useState(false);
 
    // --- HANDLERS ---
 
@@ -3660,7 +3783,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       query = query.gte('timestamp', start.getTime()).lte('timestamp', end.getTime());
 
       let effectiveRole = filterPackingRole;
-      if (targetView === 'PACKING_DATA') effectiveRole = 'PACKING';
+      if (targetView === 'PACKING_DATA' || targetView === 'PACKING_2_DATA') effectiveRole = 'PACKING';
       else if (targetView === 'GUDANG_PENDING' || targetView === 'GUDANG_READY' || targetView === 'GUDANG_CANCEL' || targetView === 'GUDANG_REPORT' || targetView === 'GUDANG_BUNDLING') effectiveRole = 'GUDANG';
       else if (targetView === 'SORTIR_DATA') effectiveRole = 'SORTIR';
       else if (targetView === 'PICKER_DATA') effectiveRole = 'PICKER';
@@ -3776,6 +3899,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const fetchPackingData = async (targetPage = page) => {
       // Permission guards for different views
       if (activeView === 'PACKING_DATA' && !hasPermission('view_packing')) return;
+      if (activeView === 'PACKING_2_DATA' && !hasPermission('view_packing_2')) return;
       if ((activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING') && !hasPermission('view_gudang')) return;
       if (activeView === 'SORTIR_DATA' && !hasPermission('view_sortir') && !hasPermission('view_packing')) return;
       if ((activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') && !hasPermission('view_picker')) return;
@@ -3863,9 +3987,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             };
          });
 
-         // FALLBACK / SINKRONISASI FIRESTORE KHUSUS MENU PACKING_DATA JIKA SUPABASE KOSONG ATAU DATA FIRESTORE LEBIH LENGKAP
-         if (activeView === 'PACKING_DATA') {
+         // FALLBACK / SINKRONISASI FIRESTORE KHUSUS MENU PACKING_DATA & PACKING_2_DATA JIKA SUPABASE KOSONG ATAU DATA FIRESTORE LEBIH LENGKAP
+         if (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') {
             try {
+               const targetRoleName = 'PACKING';
                const targetDateStr = canManageDate ? filterDate : getTodayString();
                const startMs = new Date(`${targetDateStr}T00:00:00`).getTime();
                const endMs = new Date(`${targetDateStr}T23:59:59.999`).getTime();
@@ -3883,8 +4008,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                fsSnap.docs.forEach(docSnap => {
                   const d = docSnap.data() as Record<string, any>;
                   const r = (d.role || '').toUpperCase();
-                  // Murni hanya data ber-role PACKING
-                  if (r === 'PACKING' || r === 'PACKING_DATA' || r.includes('PACK')) {
+                  // Role matching for Packing & Packing 2
+                  if (targetRoleName === 'PACKING_2' ? (r === 'PACKING_2' || r === 'PACKING_2_DATA') : (r === 'PACKING' || r === 'PACKING_DATA' || r.includes('PACK'))) {
                      fsItems.push({
                         id: docSnap.id,
                         ...d,
@@ -6847,6 +6972,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             targetRole = 'OJOL';
          } else {
             if (deleteTargetView === 'PACKING_DATA') targetRole = 'PACKING';
+            else if (deleteTargetView === 'PACKING_2_DATA') targetRole = 'PACKING';
             else if (deleteTargetView === 'SORTIR_DATA') targetRole = 'SORTIR';
             else if (deleteTargetView === 'PICKER_DATA') targetRole = 'PICKER';
             else if (deleteTargetView === 'LOGISTIK_DATA') targetRole = 'LOGISTIK';
@@ -6929,7 +7055,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          if (countError) throw countError;
          let totalRecords = count || 0;
          
-         if (totalRecords === 0 && targetView === 'PACKING_DATA') {
+         if (totalRecords === 0 && (targetView === 'PACKING_DATA' || targetView === 'PACKING_2_DATA')) {
             try {
                const startMs = new Date(`${exportStartDate}T00:00:00`).getTime();
                const endMs = new Date(`${exportEndDate}T23:59:59.999`).getTime();
@@ -7646,6 +7772,7 @@ if (filterPackingShift !== 'ALL') {
                if (massSearchRoles.includes('PICKER')) targetDbRoles.push('PICKER', 'PICKER_2');
                if (massSearchRoles.includes('CHECKER')) targetDbRoles.push('CHECKER');
                if (massSearchRoles.includes('PACKING')) targetDbRoles.push('PACKING');
+               if (massSearchRoles.includes('PACKING_2')) targetDbRoles.push('PACKING_2');
                if (massSearchRoles.includes('LOGISTIK')) targetDbRoles.push('LOGISTIK', 'OJOL', 'SORTIR');
 
                if (targetDbRoles.length > 0) {
@@ -8806,9 +8933,10 @@ if (filterPackingShift !== 'ALL') {
                )}
 
                {/* 2. DATA LOGISTIK */}
-               {(hasPermission('view_packing') || hasPermission('view_sortir') || hasPermission('view_picker') || hasPermission('view_checker') || hasPermission('view_ojol') || hasPermission('view_scan_all') || hasPermission('view_logistik')) && (
+               {(hasPermission('view_packing') || hasPermission('view_packing_2') || hasPermission('view_sortir') || hasPermission('view_picker') || hasPermission('view_checker') || hasPermission('view_ojol') || hasPermission('view_scan_all') || hasPermission('view_logistik')) && (
                   <SidebarSection title="Data Logistik">
-                     <SidebarItem hiddenMenus={hiddenMenus} view="PACKING_DATA" icon={Package} label="Data Packing" requiredPerm="view_packing" activeView={activeView === 'CHECK_INVOICE' ? 'PACKING_DATA' : activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
+                     <SidebarItem hiddenMenus={hiddenMenus} view="PACKING_DATA" icon={Package} label="Data Packing Copy" requiredPerm="view_packing" activeView={activeView === 'CHECK_INVOICE' ? 'PACKING_DATA' : activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
+                     <SidebarItem hiddenMenus={hiddenMenus} view="PACKING_2_DATA" icon={Package} label="Data Packing" requiredPerm="view_packing_2" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="SORTIR_DATA" icon={Shuffle} label="Data Sortir" requiredPerm="view_sortir" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="PICKER_DATA" icon={ScanLine} label="Data Picker" requiredPerm="view_picker" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                        <SidebarItem hiddenMenus={hiddenMenus} view="LOGISTIK_DATA" icon={Truck} label="Data Logistik" requiredPerm="view_logistik" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
@@ -9008,11 +9136,11 @@ if (filterPackingShift !== 'ALL') {
                      )}
 
                      {/* TOOLBAR 1: Packing, Sortir, Scan All, Ojol, Failed Scans, Gudang */}
-                     {(activeView === 'PACKING_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING' || activeView === 'SCAN_ALL' || activeView === 'OJOL_DATA' || activeView === 'FAILED_SCANS') && (
+                     {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING' || activeView === 'SCAN_ALL' || activeView === 'OJOL_DATA' || activeView === 'FAILED_SCANS') && (
                         <div className="p-3 sm:p-4 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200/80 dark:border-gray-800 shrink-0 w-full max-w-[100vw] shadow-2xs">
 
                            {/* REFACTORED TOOLBAR FOR PACKING, SORTIR, PICKER, OJOL, SCAN_ALL, GUDANG (UNIFIED GRID) */}
-                           {(['PACKING_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA', 'SCAN_ALL', 'GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_REPORT', 'GUDANG_BUNDLING'].includes(activeView)) ? (
+                           {(['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA', 'SCAN_ALL', 'GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_REPORT', 'GUDANG_BUNDLING'].includes(activeView)) ? (
                               <div className="flex flex-col gap-2.5 w-full">
                                  {/* ROW 1: Date, Cancel, Search, Role, Shift */}
                                  <div className="grid grid-cols-12 gap-2.5 items-center">
@@ -9050,7 +9178,7 @@ if (filterPackingShift !== 'ALL') {
                                     </div>
 
                                     {/* Cancel Filter (2 cols) - PACKING, SORTIR, PICKER, CHECKER, OJOL */}
-                                    {['PACKING_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA'].includes(activeView) && (
+                                    {['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA'].includes(activeView) && (
                                        <div className="col-span-12 sm:col-span-6 md:col-span-3 lg:col-span-2 h-10">
                                           <div
                                              className={`flex items-center gap-2.5 h-full px-3 rounded-xl border shadow-2xs cursor-pointer select-none transition-all w-full ${filterCancelOnly ? 'bg-red-50/90 border-red-200/90 text-red-700 dark:bg-red-950/40 dark:border-red-800/80 dark:text-red-300' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700/80 hover:bg-gray-50 dark:hover:bg-gray-750 text-gray-600 dark:text-gray-300'}`}
@@ -9095,7 +9223,7 @@ if (filterPackingShift !== 'ALL') {
                                     </div>
 
                                     {/* Shift Filter (2 cols) - PACKING, SORTIR, PICKER, OJOL (NOT SCAN_ALL HERE) */}
-                                    {['PACKING_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA'].includes(activeView) && (
+                                    {['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA'].includes(activeView) && (
                                        <div className="col-span-12 sm:col-span-6 md:col-span-3 lg:col-span-2 relative h-10">
                                           <Filter size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                                           <select
@@ -9136,7 +9264,7 @@ if (filterPackingShift !== 'ALL') {
                                     )}
 
                                     {/* Staff Filter (2 or 3 cols) - PACKING, SORTIR, PICKER, CHECKER, OJOL, SCAN_ALL, GUDANG_REPORT */}
-                                    {['PACKING_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA', 'SCAN_ALL', 'GUDANG_REPORT'].includes(activeView) && (
+                                    {['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA', 'SCAN_ALL', 'GUDANG_REPORT'].includes(activeView) && (
                                        <div className={`col-span-6 sm:col-span-4 md:col-span-3 ${activeView === 'SCAN_ALL' ? 'lg:col-span-3' : 'lg:col-span-2'} relative h-10`}>
                                           <Users size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                                           <select
@@ -9169,7 +9297,7 @@ if (filterPackingShift !== 'ALL') {
                                     )}
 
                                     {/* 50% Cut (2 cols) - PACKING ONLY */}
-                                    {activeView === 'PACKING_DATA' && (
+                                    {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') && (
                                        <button
                                           onClick={() => setIsHalfCountMode(!isHalfCountMode)}
                                           className={`col-span-6 sm:col-span-4 md:col-span-3 lg:col-span-2 h-10 px-2 flex items-center justify-center gap-1.5 rounded-xl border transition-all duration-200 active:scale-95 text-xs font-bold shadow-2xs w-full ${isHalfCountMode ? 'bg-gradient-to-r from-red-500 to-rose-600 border-red-600 text-white shadow-sm shadow-red-500/25' : 'bg-red-50/80 border-red-200/80 text-red-600 hover:bg-red-100/80 dark:bg-red-950/30 dark:border-red-900/50 dark:text-red-400 dark:hover:bg-red-900/40'}`}
@@ -9180,7 +9308,7 @@ if (filterPackingShift !== 'ALL') {
                                     )}
 
                                     {/* Copy Options / Salin Barcode */}
-                                    {['PACKING_DATA', 'GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_BUNDLING'].includes(activeView) && currentAdmin?.username !== 'logistik' && (
+                                    {['PACKING_DATA', 'PACKING_2_DATA', 'GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_BUNDLING'].includes(activeView) && currentAdmin?.username !== 'logistik' && (
                                        <div className={`col-span-6 sm:col-span-4 md:col-span-3 ${activeView.startsWith('GUDANG_') ? 'lg:col-span-3' : 'lg:col-span-2'} h-10 w-full`}>
                                           <button
                                              onClick={() => handleCopyAllBarcodes(false, ['GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_REPORT', 'GUDANG_BUNDLING'].includes(activeView))}
@@ -9278,7 +9406,7 @@ if (filterPackingShift !== 'ALL') {
                                     )}
 
                                     {/* NEW: Cancel Filter Toggle */}
-                                    {(activeView === 'PACKING_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || activeView === 'OJOL_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA') && (
+                                    {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || activeView === 'OJOL_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA') && (
                                        <div className="flex items-center gap-2 bg-white dark:bg-gray-800 h-11 px-3 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm cursor-pointer select-none" onClick={() => setFilterCancelOnly(!filterCancelOnly)}>
                                           <input
                                              type="checkbox"
@@ -9516,7 +9644,7 @@ if (filterPackingShift !== 'ALL') {
                                           </>
                                        )}
 
-                                       {activeView === 'PACKING_DATA' && (
+                                       {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') && (
                                           <button
                                              onClick={() => setIsHalfCountMode(!isHalfCountMode)}
                                              className={`h-11 px-4 flex items-center justify-center gap-2 rounded-xl border transition-all active:scale-95 text-sm font-bold shadow-sm ${isHalfCountMode ? 'bg-red-600 border-red-600 text-white shadow-red-500/30' : 'bg-red-50 border-red-100 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/30'}`}
@@ -9527,10 +9655,10 @@ if (filterPackingShift !== 'ALL') {
                                        )}
 
                                        {/* Buttons for Packing and Gudang */}
-                                       {(activeView === 'PACKING_DATA' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING') && currentAdmin?.username !== 'logistik' && (
+                                       {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING') && currentAdmin?.username !== 'logistik' && (
                                           <>
                                              {/* Check Invoice - PACKING ONLY */}
-                                             {activeView === 'PACKING_DATA' && (
+                                             {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') && (
                                                 <button
                                                    onClick={() => {
                                                       const url = new URL(window.location.href);
@@ -9556,7 +9684,7 @@ if (filterPackingShift !== 'ALL') {
                                                 </button>
 
                                                 {/* Salin + Staff - PACKING ONLY (DevMode Secret) */}
-                                                {activeView === 'PACKING_DATA' && showSecretMenu && (
+                                                {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') && showSecretMenu && (
                                                    <button
                                                       onClick={() => handleCopyAllBarcodes(true, true)}
                                                       disabled={isCopyingBarcodes}
@@ -9593,7 +9721,7 @@ if (filterPackingShift !== 'ALL') {
                      )}
 
                      {/* TOOLBAR 2: Other Views (Employees, Access, Failed Scans, etc) */}
-                     {(activeView !== 'PACKING_DATA' && activeView !== 'SORTIR_DATA' && (activeView !== 'PICKER_DATA' && activeView !== 'CHECKER_DATA') && activeView !== 'LEADER_2_DATA' && activeView !== 'SCAN_ALL' && activeView !== 'SYMBOLS' && activeView !== 'OJOL_DATA' && activeView !== 'GUDANG_PENDING' && activeView !== 'GUDANG_REPORT' && activeView !== 'GUDANG_BUNDLING') && (
+                     {(activeView !== 'PACKING_DATA' && activeView !== 'PACKING_2_DATA' && activeView !== 'SORTIR_DATA' && (activeView !== 'PICKER_DATA' && activeView !== 'CHECKER_DATA') && activeView !== 'LEADER_2_DATA' && activeView !== 'SCAN_ALL' && activeView !== 'SYMBOLS' && activeView !== 'OJOL_DATA' && activeView !== 'GUDANG_PENDING' && activeView !== 'GUDANG_REPORT' && activeView !== 'GUDANG_BUNDLING') && (
                         <div className="px-6 py-4 flex flex-col xl:flex-row gap-4 justify-between items-start xl:items-center">
                            {activeView === 'EMPLOYEES' ? (
                               <div className="flex flex-wrap gap-2 items-center w-full xl:w-auto">
@@ -9913,7 +10041,8 @@ if (filterPackingShift !== 'ALL') {
 
                               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                                  {[
-                                    { id: 'PACKING_DATA', label: 'Data Packing', icon: Package, color: 'blue' },
+                                    { id: 'PACKING_DATA', label: 'Data Packing Copy', icon: Package, color: 'blue' },
+                                     { id: 'PACKING_2_DATA', label: 'Data Packing', icon: Package, color: 'blue' },
                                     { id: 'SORTIR_DATA', label: 'Data Sortir', icon: Layers, color: 'purple' },
                                     { id: 'PICKER_DATA', label: 'Data Picker', icon: ScanLine, color: 'cyan' },
                                     { id: 'CHECKER_DATA', label: 'Data Checker', icon: CheckSquare, color: 'pink' },
@@ -10251,6 +10380,7 @@ if (filterPackingShift !== 'ALL') {
                                              >
                                                 <option value="SEMUA">SEMUA ROLE</option>
                                                 <option value="PACKING">PACKING</option>
+                                                <option value="PACKING_2">PACKING 2</option>
                                                 <option value="PICKER">PICKER</option>
                                                 <option value="SORTIR">SORTIR</option>
                                                 <option value="CHECKER">CHECKER</option>
@@ -10386,7 +10516,7 @@ if (filterPackingShift !== 'ALL') {
                                                       {Object.entries(syncRoleBreakdownFs).map(([roleName, count]) => (
                                                          <div key={roleName} className="bg-black/60 p-2 rounded-lg border border-gray-800 text-center">
                                                             <span className="text-[10px] text-gray-400 font-bold block truncate">
-                                                               {roleName === 'PACKING' && '📦 '}
+                                                               {(roleName === 'PACKING' || roleName === 'PACKING_2') && '📦 '}
                                                                {roleName === 'CHECKER' && '📋 '}
                                                                {roleName === 'PICKER' && '🛒 '}
                                                                {roleName === 'OJOL' && '🛵 '}
@@ -10801,7 +10931,8 @@ if (filterPackingShift !== 'ALL') {
                                        { view: 'ADMIN_NOTES', label: 'Catatan Shift & Urgent' },
                                        { view: 'SEARCH_ALL', label: 'Search Data' },
                                        { view: 'SEARCH_ALL_FIRESTORE', label: 'Search Data 2' },
-                                       { view: 'PACKING_DATA', label: 'Data Packing' },
+                                       { view: 'PACKING_DATA', label: 'Data Packing Copy' },
+                                        { view: 'PACKING_2_DATA', label: 'Data Packing' },
                                        { view: 'SORTIR_DATA', label: 'Data Sortir' },
                                        { view: 'PICKER_DATA', label: 'Data Picker' },
                                        { view: 'LOGISTIK_DATA', label: 'Data Logistik' },
@@ -11184,8 +11315,28 @@ if (filterPackingShift !== 'ALL') {
                            </div>
                         )}
 
-                        {(activeView === 'PACKING_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING' || activeView === 'SCAN_ALL') && (
-                           <div className="w-full h-full flex flex-col bg-white dark:bg-gray-800">
+                        {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING' || activeView === 'SCAN_ALL') && (
+                           <div className={`w-full h-full flex ${activeView === 'PACKING_2_DATA' && filterPackingStaff !== 'ALL' ? 'flex-col lg:flex-row' : 'flex-col'} bg-white dark:bg-gray-800 overflow-hidden`}>
+                              {/* Left / Main Table Area */}
+                              <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
+                                 {/* Banner Info Filter Staff Aktif (Khusus PACKING_2_DATA) */}
+                                 {activeView === 'PACKING_2_DATA' && filterPackingStaff !== 'ALL' && (
+                                    <div className="px-4 py-2.5 bg-gradient-to-r from-blue-600/10 via-indigo-600/10 to-purple-600/10 dark:from-blue-500/15 dark:via-indigo-500/15 dark:to-purple-500/15 border-b border-blue-200/60 dark:border-blue-800/60 flex items-center justify-between shrink-0">
+                                       <div className="flex items-center gap-2 text-xs font-bold text-blue-700 dark:text-blue-300">
+                                          <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-ping"></span>
+                                          <span className="flex items-center gap-1.5">
+                                             <Activity size={14} className="text-blue-600 dark:text-blue-400" />
+                                             Mode Rincian Staff: <span className="font-extrabold text-blue-900 dark:text-blue-100 bg-blue-100 dark:bg-blue-900/50 px-2 py-0.5 rounded-md">{filterPackingStaff}</span>
+                                          </span>
+                                       </div>
+                                       <button 
+                                          onClick={() => setFilterPackingStaff('ALL')}
+                                          className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-750 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 shadow-2xs transition-all hover:scale-105 cursor-pointer"
+                                       >
+                                          <X size={12} /> Tampilkan Semua Staff
+                                       </button>
+                                    </div>
+                                 )}
                               {/* Dashboard Stats */}
                               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 p-3.5 sm:p-4 bg-gray-50/70 dark:bg-gray-900/60 border-b border-gray-200/80 dark:border-gray-800 shrink-0">
                                  <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-gray-800 border border-gray-200/70 dark:border-gray-700/60 shadow-2xs hover:shadow-md transition-all duration-200 flex items-center justify-between group">
@@ -11194,10 +11345,10 @@ if (filterPackingShift !== 'ALL') {
                                           <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span> Total Scans
                                        </div>
                                        <div className="flex items-baseline gap-2">
-                                          <h3 className={`text-2xl sm:text-3xl font-black font-mono tracking-tight ${isHalfCountMode && activeView === 'PACKING_DATA' ? 'text-red-600 dark:text-red-500' : 'text-gray-900 dark:text-white'}`}>
-                                             {(isHalfCountMode && activeView === 'PACKING_DATA' ? Math.ceil(packingStats.total / 2) : packingStats.total).toLocaleString()}
+                                          <h3 className={`text-2xl sm:text-3xl font-black font-mono tracking-tight ${isHalfCountMode && (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') ? 'text-red-600 dark:text-red-500' : 'text-gray-900 dark:text-white'}`}>
+                                             {(isHalfCountMode && (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') ? Math.ceil(packingStats.total / 2) : packingStats.total).toLocaleString()}
                                           </h3>
-                                          {isHalfCountMode && activeView === 'PACKING_DATA' && (
+                                          {isHalfCountMode && (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') && (
                                              <span className="text-xs font-bold text-gray-400 line-through decoration-red-500/60">{packingStats.total}</span>
                                           )}
                                        </div>
@@ -11393,7 +11544,7 @@ if (filterPackingShift !== 'ALL') {
                                                    <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                                       <div className="flex items-center gap-2">
                                                          <span className="min-w-[180px]">Barcode Data</span>
-                                                         {((activeView === 'PACKING_DATA' && filterPackingStaff !== 'ALL') || activeView === 'GUDANG_REPORT') && (
+                                                         {(((activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') && filterPackingStaff !== 'ALL') || activeView === 'GUDANG_REPORT') && (
                                                             <div className="flex gap-2">
                                                                {activeView === 'GUDANG_REPORT' && (
                                                                   <button
@@ -11464,7 +11615,7 @@ if (filterPackingShift !== 'ALL') {
                                                    {activeView === 'LEADER_2_DATA' && (
                                                       <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[160px]">STAFF</th>
                                                    )}
-                                                   {!['PACKING_DATA', 'SORTIR_DATA', 'OJOL_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'GUDANG_REPORT'].includes(activeView) && (
+                                                   {!['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'OJOL_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'GUDANG_REPORT'].includes(activeView) && (
                                                       <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">Status</th>
                                                    )}
                                                 </tr>
@@ -11538,7 +11689,7 @@ if (filterPackingShift !== 'ALL') {
                                                             </td>
                                                          ) : activeView !== 'GUDANG_REPORT' ? (
                                                             <td className="px-4 py-3.5 text-center">
-                                                               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase border ${item.role === 'PACKING' ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-950/50 dark:text-emerald-400 dark:border-emerald-800' : item.role === 'SORTIR' ? 'bg-purple-50 text-purple-700 border-purple-200/80 dark:bg-purple-950/50 dark:text-purple-400 dark:border-purple-800' : item.role === 'GUDANG' ? 'bg-amber-50 text-amber-700 border-amber-200/80 dark:bg-amber-950/50 dark:text-amber-400 dark:border-amber-800' : item.role === 'PICKER' ? 'bg-blue-50 text-blue-700 border-blue-200/80 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-800' : item.role === 'CHECKER' ? 'bg-teal-50 text-teal-700 border-teal-200/80 dark:bg-teal-950/50 dark:text-teal-400 dark:border-teal-800' : 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300'}`}>
+                                                               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase border ${(item.role === 'PACKING' || item.role === 'PACKING_2') ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-950/50 dark:text-emerald-400 dark:border-emerald-800' : item.role === 'SORTIR' ? 'bg-purple-50 text-purple-700 border-purple-200/80 dark:bg-purple-950/50 dark:text-purple-400 dark:border-purple-800' : item.role === 'GUDANG' ? 'bg-amber-50 text-amber-700 border-amber-200/80 dark:bg-amber-950/50 dark:text-amber-400 dark:border-amber-800' : item.role === 'PICKER' ? 'bg-blue-50 text-blue-700 border-blue-200/80 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-800' : item.role === 'CHECKER' ? 'bg-teal-50 text-teal-700 border-teal-200/80 dark:bg-teal-950/50 dark:text-teal-400 dark:border-teal-800' : 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300'}`}>
                                                                   {item.role || 'UNKNOWN'}
                                                                </span>
                                                             </td>
@@ -11553,7 +11704,7 @@ if (filterPackingShift !== 'ALL') {
                                                                }
                                                             </td>
                                                          )}
-                                                         {!['PACKING_DATA', 'SORTIR_DATA', 'OJOL_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'GUDANG_REPORT'].includes(activeView) && (
+                                                         {!['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'OJOL_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'GUDANG_REPORT'].includes(activeView) && (
                                                             <td className="px-4 py-3.5 text-center">
                                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400 border border-emerald-200/80 dark:border-emerald-800">
                                                                   COMPLETED
@@ -11596,10 +11747,261 @@ if (filterPackingShift !== 'ALL') {
                                  )}
 
                               </div>
+                              </div>
+
+                              {/* Right: Staff Analytics Sidebar Panel (Khusus PACKING_2_DATA saat filter staff aktif) */}
+                              {activeView === 'PACKING_2_DATA' && filterPackingStaff !== 'ALL' && packing2StaffAnalytics && (
+                                 <div className="w-full lg:w-[380px] xl:w-[420px] shrink-0 h-full border-t lg:border-t-0 lg:border-l border-gray-200/80 dark:border-gray-700/80 bg-gradient-to-b from-gray-50/95 via-white to-gray-50/95 dark:from-gray-900/95 dark:via-gray-850 dark:to-slate-900/90 backdrop-blur-xl p-4 sm:p-5 overflow-y-auto flex flex-col gap-4 shadow-xl transition-all duration-300">
+                                    {/* 1. Header Card */}
+                                    <div className="relative overflow-hidden rounded-2xl p-4 bg-gradient-to-br from-blue-600 via-indigo-600 to-slate-900 text-white shadow-lg border border-white/10">
+                                       <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl -mr-10 -mt-10 pointer-events-none"></div>
+                                       <div className="flex items-start justify-between relative z-10">
+                                          <div className="flex items-center gap-3">
+                                             <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center font-black text-lg tracking-wider text-white shadow-inner">
+                                                {packing2StaffAnalytics.initials}
+                                             </div>
+                                             <div>
+                                                <div className="flex items-center gap-1.5 mb-1">
+                                                   <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1">
+                                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                                      PACKING
+                                                   </span>
+                                                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/15 text-white/90 border border-white/20">
+                                                      {packing2StaffAnalytics.shift}
+                                                   </span>
+                                                </div>
+                                                <h3 className="text-base sm:text-lg font-black tracking-tight text-white leading-tight">
+                                                   {packing2StaffAnalytics.staffName}
+                                                </h3>
+                                             </div>
+                                          </div>
+                                          <button 
+                                             onClick={() => setFilterPackingStaff('ALL')}
+                                             className="p-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white/80 hover:text-white transition-all cursor-pointer"
+                                             title="Tutup Panel Analisis"
+                                          >
+                                             <X size={16} />
+                                          </button>
+                                       </div>
+                                    </div>
+
+                                    {/* 2. Circular Progress Ring Card */}
+                                    <div className="rounded-2xl p-4 bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs backdrop-blur-md flex flex-col items-center justify-center relative overflow-hidden">
+                                       <div className="w-full flex items-center justify-between mb-2 text-xs font-bold text-gray-500 dark:text-gray-400">
+                                          <span className="flex items-center gap-1.5">
+                                             <Award size={14} className="text-amber-500" /> Kontribusi Scan Hari Ini
+                                          </span>
+                                          <span className="font-mono text-blue-600 dark:text-blue-400 font-extrabold">{packing2StaffAnalytics.percentage}%</span>
+                                       </div>
+
+                                       <div className="relative flex items-center justify-center my-2">
+                                          <svg className="w-36 h-36 transform -rotate-90" viewBox="0 0 120 120">
+                                             <circle
+                                                cx="60"
+                                                cy="60"
+                                                r="48"
+                                                className="text-gray-100 dark:text-gray-700/60"
+                                                strokeWidth="10"
+                                                stroke="currentColor"
+                                                fill="transparent"
+                                             />
+                                             <circle
+                                                cx="60"
+                                                cy="60"
+                                                r="48"
+                                                stroke="url(#blueGradient2)"
+                                                strokeWidth="10"
+                                                strokeDasharray={301.59}
+                                                strokeDashoffset={301.59 - (301.59 * Math.min(100, Math.max(0, packing2StaffAnalytics.percentage))) / 100}
+                                                strokeLinecap="round"
+                                                fill="transparent"
+                                                className="transition-all duration-1000 ease-out"
+                                             />
+                                             <defs>
+                                                <linearGradient id="blueGradient2" x1="0%" y1="0%" x2="100%" y2="100%">
+                                                   <stop offset="0%" stopColor="#3b82f6" />
+                                                   <stop offset="50%" stopColor="#6366f1" />
+                                                   <stop offset="100%" stopColor="#06b6d4" />
+                                                </linearGradient>
+                                             </defs>
+                                          </svg>
+                                          <div className="absolute flex flex-col items-center justify-center text-center">
+                                             <span className="text-3xl font-black font-mono tracking-tight text-gray-900 dark:text-white">
+                                                {packing2StaffAnalytics.percentage}%
+                                             </span>
+                                             <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                                                Share Scan
+                                             </span>
+                                          </div>
+                                       </div>
+
+                                       <div className="w-full mt-2 pt-3 border-t border-gray-100 dark:border-gray-700/60 flex items-center justify-between text-xs">
+                                          <span className="text-gray-500 dark:text-gray-400">Total Scan Staff:</span>
+                                          <span className="font-bold font-mono text-gray-800 dark:text-gray-200">
+                                             {packing2StaffAnalytics.staffTotal.toLocaleString()} <span className="text-gray-400 font-normal">/ {packing2StaffAnalytics.overallTotal.toLocaleString()}</span>
+                                          </span>
+                                       </div>
+                                    </div>
+
+                                    {/* 3. Performance 2x2 Grid */}
+                                    <div className="grid grid-cols-2 gap-2.5">
+                                       <div className="p-3.5 rounded-2xl bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs">
+                                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-blue-600 dark:text-blue-400 mb-1">
+                                             <Package size={13} /> Total Scan
+                                          </div>
+                                          <div className="text-xl font-black font-mono text-gray-900 dark:text-white">
+                                             {packing2StaffAnalytics.staffTotal.toLocaleString()}
+                                          </div>
+                                          {isHalfCountMode && (
+                                             <div className="text-[10px] text-red-500 font-semibold mt-0.5">Mode 50% Cut</div>
+                                          )}
+                                       </div>
+
+                                       <div className="p-3.5 rounded-2xl bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs">
+                                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-600 dark:text-indigo-400 mb-1">
+                                             <Zap size={13} /> Avg / Jam
+                                          </div>
+                                          <div className="text-xl font-black font-mono text-gray-900 dark:text-white">
+                                             {packing2StaffAnalytics.avgPerHour} <span className="text-xs font-normal text-gray-400">/jam</span>
+                                          </div>
+                                          <div className="text-[10px] text-gray-400 font-semibold mt-0.5">{packing2StaffAnalytics.activeHoursCount} jam aktif</div>
+                                       </div>
+
+                                       <div className="p-3.5 rounded-2xl bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs">
+                                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-purple-600 dark:text-purple-400 mb-1">
+                                             <Clock size={13} /> Jam Aktif
+                                          </div>
+                                          <div className="text-xl font-black font-mono text-gray-900 dark:text-white">
+                                             {packing2StaffAnalytics.activeHoursCount} <span className="text-xs font-normal text-gray-400">Jam</span>
+                                          </div>
+                                          <div className="text-[10px] text-gray-400 font-semibold mt-0.5">Hari ini</div>
+                                       </div>
+
+                                       <div className="p-3.5 rounded-2xl bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs flex flex-col justify-between">
+                                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 mb-1">
+                                             <Activity size={13} /> Performa
+                                          </div>
+                                          <div className="mt-1">
+                                             <span className={`text-[10px] font-bold px-2 py-1 rounded-md border inline-block ${packing2StaffAnalytics.speedTag.color}`}>
+                                                {packing2StaffAnalytics.speedTag.label}
+                                             </span>
+                                          </div>
+                                       </div>
+                                    </div>
+
+                                    {/* 4. Hourly Activity Bar Chart */}
+                                    <div className="rounded-2xl p-4 bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs flex flex-col gap-3">
+                                       <div className="flex items-center justify-between">
+                                          <div className="text-xs font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                                             <BarChart3 size={14} className="text-blue-600 dark:text-blue-400" />
+                                             Distribusi Scan Per Jam
+                                          </div>
+                                          <span className="text-[10px] font-mono font-bold text-gray-400">
+                                             Peak: {packing2StaffAnalytics.maxCountInHour} scan
+                                          </span>
+                                       </div>
+
+                                       {/* Bars Container */}
+                                       <div className="h-28 flex items-end gap-1.5 pt-5 pb-1 px-2 bg-gray-50/80 dark:bg-gray-900/50 rounded-xl border border-gray-100 dark:border-gray-800/80 overflow-x-auto">
+                                          {packing2StaffAnalytics.hourlyChartData.map((item, idx) => {
+                                             const heightPercent = packing2StaffAnalytics.maxCountInHour > 0 
+                                                ? Math.max(8, Math.round((item.count / packing2StaffAnalytics.maxCountInHour) * 100))
+                                                : 8;
+                                             const isPeak = item.count === packing2StaffAnalytics.maxCountInHour && item.count > 0;
+
+                                             return (
+                                                <div key={idx} className="flex-1 min-w-[20px] flex flex-col items-center h-full justify-end group relative">
+                                                   {/* Hover Tooltip */}
+                                                   <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-6 bg-gray-900 text-white text-[9px] font-mono font-bold py-0.5 px-1.5 rounded shadow-md pointer-events-none z-20 whitespace-nowrap">
+                                                      {item.hour}: {item.count}
+                                                   </div>
+
+                                                   {/* Bar Element */}
+                                                   <div
+                                                      className={`w-full rounded-t-md transition-all duration-500 ${
+                                                         item.count > 0
+                                                            ? isPeak
+                                                               ? 'bg-gradient-to-t from-indigo-600 to-cyan-400 shadow-sm ring-1 ring-cyan-400/40'
+                                                               : 'bg-gradient-to-t from-blue-600 to-indigo-400 group-hover:from-blue-500 group-hover:to-indigo-300'
+                                                            : 'bg-gray-200 dark:bg-gray-700/40 h-1.5'
+                                                      }`}
+                                                      style={{ height: item.count > 0 ? `${heightPercent}%` : '5px' }}
+                                                   />
+                                                   <span className="text-[9px] font-mono text-gray-400 dark:text-gray-500 mt-1 scale-90">
+                                                      {item.rawHour}
+                                                   </span>
+                                                </div>
+                                             );
+                                          })}
+                                       </div>
+                                    </div>
+
+                                    {/* 5. Latest Scan Live Card */}
+                                    <div className="rounded-2xl p-3.5 bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs flex flex-col gap-2">
+                                       <div className="flex items-center justify-between text-xs font-bold text-gray-600 dark:text-gray-300">
+                                          <span className="flex items-center gap-1.5">
+                                             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                                             Scan Terakhir
+                                          </span>
+                                          <span className="font-mono text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">
+                                             {packing2StaffAnalytics.latestTimeStr}
+                                          </span>
+                                       </div>
+                                       {packing2StaffAnalytics.latestItem ? (
+                                          <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/60 border border-gray-100 dark:border-gray-800 flex items-center justify-between gap-2">
+                                             <div className="truncate">
+                                                <div className="font-mono font-bold text-xs text-gray-900 dark:text-white truncate">
+                                                   {packing2StaffAnalytics.latestItem.barcode}
+                                                </div>
+                                                <div className="text-[10px] text-gray-400 truncate">
+                                                   {packing2StaffAnalytics.latestItem.description || 'Verified Scan'}
+                                                </div>
+                                             </div>
+                                             <button
+                                                onClick={() => {
+                                                   navigator.clipboard.writeText(packing2StaffAnalytics.latestItem.barcode);
+                                                   showToast('Barcode berhasil disalin!', 'success');
+                                                }}
+                                                className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 hover:text-blue-600 transition-colors shrink-0 cursor-pointer"
+                                                title="Salin Barcode"
+                                             >
+                                                <Copy size={13} />
+                                             </button>
+                                          </div>
+                                       ) : (
+                                          <div className="text-xs text-gray-400 text-center py-2">Belum ada scan terbaru</div>
+                                       )}
+                                    </div>
+
+                                    {/* 6. Action Buttons */}
+                                    <div className="flex flex-col gap-2 pt-1">
+                                       <button
+                                          onClick={() => {
+                                             const barcodes = packingData.map(d => d.barcode).filter(Boolean).join('\n');
+                                             if (barcodes) {
+                                                navigator.clipboard.writeText(barcodes);
+                                                showToast(`${packingData.length} barcode berhasil disalin!`, 'success');
+                                             } else {
+                                                showToast('Tidak ada barcode untuk disalin', 'error');
+                                             }
+                                          }}
+                                          className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 hover:scale-[1.01] transition-all cursor-pointer"
+                                       >
+                                          <Copy size={14} /> Salin Semua Barcode Staff ({packingData.length})
+                                       </button>
+                                       
+                                       <button
+                                          onClick={() => setFilterPackingStaff('ALL')}
+                                          className="w-full py-2 px-4 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-gray-200 dark:border-gray-700"
+                                       >
+                                          <RotateCcw size={13} /> Reset Filter Staff
+                                       </button>
+                                    </div>
+                                 </div>
+                              )}
                            </div>
                         )}
 
-                        {/* BATCH DATA VIEW */}
                         {activeView === 'BATCH_DATA' && (
                            <div className="w-full flex flex-col bg-white dark:bg-gray-800">
                               <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 bg-indigo-50 dark:bg-indigo-900/20 shrink-0">
@@ -11725,6 +12127,7 @@ if (filterPackingShift !== 'ALL') {
                                                        { key: 'PICKER', label: 'Picker' },
                                                        { key: 'CHECKER', label: 'Checker' },
                                                        { key: 'PACKING', label: 'Packing' },
+                                                       { key: 'PACKING_2', label: 'Packing 2' },
                                                        { key: 'LOGISTIK', label: 'Logistik' }
                                                     ].map(r => {
                                                        const isSelected = massSearchRoles.includes(r.key);
@@ -13625,6 +14028,7 @@ LXAD-1234567890`}
                                                        { key: 'PICKER', label: 'Picker' },
                                                        { key: 'CHECKER', label: 'Checker' },
                                                        { key: 'PACKING', label: 'Packing' },
+                                                       { key: 'PACKING_2', label: 'Packing 2' },
                                                        { key: 'LOGISTIK', label: 'Logistik' }
                                                     ].map(r => {
                                                        const isSelected = massSearchRoles.includes(r.key);
@@ -19346,7 +19750,7 @@ LXAD-1234567890`}
                                  return (
                                     <tr key={role} className="hover:bg-gray-800/40">
                                        <td className="py-2.5 px-4 font-sans font-bold text-white flex items-center gap-2">
-                                          {role === 'PACKING' && '📦'}
+                                          {(role === 'PACKING' || role === 'PACKING_2') && '📦'}
                                           {role === 'CHECKER' && '📋'}
                                           {role === 'PICKER' && '🛒'}
                                           {role === 'OJOL' && '🛵'}

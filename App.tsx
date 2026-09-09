@@ -20,6 +20,7 @@ const DEFAULT_PROFILE_CONFIG: ProfileConfig[] = [
   { role: 'SORTIR', is_active: true, sort_order: 2 },
   { role: 'SORTIR_BATCH', is_active: true, sort_order: 3 },
   { role: 'PACKING', is_active: true, sort_order: 4 },
+  { role: 'PACKING_2', is_active: true, sort_order: 4 },
   { role: 'GUDANG', is_active: true, sort_order: 5 },
   { role: 'OJOL', is_active: true, sort_order: 6 },
   { role: 'LEADER', is_active: true, sort_order: 7 },
@@ -29,12 +30,12 @@ const DEFAULT_PROFILE_CONFIG: ProfileConfig[] = [
 
 // Default Data Initialization (Fallback)
 const DEFAULT_PERMISSIONS: UserPermissions = {
-  'picker@kalindo.com': [UserRole.PICKER, UserRole.PICKER_2, UserRole.PICKER_2],
+  'picker@kalindo.com': [UserRole.PICKER, UserRole.PICKER_2],
   'sortir@kalindo.com': [UserRole.SORTIR],
-  'packing@kalindo.com': [UserRole.PACKING],
-  'dev@kalindo.com': [UserRole.PICKER, UserRole.PICKER_2, UserRole.PICKER_2, UserRole.SORTIR, UserRole.PACKING, UserRole.GUDANG, UserRole.OJOL, UserRole.LEADER],
-  'developer@kalindo.com': [UserRole.PICKER, UserRole.PICKER_2, UserRole.PICKER_2, UserRole.SORTIR, UserRole.PACKING, UserRole.GUDANG, UserRole.OJOL, UserRole.LEADER, UserRole.ADMIN], // For devmode bypass
-  'gudang.user@gmail.com': [UserRole.PICKER, UserRole.PICKER_2, UserRole.PICKER_2, UserRole.SORTIR, UserRole.PACKING, UserRole.GUDANG, UserRole.OJOL, UserRole.LEADER, UserRole.ADMIN],
+  'packing@kalindo.com': [UserRole.PACKING, UserRole.PACKING_2],
+  'dev@kalindo.com': [UserRole.PICKER, UserRole.PICKER_2, UserRole.SORTIR, UserRole.PACKING, UserRole.PACKING_2, UserRole.GUDANG, UserRole.OJOL, UserRole.LEADER],
+  'developer@kalindo.com': [UserRole.PICKER, UserRole.PICKER_2, UserRole.SORTIR, UserRole.PACKING, UserRole.PACKING_2, UserRole.GUDANG, UserRole.OJOL, UserRole.LEADER, UserRole.ADMIN], // For devmode bypass
+  'gudang.user@gmail.com': [UserRole.PICKER, UserRole.PICKER_2, UserRole.SORTIR, UserRole.PACKING, UserRole.PACKING_2, UserRole.GUDANG, UserRole.OJOL, UserRole.LEADER, UserRole.ADMIN],
   'leader@kalindo.com': [UserRole.LEADER],
   'admin@kalindo.com': [UserRole.ADMIN],
 };

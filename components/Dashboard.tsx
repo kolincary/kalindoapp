@@ -44,6 +44,7 @@ const ROLE_BG_IMAGES: Record<string, string> = {
    [UserRole.SORTIR]: '/assets/sortir-bg.webp',
    [UserRole.SORTIR_BATCH]: '/assets/sortir-bg.webp',
    [UserRole.PACKING]: '/assets/packing-bg.webp',
+   [UserRole.PACKING_2]: '/assets/packing-bg.webp',
    [UserRole.GUDANG]: '/assets/gudang-bg.webp',
    [UserRole.OJOL]: '/assets/ojol-bg.webp',
    [UserRole.LEADER]: '/assets/leader-bg.webp',
@@ -605,6 +606,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
          bgLight: 'bg-packing-50 dark:bg-packing-900/30',
          btn: 'bg-packing-600 active:bg-packing-700 dark:bg-packing-700 dark:active:bg-packing-600',
          title: 'Manifest Box'
+      },
+      [UserRole.PACKING_2]: {
+         gradient: 'bg-gradient-to-r from-packing-600 to-packing-500 dark:from-packing-950 dark:to-packing-900',
+         accent: 'text-packing-600 dark:text-packing-300',
+         bgLight: 'bg-packing-50 dark:bg-packing-900/30',
+         btn: 'bg-packing-600 active:bg-packing-700 dark:bg-packing-700 dark:active:bg-packing-600',
+         title: 'Manifest Box 2'
       },
       [UserRole.ADMIN]: {
          gradient: 'bg-gradient-to-r from-pink-600 to-rose-500 dark:from-pink-950 dark:to-rose-900',
@@ -1807,7 +1815,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
        }
 
         // --- CANCEL CHECK FOR CHECKER & PACKING (7 DAYS) ---
-        if ([UserRole.CHECKER, UserRole.PACKING].includes(role)) {
+        if ([UserRole.CHECKER, UserRole.PACKING, UserRole.PACKING_2].includes(role)) {
            try {
               const sevenDaysAgo = new Date();
               sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -1999,8 +2007,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 }
              }
 
-             // 5. Role: PACKING
-             else if (role === UserRole.PACKING) {
+             // 5. Role: PACKING & PACKING_2
+             else if (role === UserRole.PACKING || role === UserRole.PACKING_2) {
                 const { data: checkerData, error: checkerErr } = await supabase
                    .from('scanned_items')
                    .select('barcode')
@@ -3117,7 +3125,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
          return result.filter(item =>
             cancelledSet.has((item.barcode || '').trim().toUpperCase()) ||
             item.description?.toUpperCase().includes('[CANCEL]') ||
-            (item.priority === 'HIGH' && ((role === UserRole.SORTIR || role === UserRole.SORTIR_BATCH) || (role === UserRole.PACKING || role === UserRole.ADMIN)))
+            (item.priority === 'HIGH' && ((role === UserRole.SORTIR || role === UserRole.SORTIR_BATCH) || (role === UserRole.PACKING || role === UserRole.PACKING_2 || role === UserRole.ADMIN)))
          );
       }
 
@@ -3944,7 +3952,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                </h3>
 
                <div className="flex items-center gap-2 flex-1 md:flex-none justify-end">
-                  {(role === UserRole.PACKING || role === UserRole.ADMIN) && (
+                  {(role === UserRole.PACKING || role === UserRole.PACKING_2 || role === UserRole.ADMIN) && (
                      <button
                         onClick={() => setShowOnlyCancel(!showOnlyCancel)}
                         className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border ${showOnlyCancel
@@ -5466,7 +5474,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                            .filter(emp => {
                               // Only show SORTIR and PACKING roles
                               const roles = emp.allowed_roles || [];
-                              const isCorrectRole = roles.includes('SORTIR') || roles.includes('PACKING') || roles.includes('ADMIN');
+                              const isCorrectRole = roles.includes('SORTIR') || roles.includes('PACKING') || roles.includes('PACKING_2') || roles.includes('ADMIN');
                               const matchesSearch = emp.name.toLowerCase().includes(teamSearchTerm.toLowerCase());
                               return isCorrectRole && matchesSearch;
                            })
@@ -5501,7 +5509,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                            ))}
                         {employees.filter(emp => {
                            const roles = emp.allowed_roles || [];
-                           const isCorrectRole = roles.includes('SORTIR') || roles.includes('PACKING') || roles.includes('ADMIN');
+                           const isCorrectRole = roles.includes('SORTIR') || roles.includes('PACKING') || roles.includes('PACKING_2') || roles.includes('ADMIN');
                            return isCorrectRole && emp.name.toLowerCase().includes(teamSearchTerm.toLowerCase());
                         }).length === 0 && (
                               <div className="py-12 text-center text-gray-400">

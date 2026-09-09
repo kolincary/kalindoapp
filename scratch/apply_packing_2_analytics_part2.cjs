@@ -1,0 +1,341 @@
+const fs = require('fs');
+const path = require('path');
+
+const targetPath = path.resolve('components/AdminDashboard.tsx');
+let rawContent = fs.readFileSync(targetPath, 'utf8');
+
+// Normalize line breaks for safe processing
+const isCRLF = rawContent.includes('\r\n');
+const lines = rawContent.split(/\r?\n/);
+
+console.log('Original lines count:', lines.length);
+
+const startIdx = lines.findIndex((l, idx) => 
+   idx > 10000 &&
+   l.includes("activeView === 'PACKING_DATA'") && 
+   l.includes("activeView === 'PACKING_2_DATA'") && 
+   l.includes("GUDANG_BUNDLING") &&
+   lines[idx + 1] && lines[idx + 1].includes('w-full h-full flex flex-col bg-white dark:bg-gray-800')
+);
+
+console.log('Found main view start condition at line:', startIdx + 1);
+
+if (startIdx === -1) {
+   console.error('Could not find start index!');
+   process.exit(1);
+}
+
+// Find the <div className="w-full h-full flex flex-col bg-white dark:bg-gray-800">
+const divStartIdx = startIdx + 1;
+console.log('Line divStartIdx:', divStartIdx + 1, lines[divStartIdx]);
+
+// Find the closing </div> of this section before BATCH_DATA
+const batchIdx = lines.findIndex((l, idx) => idx > startIdx && l.includes("{activeView === 'BATCH_DATA' && ("));
+console.log('Found BATCH_DATA at line:', batchIdx + 1);
+
+if (batchIdx === -1) {
+   console.error('Could not find BATCH_DATA index!');
+   process.exit(1);
+}
+
+console.log('Line batchIdx - 4:', lines[batchIdx - 4]);
+console.log('Line batchIdx - 3:', lines[batchIdx - 3]);
+console.log('Line batchIdx - 2:', lines[batchIdx - 2]);
+
+// Replace line divStartIdx with our dynamic split wrapper
+const newDivStart = [
+   '                           <div className={`w-full h-full flex ${activeView === \'PACKING_2_DATA\' && filterPackingStaff !== \'ALL\' ? \'flex-col lg:flex-row\' : \'flex-col\'} bg-white dark:bg-gray-800 overflow-hidden`}>',
+   '                              {/* Left / Main Table Area */}',
+   '                              <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">',
+   '                                 {/* Banner Info Filter Staff Aktif (Khusus PACKING_2_DATA) */}',
+   '                                 {activeView === \'PACKING_2_DATA\' && filterPackingStaff !== \'ALL\' && (',
+   '                                    <div className="px-4 py-2.5 bg-gradient-to-r from-blue-600/10 via-indigo-600/10 to-purple-600/10 dark:from-blue-500/15 dark:via-indigo-500/15 dark:to-purple-500/15 border-b border-blue-200/60 dark:border-blue-800/60 flex items-center justify-between shrink-0">',
+   '                                       <div className="flex items-center gap-2 text-xs font-bold text-blue-700 dark:text-blue-300">',
+   '                                          <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-ping"></span>',
+   '                                          <span className="flex items-center gap-1.5">',
+   '                                             <Activity size={14} className="text-blue-600 dark:text-blue-400" />',
+   '                                             Mode Rincian Staff: <span className="font-extrabold text-blue-900 dark:text-blue-100 bg-blue-100 dark:bg-blue-900/50 px-2 py-0.5 rounded-md">{filterPackingStaff}</span>',
+   '                                          </span>',
+   '                                       </div>',
+   '                                       <button ',
+   '                                          onClick={() => setFilterPackingStaff(\'ALL\')}',
+   '                                          className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-750 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 shadow-2xs transition-all hover:scale-105 cursor-pointer"',
+   '                                       >',
+   '                                          <X size={12} /> Tampilkan Semua Staff',
+   '                                       </button>',
+   '                                    </div>',
+   '                                 )}'
+];
+
+const sidebarCode = [
+   '                              </div>',
+   '',
+   '                              {/* Right: Staff Analytics Sidebar Panel (Khusus PACKING_2_DATA saat filter staff aktif) */}',
+   '                              {activeView === \'PACKING_2_DATA\' && filterPackingStaff !== \'ALL\' && packing2StaffAnalytics && (',
+   '                                 <div className="w-full lg:w-[380px] xl:w-[420px] shrink-0 h-full border-t lg:border-t-0 lg:border-l border-gray-200/80 dark:border-gray-700/80 bg-gradient-to-b from-gray-50/95 via-white to-gray-50/95 dark:from-gray-900/95 dark:via-gray-850 dark:to-slate-900/90 backdrop-blur-xl p-4 sm:p-5 overflow-y-auto flex flex-col gap-4 shadow-xl transition-all duration-300">',
+   '                                    {/* 1. Header Card */}',
+   '                                    <div className="relative overflow-hidden rounded-2xl p-4 bg-gradient-to-br from-blue-600 via-indigo-600 to-slate-900 text-white shadow-lg border border-white/10">',
+   '                                       <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl -mr-10 -mt-10 pointer-events-none"></div>',
+   '                                       <div className="flex items-start justify-between relative z-10">',
+   '                                          <div className="flex items-center gap-3">',
+   '                                             <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center font-black text-lg tracking-wider text-white shadow-inner">',
+   '                                                {packing2StaffAnalytics.initials}',
+   '                                             </div>',
+   '                                             <div>',
+   '                                                <div className="flex items-center gap-1.5 mb-1">',
+   '                                                   <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1">',
+   '                                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>',
+   '                                                      PACKING 2',
+   '                                                   </span>',
+   '                                                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/15 text-white/90 border border-white/20">',
+   '                                                      {packing2StaffAnalytics.shift}',
+   '                                                   </span>',
+   '                                                </div>',
+   '                                                <h3 className="text-base sm:text-lg font-black tracking-tight text-white leading-tight">',
+   '                                                   {packing2StaffAnalytics.staffName}',
+   '                                                </h3>',
+   '                                             </div>',
+   '                                          </div>',
+   '                                          <button ',
+   '                                             onClick={() => setFilterPackingStaff(\'ALL\')}',
+   '                                             className="p-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white/80 hover:text-white transition-all cursor-pointer"',
+   '                                             title="Tutup Panel Analisis"',
+   '                                          >',
+   '                                             <X size={16} />',
+   '                                          </button>',
+   '                                       </div>',
+   '                                    </div>',
+   '',
+   '                                    {/* 2. Circular Progress Ring Card */}',
+   '                                    <div className="rounded-2xl p-4 bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs backdrop-blur-md flex flex-col items-center justify-center relative overflow-hidden">',
+   '                                       <div className="w-full flex items-center justify-between mb-2 text-xs font-bold text-gray-500 dark:text-gray-400">',
+   '                                          <span className="flex items-center gap-1.5">',
+   '                                             <Award size={14} className="text-amber-500" /> Kontribusi Scan Hari Ini',
+   '                                          </span>',
+   '                                          <span className="font-mono text-blue-600 dark:text-blue-400 font-extrabold">{packing2StaffAnalytics.percentage}%</span>',
+   '                                       </div>',
+   '',
+   '                                       <div className="relative flex items-center justify-center my-2">',
+   '                                          <svg className="w-36 h-36 transform -rotate-90" viewBox="0 0 120 120">',
+   '                                             <circle',
+   '                                                cx="60"',
+   '                                                cy="60"',
+   '                                                r="48"',
+   '                                                className="text-gray-100 dark:text-gray-700/60"',
+   '                                                strokeWidth="10"',
+   '                                                stroke="currentColor"',
+   '                                                fill="transparent"',
+   '                                             />',
+   '                                             <circle',
+   '                                                cx="60"',
+   '                                                cy="60"',
+   '                                                r="48"',
+   '                                                stroke="url(#blueGradient2)"',
+   '                                                strokeWidth="10"',
+   '                                                strokeDasharray={301.59}',
+   '                                                strokeDashoffset={301.59 - (301.59 * Math.min(100, Math.max(0, packing2StaffAnalytics.percentage))) / 100}',
+   '                                                strokeLinecap="round"',
+   '                                                fill="transparent"',
+   '                                                className="transition-all duration-1000 ease-out"',
+   '                                             />',
+   '                                             <defs>',
+   '                                                <linearGradient id="blueGradient2" x1="0%" y1="0%" x2="100%" y2="100%">',
+   '                                                   <stop offset="0%" stopColor="#3b82f6" />',
+   '                                                   <stop offset="50%" stopColor="#6366f1" />',
+   '                                                   <stop offset="100%" stopColor="#06b6d4" />',
+   '                                                </linearGradient>',
+   '                                             </defs>',
+   '                                          </svg>',
+   '                                          <div className="absolute flex flex-col items-center justify-center text-center">',
+   '                                             <span className="text-3xl font-black font-mono tracking-tight text-gray-900 dark:text-white">',
+   '                                                {packing2StaffAnalytics.percentage}%',
+   '                                             </span>',
+   '                                             <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">',
+   '                                                Share Scan',
+   '                                             </span>',
+   '                                          </div>',
+   '                                       </div>',
+   '',
+   '                                       <div className="w-full mt-2 pt-3 border-t border-gray-100 dark:border-gray-700/60 flex items-center justify-between text-xs">',
+   '                                          <span className="text-gray-500 dark:text-gray-400">Total Scan Staff:</span>',
+   '                                          <span className="font-bold font-mono text-gray-800 dark:text-gray-200">',
+   '                                             {packing2StaffAnalytics.staffTotal.toLocaleString()} <span className="text-gray-400 font-normal">/ {packing2StaffAnalytics.overallTotal.toLocaleString()}</span>',
+   '                                          </span>',
+   '                                       </div>',
+   '                                    </div>',
+   '',
+   '                                    {/* 3. Performance 2x2 Grid */}',
+   '                                    <div className="grid grid-cols-2 gap-2.5">',
+   '                                       <div className="p-3.5 rounded-2xl bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs">',
+   '                                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-blue-600 dark:text-blue-400 mb-1">',
+   '                                             <Package size={13} /> Total Scan',
+   '                                          </div>',
+   '                                          <div className="text-xl font-black font-mono text-gray-900 dark:text-white">',
+   '                                             {packing2StaffAnalytics.staffTotal.toLocaleString()}',
+   '                                          </div>',
+   '                                          {isHalfCountMode && (',
+   '                                             <div className="text-[10px] text-red-500 font-semibold mt-0.5">Mode 50% Cut</div>',
+   '                                          )}',
+   '                                       </div>',
+   '',
+   '                                       <div className="p-3.5 rounded-2xl bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs">',
+   '                                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-600 dark:text-indigo-400 mb-1">',
+   '                                             <Zap size={13} /> Avg / Jam',
+   '                                          </div>',
+   '                                          <div className="text-xl font-black font-mono text-gray-900 dark:text-white">',
+   '                                             {packing2StaffAnalytics.avgPerHour} <span className="text-xs font-normal text-gray-400">/jam</span>',
+   '                                          </div>',
+   '                                          <div className="text-[10px] text-gray-400 font-semibold mt-0.5">{packing2StaffAnalytics.activeHoursCount} jam aktif</div>',
+   '                                       </div>',
+   '',
+   '                                       <div className="p-3.5 rounded-2xl bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs">',
+   '                                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-purple-600 dark:text-purple-400 mb-1">',
+   '                                             <Clock size={13} /> Jam Aktif',
+   '                                          </div>',
+   '                                          <div className="text-xl font-black font-mono text-gray-900 dark:text-white">',
+   '                                             {packing2StaffAnalytics.activeHoursCount} <span className="text-xs font-normal text-gray-400">Jam</span>',
+   '                                          </div>',
+   '                                          <div className="text-[10px] text-gray-400 font-semibold mt-0.5">Hari ini</div>',
+   '                                       </div>',
+   '',
+   '                                       <div className="p-3.5 rounded-2xl bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs flex flex-col justify-between">',
+   '                                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 mb-1">',
+   '                                             <Activity size={13} /> Performa',
+   '                                          </div>',
+   '                                          <div className="mt-1">',
+   '                                             <span className={`text-[10px] font-bold px-2 py-1 rounded-md border inline-block ${packing2StaffAnalytics.speedTag.color}`}>',
+   '                                                {packing2StaffAnalytics.speedTag.label}',
+   '                                             </span>',
+   '                                          </div>',
+   '                                       </div>',
+   '                                    </div>',
+   '',
+   '                                    {/* 4. Hourly Activity Bar Chart */}',
+   '                                    <div className="rounded-2xl p-4 bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs flex flex-col gap-3">',
+   '                                       <div className="flex items-center justify-between">',
+   '                                          <div className="text-xs font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">',
+   '                                             <BarChart3 size={14} className="text-blue-600 dark:text-blue-400" />',
+   '                                             Distribusi Scan Per Jam',
+   '                                          </div>',
+   '                                          <span className="text-[10px] font-mono font-bold text-gray-400">',
+   '                                             Peak: {packing2StaffAnalytics.maxCountInHour} scan',
+   '                                          </span>',
+   '                                       </div>',
+   '',
+   '                                       {/* Bars Container */}',
+   '                                       <div className="h-28 flex items-end gap-1.5 pt-5 pb-1 px-2 bg-gray-50/80 dark:bg-gray-900/50 rounded-xl border border-gray-100 dark:border-gray-800/80 overflow-x-auto">',
+   '                                          {packing2StaffAnalytics.hourlyChartData.map((item, idx) => {',
+   '                                             const heightPercent = packing2StaffAnalytics.maxCountInHour > 0 ',
+   '                                                ? Math.max(8, Math.round((item.count / packing2StaffAnalytics.maxCountInHour) * 100))',
+   '                                                : 8;',
+   '                                             const isPeak = item.count === packing2StaffAnalytics.maxCountInHour && item.count > 0;',
+   '',
+   '                                             return (',
+   '                                                <div key={idx} className="flex-1 min-w-[20px] flex flex-col items-center h-full justify-end group relative">',
+   '                                                   {/* Hover Tooltip */}',
+   '                                                   <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-6 bg-gray-900 text-white text-[9px] font-mono font-bold py-0.5 px-1.5 rounded shadow-md pointer-events-none z-20 whitespace-nowrap">',
+   '                                                      {item.hour}: {item.count}',
+   '                                                   </div>',
+   '',
+   '                                                   {/* Bar Element */}',
+   '                                                   <div',
+   '                                                      className={`w-full rounded-t-md transition-all duration-500 ${',
+   '                                                         item.count > 0',
+   '                                                            ? isPeak',
+   '                                                               ? \'bg-gradient-to-t from-indigo-600 to-cyan-400 shadow-sm ring-1 ring-cyan-400/40\'',
+   '                                                               : \'bg-gradient-to-t from-blue-600 to-indigo-400 group-hover:from-blue-500 group-hover:to-indigo-300\'',
+   '                                                            : \'bg-gray-200 dark:bg-gray-700/40 h-1.5\'',
+   '                                                      }`}',
+   '                                                      style={{ height: item.count > 0 ? `${heightPercent}%` : \'5px\' }}',
+   '                                                   />',
+   '                                                   <span className="text-[9px] font-mono text-gray-400 dark:text-gray-500 mt-1 scale-90">',
+   '                                                      {item.rawHour}',
+   '                                                   </span>',
+   '                                                </div>',
+   '                                             );',
+   '                                          })}',
+   '                                       </div>',
+   '                                    </div>',
+   '',
+   '                                    {/* 5. Latest Scan Live Card */}',
+   '                                    <div className="rounded-2xl p-3.5 bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs flex flex-col gap-2">',
+   '                                       <div className="flex items-center justify-between text-xs font-bold text-gray-600 dark:text-gray-300">',
+   '                                          <span className="flex items-center gap-1.5">',
+   '                                             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>',
+   '                                             Scan Terakhir',
+   '                                          </span>',
+   '                                          <span className="font-mono text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">',
+   '                                             {packing2StaffAnalytics.latestTimeStr}',
+   '                                          </span>',
+   '                                       </div>',
+   '                                       {packing2StaffAnalytics.latestItem ? (',
+   '                                          <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/60 border border-gray-100 dark:border-gray-800 flex items-center justify-between gap-2">',
+   '                                             <div className="truncate">',
+   '                                                <div className="font-mono font-bold text-xs text-gray-900 dark:text-white truncate">',
+   '                                                   {packing2StaffAnalytics.latestItem.barcode}',
+   '                                                </div>',
+   '                                                <div className="text-[10px] text-gray-400 truncate">',
+   '                                                   {packing2StaffAnalytics.latestItem.description || \'Verified Scan\'}',
+   '                                                </div>',
+   '                                             </div>',
+   '                                             <button',
+   '                                                onClick={() => {',
+   '                                                   navigator.clipboard.writeText(packing2StaffAnalytics.latestItem.barcode);',
+   '                                                   showToast(\'Barcode berhasil disalin!\', \'success\');',
+   '                                                }}',
+   '                                                className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 hover:text-blue-600 transition-colors shrink-0 cursor-pointer"',
+   '                                                title="Salin Barcode"',
+   '                                             >',
+   '                                                <Copy size={13} />',
+   '                                             </button>',
+   '                                          </div>',
+   '                                       ) : (',
+   '                                          <div className="text-xs text-gray-400 text-center py-2">Belum ada scan terbaru</div>',
+   '                                       )}',
+   '                                    </div>',
+   '',
+   '                                    {/* 6. Action Buttons */}',
+   '                                    <div className="flex flex-col gap-2 pt-1">',
+   '                                       <button',
+   '                                          onClick={() => {',
+   '                                             const barcodes = packingData.map(d => d.barcode).filter(Boolean).join(\'\\n\');',
+   '                                             if (barcodes) {',
+   '                                                navigator.clipboard.writeText(barcodes);',
+   '                                                showToast(`${packingData.length} barcode berhasil disalin!`, \'success\');',
+   '                                             } else {',
+   '                                                showToast(\'Tidak ada barcode untuk disalin\', \'error\');',
+   '                                             }',
+   '                                          }}',
+   '                                          className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 hover:scale-[1.01] transition-all cursor-pointer"',
+   '                                       >',
+   '                                          <Copy size={14} /> Salin Semua Barcode Staff ({packingData.length})',
+   '                                       </button>',
+   '                                       ',
+   '                                       <button',
+   '                                          onClick={() => setFilterPackingStaff(\'ALL\')}',
+   '                                          className="w-full py-2 px-4 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-gray-200 dark:border-gray-700"',
+   '                                       >',
+   '                                          <RotateCcw size={13} /> Reset Filter Staff',
+   '                                       </button>',
+   '                                    </div>'
+];
+
+// Perform array surgery:
+// 1. Replace line divStartIdx with newDivStart
+// 2. Insert sidebarCode right before batchIdx - 3
+const lineEnding = isCRLF ? '\r\n' : '\n';
+
+const partBefore = lines.slice(0, divStartIdx);
+const partTable = lines.slice(divStartIdx + 1, batchIdx - 3);
+const partAfter = lines.slice(batchIdx - 3);
+
+const finalLines = [
+   ...partBefore,
+   ...newDivStart,
+   ...partTable,
+   ...sidebarCode,
+   ...partAfter
+];
+
+fs.writeFileSync(targetPath, finalLines.join(lineEnding), 'utf8');
+console.log('Successfully updated AdminDashboard.tsx with Staff Analytics Sidebar!');

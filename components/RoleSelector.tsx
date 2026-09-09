@@ -19,6 +19,7 @@ const roleCardConfig: Record<string, { icon: any, colorGradient: string, title: 
   'SORTIR': { icon: Shuffle, colorGradient: 'from-[#9333ea] via-[#9333ea] to-[#7e22ce] shadow-purple-500/20', title: 'SORTIR', desc: 'Scan Zona Sortir', bgImage: '/assets/sortir-bg.webp' },
   'SORTIR_BATCH': { icon: Shuffle, colorGradient: 'from-[#c026d3] via-[#c026d3] to-[#a21caf] shadow-fuchsia-500/20', title: 'SORTIR BATCH', desc: 'Scan Sortir Batch', bgImage: '/assets/sortirbatch-bg.webp' },
   'PACKING': { icon: Package, colorGradient: 'from-[#f97316] via-[#ea580c] to-[#c2410c] shadow-orange-500/20', title: 'PACKING', desc: 'Packing & Pengemasan', bgImage: '/assets/packing-bg.webp' },
+  'PACKING_2': { icon: Package, colorGradient: 'from-[#f97316] via-[#ea580c] to-[#c2410c] shadow-orange-500/20', title: 'PACKING 2', desc: 'Packing & Pengemasan', bgImage: '/assets/packing-bg.webp' },
   'GUDANG': { icon: Warehouse, colorGradient: 'from-[#059669] via-[#059669] to-[#047857] shadow-emerald-500/20', title: 'GUDANG', desc: 'Manajemen Stok', bgImage: '/assets/gudang-bg.webp' },
   'OJOL': { icon: Bike, colorGradient: 'from-[#0891b2] via-[#0891b2] to-[#0e7490] shadow-cyan-500/20', title: 'OJOL', desc: 'Pengiriman Ojol', bgImage: '/assets/ojol-bg.webp' },
   'LEADER': { icon: Crown, colorGradient: 'from-[#6366f1] via-[#4f46e5] to-[#3730a3] shadow-indigo-500/20', title: 'LEADER', desc: 'Laporan & Monitoring', bgImage: '/assets/leader-bg.webp' },
@@ -107,6 +108,7 @@ export const RoleSelector: React.FC<RoleSelectorProps> = ({ onSelectRole, isDark
         case 'SORTIR_BATCH':
           return 'Tim Sortir';
         case 'PACKING':
+        case 'PACKING_2':
           return 'Tim Packing';
         case 'GUDANG':
           return 'Tim Gudang';
