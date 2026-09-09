@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { UserRole } from '../types';
-import { Database, UploadCloud, CheckCircle2, AlertCircle, RefreshCw, FileText, Loader2, Play, Check, X, ShieldAlert, Calendar } from 'lucide-react';
+import { Database, UploadCloud, CheckCircle2, AlertCircle, RefreshCw, FileText, Loader2, Play, Check, X, ShieldAlert, Calendar, Clock, Sparkles } from 'lucide-react';
 
 interface InjectExpiredResiViewProps {
    isDarkMode?: boolean;
@@ -18,6 +18,14 @@ export const InjectExpiredResiView: React.FC<InjectExpiredResiViewProps> = () =>
    const [rawBarcodes, setRawBarcodes] = useState('');
    const [employeeName, setEmployeeName] = useState('RESI KEDALUWARSA');
    const [customInjectDate, setCustomInjectDate] = useState(() => new Date().toISOString().split('T')[0]);
+   const [customInjectTime, setCustomInjectTime] = useState(() => {
+      const now = new Date();
+      // If executed in early morning / midnight (00:00 - 07:00), default to realistic daytime shift 14:30
+      if (now.getHours() >= 0 && now.getHours() < 7) {
+         return '14:30';
+      }
+      return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+   });
    const [selectedRoles, setSelectedRoles] = useState<string[]>([
       UserRole.PICKER,
       UserRole.CHECKER,
@@ -58,7 +66,7 @@ export const InjectExpiredResiView: React.FC<InjectExpiredResiViewProps> = () =>
          return;
       }
 
-      if (!window.confirm(`Konfirmasi Inject Resi Massal:\n- Total Resi Unik: ${barcodes.length}\n- Target Role: ${selectedRoles.join(', ')}\n- Nama Staff: "${employeeName}"\n\nApakah Anda yakin ingin memproses?`)) {
+      if (!window.confirm(`Konfirmasi Inject Resi Massal:\n- Total Resi Unik: ${barcodes.length}\n- Target Role: ${selectedRoles.join(', ')}\n- Nama Staff: "${employeeName}"\n- Tanggal & Waktu: ${customInjectDate} pukul ${customInjectTime}\n\nApakah Anda yakin ingin memproses?`)) {
          return;
       }
 
@@ -90,7 +98,8 @@ export const InjectExpiredResiView: React.FC<InjectExpiredResiViewProps> = () =>
             console.warn("Firestore not available for dual sync:", fsErr);
          }
 
-         for (const barcode of barcodes) {
+         for (let bIndex = 0; bIndex < barcodes.length; bIndex++) {
+            const barcode = barcodes[bIndex];
             for (const role of selectedRoles) {
                completedOps++;
                setProgress({ current: completedOps, total: totalOperations });
@@ -117,13 +126,25 @@ export const InjectExpiredResiView: React.FC<InjectExpiredResiViewProps> = () =>
                         message: `Sudah ada data (Oleh: ${existing.employee_name || 'User'})`
                      });
                   } else {
-                     // Record does NOT exist -> INSERT NEW
+                     // Record does NOT exist -> INSERT NEW with custom date and time
                      let targetTimestamp = Date.now();
                      if (customInjectDate) {
                         const [y, m, d] = customInjectDate.split('-').map(Number);
-                        const now = new Date();
-                        const dateObj = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
-                        targetTimestamp = dateObj.getTime();
+                        let hour = 14;
+                        let minute = 30;
+                        let second = Math.floor(Math.random() * 50);
+
+                        if (customInjectTime) {
+                           const parts = customInjectTime.split(':').map(Number);
+                           if (!isNaN(parts[0])) hour = parts[0];
+                           if (!isNaN(parts[1])) minute = parts[1];
+                           if (parts.length > 2 && !isNaN(parts[2])) second = parts[2];
+                        }
+
+                        // Add realistic incremental second variance per barcode (e.g. 2-4 seconds apart)
+                        const secondJitter = (bIndex * 3) + Math.floor(Math.random() * 2);
+                        const dateObj = new Date(y, m - 1, d, hour, minute, second, Math.floor(Math.random() * 999));
+                        targetTimestamp = dateObj.getTime() + (secondJitter * 1000);
                      }
 
                      const uniqueId = `${targetTimestamp}-${Math.random().toString(36).substring(2, 9)}`;
@@ -190,24 +211,24 @@ export const InjectExpiredResiView: React.FC<InjectExpiredResiViewProps> = () =>
 
    return (
       <div className="w-full h-full min-h-full bg-gray-50 dark:bg-gray-900 p-4 sm:p-6 overflow-y-auto">
-         <div className="max-w-6xl mx-auto space-y-6">
+         <div className="w-full space-y-6">
             
             {/* Top Header Card */}
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 sm:p-6 border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                <div className="flex items-center gap-3.5">
-                  <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center shrink-0 shadow-xs">
-                     <Database size={24} />
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center shrink-0 border border-blue-200/60 dark:border-blue-800/60 shadow-sm">
+                     <Database className="w-5 h-5 sm:w-6 sm:h-6" />
                   </div>
                   <div>
                      <div className="flex items-center gap-2">
-                        <h2 className="text-lg sm:text-xl font-black text-gray-900 dark:text-white">
+                        <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">
                            Auto Inject Resi Kedaluwarsa
                         </h2>
                         <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300 border border-blue-200">
                            DEVMODE NEW
                         </span>
                      </div>
-                     <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                     <p className="text-gray-500 dark:text-gray-400 text-xs sm:text-sm mt-0.5">
                         Isi otomatis data scan resi kedaluwarsa ke Supabase & Firestore untuk role PICKER, CHECKER, dan PACKING.
                      </p>
                   </div>
@@ -217,7 +238,7 @@ export const InjectExpiredResiView: React.FC<InjectExpiredResiViewProps> = () =>
             {/* Main Form Section */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                
-               {/* Left Form (8 cols) */}
+               {/* Left Form (7 cols) */}
                <div className="lg:col-span-7 bg-white dark:bg-gray-800 rounded-2xl p-5 sm:p-6 border border-gray-200 dark:border-gray-700 shadow-sm space-y-5">
                   <form onSubmit={handleProcessInject} className="space-y-5">
                      
@@ -275,25 +296,27 @@ export const InjectExpiredResiView: React.FC<InjectExpiredResiViewProps> = () =>
                         </div>
                      </div>
 
-                     {/* Employee Name & Date Input Grid */}
-                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                           <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1">
-                              Nama Staff (`employee_name`)
-                           </label>
-                           <input
-                              type="text"
-                              value={employeeName}
-                              onChange={(e) => setEmployeeName(e.target.value)}
-                              className="w-full h-11 px-3.5 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-xl text-sm font-bold text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                              disabled={isProcessing}
-                              required
-                           />
-                           <p className="text-[11px] text-gray-400 mt-1 italic">
-                              Nama staff yang tercatat di database.
-                           </p>
-                        </div>
+                     {/* Staff Name */}
+                     <div>
+                        <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1">
+                           Nama Staff (`employee_name`)
+                        </label>
+                        <input
+                           type="text"
+                           value={employeeName}
+                           onChange={(e) => setEmployeeName(e.target.value)}
+                           className="w-full h-11 px-3.5 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-xl text-sm font-bold text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                           disabled={isProcessing}
+                           required
+                        />
+                        <p className="text-[11px] text-gray-400 mt-1 italic">
+                           Nama staff yang tercatat di database.
+                        </p>
+                     </div>
 
+                     {/* Tanggal & Jam Input Grid */}
+                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* Tanggal Scan */}
                         <div>
                            <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1">
                               Tanggal Scan Inject
@@ -309,8 +332,61 @@ export const InjectExpiredResiView: React.FC<InjectExpiredResiViewProps> = () =>
                               />
                            </div>
                            <p className="text-[11px] text-gray-400 mt-1 italic">
-                              Target tanggal timestamp data yang diinject.
+                              Target tanggal timestamp data.
                            </p>
+                        </div>
+
+                        {/* Waktu / Jam Scan */}
+                        <div>
+                           <div className="flex items-center justify-between mb-1">
+                              <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                                 Jam / Waktu Scan
+                              </label>
+                              <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/40 px-1.5 py-0.5 rounded">
+                                 Realistic Time
+                              </span>
+                           </div>
+                           <div className="relative flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-xl px-3.5 h-11 overflow-hidden select-none">
+                              <Clock size={18} className="text-gray-400 shrink-0 pointer-events-none" />
+                              <input
+                                 type="time"
+                                 value={customInjectTime}
+                                 onChange={(e) => setCustomInjectTime(e.target.value)}
+                                 disabled={isProcessing}
+                                 className="bg-transparent text-gray-900 dark:text-white outline-none w-full h-full text-sm font-bold cursor-pointer select-none"
+                              />
+                           </div>
+
+                           {/* Quick Presets */}
+                           <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                              {[
+                                 { label: 'Pagi 09:30', val: '09:30' },
+                                 { label: 'Siang 14:30', val: '14:30' },
+                                 { label: 'Sore 17:45', val: '17:45' },
+                                 { label: 'Malam 20:15', val: '20:15' },
+                                 { 
+                                    label: 'Sekarang', 
+                                    val: () => {
+                                       const now = new Date();
+                                       return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                                    }
+                                 }
+                              ].map((preset, idx) => (
+                                 <button
+                                    key={idx}
+                                    type="button"
+                                    onClick={() => setCustomInjectTime(typeof preset.val === 'function' ? preset.val() : preset.val)}
+                                    disabled={isProcessing}
+                                    className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border transition-colors cursor-pointer ${
+                                       (typeof preset.val === 'string' && customInjectTime === preset.val)
+                                          ? 'bg-blue-600 text-white border-blue-600'
+                                          : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                    }`}
+                                 >
+                                    {preset.label}
+                                 </button>
+                              ))}
+                           </div>
                         </div>
                      </div>
 
