@@ -2229,6 +2229,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [isBatchImportModalOpen, setIsBatchImportModalOpen] = useState(false);
    const [isExcelImportModalOpen, setIsExcelImportModalOpen] = useState(false);
    const [isLogistikImportModalOpen, setIsLogistikImportModalOpen] = useState(false);
+   const [isLogistikDevToolsOpen, setIsLogistikDevToolsOpen] = useState(false);
+   const logistikDevToolsRef = useRef<HTMLDivElement>(null);
+
+   useEffect(() => {
+      if (!isLogistikDevToolsOpen) return;
+      const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+         if (logistikDevToolsRef.current && !logistikDevToolsRef.current.contains(event.target as Node)) {
+            setIsLogistikDevToolsOpen(false);
+         }
+      };
+      const handleKeyDown = (e: KeyboardEvent) => {
+         if (e.key === 'Escape') {
+            setIsLogistikDevToolsOpen(false);
+         }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('touchstart', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
+      return () => {
+         document.removeEventListener('mousedown', handleClickOutside);
+         document.removeEventListener('touchstart', handleClickOutside);
+         document.removeEventListener('keydown', handleKeyDown);
+      };
+   }, [isLogistikDevToolsOpen]);
    const [logistikImportText, setLogistikImportText] = useState('');
    const [logistikImportDate, setLogistikImportDate] = useState(() => {
       const today = new Date();
@@ -4659,7 +4683,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             if (fetchGudangAudit) {
                // Direct fast fetch for Gudang status scans (Ready / Cancel / Pending) without expensive count
                const { data: gudangRows } = await supabase.from('scanned_items')
-                  .select('id, barcode, timestamp, status, menu_context, role')
+                  .select('id, barcode, timestamp, status, menu_context, role, description')
                   .or('status.eq.PENDING,menu_context.eq.PENDING,status.eq.READY,menu_context.eq.READY,status.eq.CANCEL,menu_context.eq.CANCEL')
                   .gte('timestamp', d.startMs)
                   .lte('timestamp', d.endMs)
@@ -4912,7 +4936,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       const gudangCancelResiSet = new Set<string>(
          auditPendingData
-            .filter(d => d.status === 'CANCEL' || d.menu_context === 'CANCEL')
+            .filter(d => d.status === 'CANCEL' || d.menu_context === 'CANCEL' || (d.description && d.description.toUpperCase().includes('[CANCEL]')))
             .map(d => (d.barcode || '').toString().trim().toUpperCase())
             .filter(Boolean)
       );
@@ -4924,7 +4948,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       ]);
       const readyResiSet = new Set<string>(
          auditPendingData
-            .filter(d => d.status === 'READY' || d.menu_context === 'READY')
+            .filter(d => d.status === 'READY' || d.menu_context === 'READY' || (d.description && d.description.toUpperCase().includes('[READY]')))
             .map(d => (d.barcode || '').toString().trim().toUpperCase())
             .filter(Boolean)
       );
@@ -4940,10 +4964,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const ojolResiSet = new Set<string>(relevantRoleData.filter(d => (d.role || '').toUpperCase() === 'OJOL').map(d => (d.barcode || '').toString().trim().toUpperCase()).filter(Boolean));
       const pendingResi = new Set<string>(
          auditPendingData
-            .filter(d => d.status === 'PENDING' || d.menu_context === 'PENDING')
+            .filter(d => d.status === 'PENDING' || d.menu_context === 'PENDING' || (d.description && (d.description.toUpperCase().includes('[PENDING]') || d.description.toUpperCase().includes('[PENDING LT3]'))))
             .map(d => (d.barcode || '').toString().trim().toUpperCase())
             .filter(Boolean)
       );
+
+      // If a resi is Cancelled, Ready in Gudang, or Scanned by Field Role, it is NO LONGER Pending!
+      cancelBarcodeSet.forEach(bc => pendingResi.delete(bc));
+      readyResiSet.forEach(bc => pendingResi.delete(bc));
+      roleResi.forEach(bc => pendingResi.delete(bc));
 
       const crossDateResiMap = new Map<string, string>(); // barcode -> dateStr
       const sameDayResiSet = new Set<string>();
@@ -9059,74 +9088,176 @@ if (filterPackingShift !== 'ALL') {
                                     <p className="text-xs sm:text-sm text-gray-500 font-medium">Import data resi logistik dengan cepat. Cukup copy-paste no resi / ID pesanan.</p>
                                  </div>
                               </div>
-                              <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+                              <div className="flex items-center gap-3 w-full sm:w-auto relative">
                                  {(showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || packingSearch.toLowerCase().includes('devmodenew')) && (
-                                    <div className="flex flex-wrap items-center gap-2">
+                                    <div ref={logistikDevToolsRef} className="relative">
                                        <button
-                                          onClick={handleCleanDevModeLogistikData}
-                                          disabled={isCleaningDevModeLogistik}
-                                          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-xl font-bold shadow-lg shadow-amber-200 dark:shadow-none transition-all active:scale-95 text-xs sm:text-sm cursor-pointer border border-amber-500/30"
-                                          title="Tool Khusus DevMode Logistik: Auto-padding 00 pada resi Logistik diawali 4 atau 2"
+                                          onClick={() => setIsLogistikDevToolsOpen(prev => !prev)}
+                                          className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-bold transition-all active:scale-95 text-xs sm:text-sm cursor-pointer border shadow-sm ${
+                                             isLogistikDevToolsOpen 
+                                                ? 'bg-amber-600 text-white border-amber-500 shadow-amber-500/20 ring-2 ring-amber-500/30' 
+                                                : 'bg-amber-50 hover:bg-amber-100/80 dark:bg-amber-950/40 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/80'
+                                          }`}
+                                          title="Buka Menu Dev Tools Logistik"
                                        >
-                                          {isCleaningDevModeLogistik ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
-                                          <span>Bersihkan Logistik 00 (DevMode)</span>
+                                          <Wrench size={16} className={`transition-transform duration-200 ${isLogistikDevToolsOpen ? 'rotate-45' : ''}`} />
+                                          <span>Dev Tools Logistik</span>
+                                          <span className="px-1.5 py-0.5 text-[10px] rounded-md font-extrabold bg-amber-500/20 text-amber-800 dark:text-amber-200 border border-amber-400/30">
+                                             7 Tools
+                                          </span>
+                                          <ChevronDown size={14} className={`transition-transform duration-200 ${isLogistikDevToolsOpen ? 'rotate-180' : ''}`} />
                                        </button>
-                                       <button
-                                          onClick={() => { setDevModeModalText(''); setDevModeModalConfig({ isOpen: true, type: 'NORMAL' }); }}
-                                          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-bold shadow-lg shadow-orange-200 dark:shadow-none transition-all active:scale-95 text-xs sm:text-sm cursor-pointer border border-orange-500/30"
-                                          title="Tool Khusus DevMode Logistik: Input massal untuk menambahkan 00 di depan resi"
-                                       >
-                                          <Plus size={16} />
-                                          <span>Manual Logistik 00 (DevMode)</span>
-                                       </button>
-                                       <button
-                                          onClick={() => { setDevModeModalText(''); setDevModeModalConfig({ isOpen: true, type: 'EXCEL' }); }}
-                                          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-yellow-600 hover:bg-yellow-700 text-white rounded-xl font-bold shadow-lg shadow-yellow-200 dark:shadow-none transition-all active:scale-95 text-xs sm:text-sm cursor-pointer border border-yellow-500/30"
-                                          title="Tool Khusus DevMode Logistik: Input massal via Copy Paste Excel untuk menambahkan 00 di depan resi (Otomatis ambil kolom 2)"
-                                       >
-                                          <Plus size={16} />
-                                          <span>Manual Excel Logistik (DevMode)</span>
-                                       </button>
-                                       <button
-                                          onClick={() => { setDevModeModalText(''); setDevModeModalConfig({ isOpen: true, type: 'REMOVE_00' }); }}
-                                          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold shadow-lg shadow-red-200 dark:shadow-none transition-all active:scale-95 text-xs sm:text-sm cursor-pointer border border-red-500/30"
-                                          title="Tool Khusus DevMode: Input massal untuk menghapus 00 di depan resi (Semua Role)"
-                                       >
-                                          <Minus size={16} />
-                                          <span>Manual Hapus 00 (DevMode)</span>
-                                       </button>
-                                       <button
-                                          onClick={handleCleanDevMode0026Data}
-                                          disabled={isCleaningDevMode0026}
-                                          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-xl font-bold shadow-lg shadow-rose-200 dark:shadow-none transition-all active:scale-95 text-xs sm:text-sm cursor-pointer border border-rose-500/30"
-                                          title="Tool Khusus DevMode: Hapus prefix 00 pada resi 0026 -> 26 (Role Checker, Picker, Packing, Ojol)"
-                                       >
-                                          {isCleaningDevMode0026 ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
-                                          <span>Hapus 00 pada 0026 (DevMode)</span>
-                                       </button>
-                                       <button
-                                          onClick={handleCleanDevModeLxadData}
-                                          disabled={isCleaningDevModeLxad}
-                                          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-xl font-bold shadow-lg shadow-teal-200 dark:shadow-none transition-all active:scale-95 text-xs sm:text-sm cursor-pointer border border-teal-500/30"
-                                          title="Tool Khusus DevMode: Format resi LXADxxxxxxxx menjadi LXAD-xxxxxxxxx (Semua Role)"
-                                       >
-                                          {isCleaningDevModeLxad ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
-                                          <span>Format LXAD (DevMode)</span>
-                                       </button>
-                                       <button
-                                          onClick={handleCleanDevModeJnapData}
-                                          disabled={isCleaningDevModeJnap}
-                                          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 text-white rounded-xl font-bold shadow-lg shadow-cyan-200 dark:shadow-none transition-all active:scale-95 text-xs sm:text-sm cursor-pointer border border-cyan-500/30"
-                                          title="Tool Khusus DevMode: Format resi JNAPxxxxxxxx menjadi JNAP-xxxxxxxxx (Semua Role)"
-                                       >
-                                          {isCleaningDevModeJnap ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
-                                          <span>Format JNAP (DevMode)</span>
-                                       </button>
+
+                                       {/* DevTools Dropdown Popover */}
+                                       {isLogistikDevToolsOpen && (
+                                          <>
+                                             <div className="fixed inset-0 z-40" onClick={() => setIsLogistikDevToolsOpen(false)} />
+                                             <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl z-50 p-2 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                                                {/* Header inside popup */}
+                                                <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+                                                   <div className="flex items-center gap-2">
+                                                      <div className="w-6 h-6 rounded-lg bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                                                         <Sparkles size={14} />
+                                                      </div>
+                                                      <span className="text-xs font-bold text-gray-800 dark:text-gray-200">Tools Khusus DevMode</span>
+                                                   </div>
+                                                   <button
+                                                      onClick={() => setIsLogistikDevToolsOpen(false)}
+                                                      className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+                                                   >
+                                                      <X size={14} />
+                                                   </button>
+                                                </div>
+
+                                                <div className="p-1 space-y-1 max-h-[70vh] overflow-y-auto">
+                                                   {/* Section 1: Logistik 00 Cleaners & Adders */}
+                                                   <div className="px-2 pt-2 pb-1 text-[10px] font-extrabold tracking-wider uppercase text-amber-600 dark:text-amber-400">
+                                                      Khusus Role Logistik
+                                                   </div>
+                                                   
+                                                   {/* 1. Bersihkan Logistik 00 */}
+                                                   <button
+                                                      onClick={() => { setIsLogistikDevToolsOpen(false); handleCleanDevModeLogistikData(); }}
+                                                      disabled={isCleaningDevModeLogistik}
+                                                      className="w-full flex items-start gap-3 p-2.5 text-left rounded-xl hover:bg-amber-50 dark:hover:bg-amber-950/40 text-gray-700 dark:text-gray-200 transition-colors group cursor-pointer border border-transparent hover:border-amber-200 dark:hover:border-amber-800/60 disabled:opacity-50"
+                                                   >
+                                                      <div className="w-8 h-8 rounded-lg bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                                                         {isCleaningDevModeLogistik ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
+                                                      </div>
+                                                      <div className="flex-1 min-w-0">
+                                                         <div className="text-xs font-bold text-gray-900 dark:text-white flex items-center justify-between">
+                                                            <span>Bersihkan Logistik 00</span>
+                                                            <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/50 px-1.5 py-0.5 rounded">Auto</span>
+                                                         </div>
+                                                         <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">Auto-pad 00 pd resi diawali 4 atau 2</p>
+                                                      </div>
+                                                   </button>
+
+                                                   {/* 2. Manual Logistik 00 */}
+                                                   <button
+                                                      onClick={() => { setIsLogistikDevToolsOpen(false); setDevModeModalText(''); setDevModeModalConfig({ isOpen: true, type: 'NORMAL' }); }}
+                                                      className="w-full flex items-start gap-3 p-2.5 text-left rounded-xl hover:bg-orange-50 dark:hover:bg-orange-950/40 text-gray-700 dark:text-gray-200 transition-colors group cursor-pointer border border-transparent hover:border-orange-200 dark:hover:border-orange-800/60"
+                                                   >
+                                                      <div className="w-8 h-8 rounded-lg bg-orange-500/10 dark:bg-orange-500/20 text-orange-600 dark:text-orange-400 flex items-center justify-center shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                                                         <Plus size={16} />
+                                                      </div>
+                                                      <div className="flex-1 min-w-0">
+                                                         <div className="text-xs font-bold text-gray-900 dark:text-white">Manual Logistik 00</div>
+                                                         <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">Input massal tambah 00 di depan resi</p>
+                                                      </div>
+                                                   </button>
+
+                                                   {/* 3. Manual Excel Logistik */}
+                                                   <button
+                                                      onClick={() => { setIsLogistikDevToolsOpen(false); setDevModeModalText(''); setDevModeModalConfig({ isOpen: true, type: 'EXCEL' }); }}
+                                                      className="w-full flex items-start gap-3 p-2.5 text-left rounded-xl hover:bg-yellow-50 dark:hover:bg-yellow-950/40 text-gray-700 dark:text-gray-200 transition-colors group cursor-pointer border border-transparent hover:border-yellow-200 dark:hover:border-yellow-800/60"
+                                                      title="Tool Khusus DevMode Logistik: Input massal via Copy Paste Excel untuk menambahkan 00 di depan resi (Otomatis ambil kolom 2)"
+                                                   >
+                                                      <div className="w-8 h-8 rounded-lg bg-yellow-500/10 dark:bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 flex items-center justify-center shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                                                         <FileSpreadsheet size={16} />
+                                                      </div>
+                                                      <div className="flex-1 min-w-0">
+                                                         <div className="text-xs font-bold text-gray-900 dark:text-white">Manual Excel Logistik</div>
+                                                         <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">Paste Excel, otomatis ambil kolom 2</p>
+                                                      </div>
+                                                   </button>
+
+                                                   {/* Section 2: Global Barcode Formatting & Cleaners */}
+                                                   <div className="px-2 pt-3 pb-1 text-[10px] font-extrabold tracking-wider uppercase text-rose-600 dark:text-rose-400 border-t border-gray-100 dark:border-gray-700 mt-1">
+                                                      Format & Repair Barcode (Semua Role)
+                                                   </div>
+
+                                                   {/* 4. Manual Hapus 00 */}
+                                                   <button
+                                                      onClick={() => { setIsLogistikDevToolsOpen(false); setDevModeModalText(''); setDevModeModalConfig({ isOpen: true, type: 'REMOVE_00' }); }}
+                                                      className="w-full flex items-start gap-3 p-2.5 text-left rounded-xl hover:bg-red-50 dark:hover:bg-red-950/40 text-gray-700 dark:text-gray-200 transition-colors group cursor-pointer border border-transparent hover:border-red-200 dark:hover:border-red-800/60"
+                                                      title="Tool Khusus DevMode: Input massal untuk menghapus 00 di depan resi (Semua Role)"
+                                                   >
+                                                      <div className="w-8 h-8 rounded-lg bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                                                         <Minus size={16} />
+                                                      </div>
+                                                      <div className="flex-1 min-w-0">
+                                                         <div className="text-xs font-bold text-gray-900 dark:text-white">Manual Hapus 00</div>
+                                                         <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">Input massal hapus 00 di depan resi</p>
+                                                      </div>
+                                                   </button>
+
+                                                   {/* 5. Hapus 00 pada 0026 */}
+                                                   <button
+                                                      onClick={() => { setIsLogistikDevToolsOpen(false); handleCleanDevMode0026Data(); }}
+                                                      disabled={isCleaningDevMode0026}
+                                                      className="w-full flex items-start gap-3 p-2.5 text-left rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/40 text-gray-700 dark:text-gray-200 transition-colors group cursor-pointer border border-transparent hover:border-rose-200 dark:hover:border-rose-800/60 disabled:opacity-50"
+                                                      title="Tool Khusus DevMode: Hapus prefix 00 pada resi 0026 -> 26 (Role Checker, Picker, Packing, Ojol)"
+                                                   >
+                                                      <div className="w-8 h-8 rounded-lg bg-rose-500/10 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                                                         {isCleaningDevMode0026 ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
+                                                      </div>
+                                                      <div className="flex-1 min-w-0">
+                                                         <div className="text-xs font-bold text-gray-900 dark:text-white">Hapus 00 pada 0026</div>
+                                                         <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">Hapus prefix 00 pd resi 0026 -&gt; 26</p>
+                                                      </div>
+                                                   </button>
+
+                                                   {/* 6. Format LXAD */}
+                                                   <button
+                                                      onClick={() => { setIsLogistikDevToolsOpen(false); handleCleanDevModeLxadData(); }}
+                                                      disabled={isCleaningDevModeLxad}
+                                                      className="w-full flex items-start gap-3 p-2.5 text-left rounded-xl hover:bg-teal-50 dark:hover:bg-teal-950/40 text-gray-700 dark:text-gray-200 transition-colors group cursor-pointer border border-transparent hover:border-teal-200 dark:hover:border-teal-800/60 disabled:opacity-50"
+                                                      title="Tool Khusus DevMode: Format resi LXADxxxxxxxx menjadi LXAD-xxxxxxxxx (Semua Role)"
+                                                   >
+                                                      <div className="w-8 h-8 rounded-lg bg-teal-500/10 dark:bg-teal-500/20 text-teal-600 dark:text-teal-400 flex items-center justify-center shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                                                         {isCleaningDevModeLxad ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
+                                                      </div>
+                                                      <div className="flex-1 min-w-0">
+                                                         <div className="text-xs font-bold text-gray-900 dark:text-white">Format LXAD</div>
+                                                         <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">Format LXADxxxxxxxx -&gt; LXAD-xxxxxxxxx</p>
+                                                      </div>
+                                                   </button>
+
+                                                   {/* 7. Format JNAP */}
+                                                   <button
+                                                      onClick={() => { setIsLogistikDevToolsOpen(false); handleCleanDevModeJnapData(); }}
+                                                      disabled={isCleaningDevModeJnap}
+                                                      className="w-full flex items-start gap-3 p-2.5 text-left rounded-xl hover:bg-cyan-50 dark:hover:bg-cyan-950/40 text-gray-700 dark:text-gray-200 transition-colors group cursor-pointer border border-transparent hover:border-cyan-200 dark:hover:border-cyan-800/60 disabled:opacity-50"
+                                                      title="Tool Khusus DevMode: Format resi JNAPxxxxxxxx menjadi JNAP-xxxxxxxxx (Semua Role)"
+                                                   >
+                                                      <div className="w-8 h-8 rounded-lg bg-cyan-500/10 dark:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                                                         {isCleaningDevModeJnap ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
+                                                      </div>
+                                                      <div className="flex-1 min-w-0">
+                                                         <div className="text-xs font-bold text-gray-900 dark:text-white">Format JNAP</div>
+                                                         <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">Format JNAPxxxxxxxx -&gt; JNAP-xxxxxxxxx</p>
+                                                      </div>
+                                                   </button>
+                                                </div>
+                                             </div>
+                                          </>
+                                       )}
                                     </div>
                                  )}
                                  <button
                                     onClick={() => setIsLogistikImportModalOpen(true)}
-                                    className="flex items-center justify-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 dark:shadow-none transition-all active:scale-95 sm:w-auto w-full border border-indigo-500/20 cursor-pointer"
+                                    className="flex items-center justify-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 dark:shadow-none transition-all active:scale-95 sm:w-auto w-full border border-indigo-500/20 cursor-pointer text-xs sm:text-sm"
                                  >
                                     <Plus size={18} /> Import Text (Cepat)
                                  </button>
@@ -9135,12 +9266,12 @@ if (filterPackingShift !== 'ALL') {
                         </div>
                      )}
 
-                     {/* TOOLBAR 1: Packing, Sortir, Scan All, Ojol, Failed Scans, Gudang */}
+                     {/* TOOLBAR 1: Packing, Sortir, Scan All, Ojol, Failed Scans, Gudang, Logistik */}
                      {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING' || activeView === 'SCAN_ALL' || activeView === 'OJOL_DATA' || activeView === 'FAILED_SCANS') && (
                         <div className="p-3 sm:p-4 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200/80 dark:border-gray-800 shrink-0 w-full max-w-[100vw] shadow-2xs">
 
-                           {/* REFACTORED TOOLBAR FOR PACKING, SORTIR, PICKER, OJOL, SCAN_ALL, GUDANG (UNIFIED GRID) */}
-                           {(['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA', 'SCAN_ALL', 'GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_REPORT', 'GUDANG_BUNDLING'].includes(activeView)) ? (
+                           {/* REFACTORED TOOLBAR FOR PACKING, SORTIR, PICKER, OJOL, SCAN_ALL, GUDANG, LOGISTIK (UNIFIED GRID) */}
+                           {(['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA', 'SCAN_ALL', 'GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_REPORT', 'GUDANG_BUNDLING', 'LOGISTIK_DATA'].includes(activeView)) ? (
                               <div className="flex flex-col gap-2.5 w-full">
                                  {/* ROW 1: Date, Cancel, Search, Role, Shift */}
                                  <div className="grid grid-cols-12 gap-2.5 items-center">
@@ -9177,8 +9308,8 @@ if (filterPackingShift !== 'ALL') {
                                        </div>
                                     </div>
 
-                                    {/* Cancel Filter (2 cols) - PACKING, SORTIR, PICKER, CHECKER, OJOL */}
-                                    {['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA'].includes(activeView) && (
+                                    {/* Cancel Filter (2 cols) - PACKING, SORTIR, PICKER, CHECKER, OJOL, LOGISTIK */}
+                                    {['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA', 'LOGISTIK_DATA'].includes(activeView) && (
                                        <div className="col-span-12 sm:col-span-6 md:col-span-3 lg:col-span-2 h-10">
                                           <div
                                              className={`flex items-center gap-2.5 h-full px-3 rounded-xl border shadow-2xs cursor-pointer select-none transition-all w-full ${filterCancelOnly ? 'bg-red-50/90 border-red-200/90 text-red-700 dark:bg-red-950/40 dark:border-red-800/80 dark:text-red-300' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700/80 hover:bg-gray-50 dark:hover:bg-gray-750 text-gray-600 dark:text-gray-300'}`}
@@ -9222,8 +9353,8 @@ if (filterPackingShift !== 'ALL') {
                                        />
                                     </div>
 
-                                    {/* Shift Filter (2 cols) - PACKING, SORTIR, PICKER, OJOL (NOT SCAN_ALL HERE) */}
-                                    {['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA'].includes(activeView) && (
+                                    {/* Shift Filter (2 cols) - PACKING, SORTIR, PICKER, OJOL, LOGISTIK (NOT SCAN_ALL HERE) */}
+                                    {['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA', 'LOGISTIK_DATA'].includes(activeView) && (
                                        <div className="col-span-12 sm:col-span-6 md:col-span-3 lg:col-span-2 relative h-10">
                                           <Filter size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                                           <select
@@ -9263,8 +9394,8 @@ if (filterPackingShift !== 'ALL') {
                                        </div>
                                     )}
 
-                                    {/* Staff Filter (2 or 3 cols) - PACKING, SORTIR, PICKER, CHECKER, OJOL, SCAN_ALL, GUDANG_REPORT */}
-                                    {['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA', 'SCAN_ALL', 'GUDANG_REPORT'].includes(activeView) && (
+                                    {/* Staff Filter (2 or 3 cols) - PACKING, SORTIR, PICKER, CHECKER, OJOL, SCAN_ALL, GUDANG_REPORT, LOGISTIK */}
+                                    {['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA', 'SCAN_ALL', 'GUDANG_REPORT', 'LOGISTIK_DATA'].includes(activeView) && (
                                        <div className={`col-span-6 sm:col-span-4 md:col-span-3 ${activeView === 'SCAN_ALL' ? 'lg:col-span-3' : 'lg:col-span-2'} relative h-10`}>
                                           <Users size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                                           <select
@@ -9601,10 +9732,11 @@ if (filterPackingShift !== 'ALL') {
                                           )}
                                        </div>
                                     )}
+
                                     {/* Buttons */}
                                     <div className="grid grid-cols-[auto_1fr] sm:flex sm:flex-wrap items-center gap-2 w-full xl:w-auto">
                                        {/* Tombol Khusus DevMode Repair Barcodes (Tampil di Semua Role bila DevMode Aktif) */}
-                                       {(showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || packingSearch.toLowerCase().includes('devmodenew')) && (
+                                       {activeView !== 'LOGISTIK_DATA' && (showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || packingSearch.toLowerCase().includes('devmodenew')) && (
                                           <>
                                              <button
                                                 onClick={handleCleanDevMode0026Data}
@@ -13877,14 +14009,14 @@ LXAD-1234567890`}
                                                 <div className="flex-1 overflow-y-auto p-2">
                                                    {isLoadingAuditData ? (
                                                       <div className="flex justify-center py-10"><Loader2 className="animate-spin text-red-500" size={24} /></div>
-                                                   ) : auditPendingData.length === 0 ? (
+                                                   ) : pendingResi.size === 0 ? (
                                                       <div className="text-center text-sm text-gray-400 py-10">Data kosong</div>
                                                    ) : (
                                                       <div className="flex flex-col gap-1">
-                                                         {auditPendingData.map((d, i) => (
+                                                         {Array.from(pendingResi).map((barcode, i) => (
                                                             <div key={i} className="px-3 py-2 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 rounded text-xs font-mono font-bold text-red-700 dark:text-red-400 flex justify-between items-center">
-                                                               <span>{d.barcode}</span>
-                                                               {roleResi.has(d.barcode) && <span className="bg-green-100 text-green-600 px-1.5 py-0.5 rounded text-[10px]">SCANNED BY {auditRoleFilter}</span>}
+                                                               <span>{barcode}</span>
+                                                               {roleResi.has(barcode) && <span className="bg-green-100 text-green-600 px-1.5 py-0.5 rounded text-[10px]">SCANNED BY {auditRoleFilter}</span>}
                                                             </div>
                                                          ))}
                                                       </div>
@@ -15907,17 +16039,17 @@ LXAD-1234567890`}
                                                        <div className="flex-1 overflow-y-auto p-3">
                                                           {isLoadingAuditData ? (
                                                              <div className="flex justify-center py-10"><Loader2 className="animate-spin text-red-500" size={24} /></div>
-                                                          ) : auditPendingData.length === 0 ? (
+                                                          ) : pendingResi.size === 0 ? (
                                                              <div className="text-center text-sm text-gray-400 py-10 flex flex-col items-center gap-2">
                                                                 <AlertCircle size={32} className="text-gray-300" />
                                                                 <span>Tidak ada data pending</span>
                                                              </div>
                                                           ) : (
                                                              <div className="flex flex-col gap-1">
-                                                                {auditPendingData.map((d, i) => (
+                                                                {Array.from(pendingResi).map((barcode, i) => (
                                                                    <div key={i} className="px-3 py-2 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 rounded-lg text-xs font-mono font-bold text-red-700 dark:text-red-400 flex justify-between items-center">
-                                                                      <span>{d.barcode}</span>
-                                                                      {roleResi.has(d.barcode) && <span className="bg-green-100 text-green-600 px-1.5 py-0.5 rounded text-[10px] font-bold">SCANNED BY {auditRoleFilter}</span>}
+                                                                      <span>{barcode}</span>
+                                                                      {roleResi.has(barcode) && <span className="bg-green-100 text-green-600 px-1.5 py-0.5 rounded text-[10px] font-bold">SCANNED BY {auditRoleFilter}</span>}
                                                                    </div>
                                                                 ))}
                                                              </div>
