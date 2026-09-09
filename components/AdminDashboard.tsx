@@ -22,6 +22,7 @@ import {
    Database,
    LogOut,
    LayoutDashboard,
+   LayoutGrid,
    KeyRound,
    Shield,
    MessageSquare,
@@ -367,6 +368,99 @@ const EmployeeRow = React.memo(({
    );
 });
 
+const ROLE_BADGE_STYLES: Record<string, { bg: string; text: string; border: string; activeBg: string; activeText: string; activeBorder: string; dot: string }> = {
+   PICKER: {
+      bg: 'bg-cyan-50 dark:bg-cyan-950/30',
+      text: 'text-cyan-700 dark:text-cyan-300',
+      border: 'border-cyan-200 dark:border-cyan-800',
+      activeBg: 'bg-cyan-600',
+      activeText: 'text-white',
+      activeBorder: 'border-cyan-600',
+      dot: 'bg-cyan-500',
+   },
+   PICKER_2: {
+      bg: 'bg-sky-50 dark:bg-sky-950/30',
+      text: 'text-sky-700 dark:text-sky-300',
+      border: 'border-sky-200 dark:border-sky-800',
+      activeBg: 'bg-sky-600',
+      activeText: 'text-white',
+      activeBorder: 'border-sky-600',
+      dot: 'bg-sky-500',
+   },
+   SORTIR: {
+      bg: 'bg-purple-50 dark:bg-purple-950/30',
+      text: 'text-purple-700 dark:text-purple-300',
+      border: 'border-purple-200 dark:border-purple-800',
+      activeBg: 'bg-purple-600',
+      activeText: 'text-white',
+      activeBorder: 'border-purple-600',
+      dot: 'bg-purple-500',
+   },
+   PACKING: {
+      bg: 'bg-blue-50 dark:bg-blue-950/30',
+      text: 'text-blue-700 dark:text-blue-300',
+      border: 'border-blue-200 dark:border-blue-800',
+      activeBg: 'bg-blue-600',
+      activeText: 'text-white',
+      activeBorder: 'border-blue-600',
+      dot: 'bg-blue-500',
+   },
+   PACKING_2: {
+      bg: 'bg-indigo-50 dark:bg-indigo-950/30',
+      text: 'text-indigo-700 dark:text-indigo-300',
+      border: 'border-indigo-200 dark:border-indigo-800',
+      activeBg: 'bg-indigo-600',
+      activeText: 'text-white',
+      activeBorder: 'border-indigo-600',
+      dot: 'bg-indigo-500',
+   },
+   GUDANG: {
+      bg: 'bg-amber-50 dark:bg-amber-950/30',
+      text: 'text-amber-700 dark:text-amber-300',
+      border: 'border-amber-200 dark:border-amber-800',
+      activeBg: 'bg-amber-600',
+      activeText: 'text-white',
+      activeBorder: 'border-amber-600',
+      dot: 'bg-amber-500',
+   },
+   OJOL: {
+      bg: 'bg-emerald-50 dark:bg-emerald-950/30',
+      text: 'text-emerald-700 dark:text-emerald-300',
+      border: 'border-emerald-200 dark:border-emerald-800',
+      activeBg: 'bg-emerald-600',
+      activeText: 'text-white',
+      activeBorder: 'border-emerald-600',
+      dot: 'bg-emerald-500',
+   },
+   LEADER: {
+      bg: 'bg-violet-50 dark:bg-violet-950/30',
+      text: 'text-violet-700 dark:text-violet-300',
+      border: 'border-violet-200 dark:border-violet-800',
+      activeBg: 'bg-violet-600',
+      activeText: 'text-white',
+      activeBorder: 'border-violet-600',
+      dot: 'bg-violet-500',
+   },
+   CHECKER: {
+      bg: 'bg-teal-50 dark:bg-teal-950/30',
+      text: 'text-teal-700 dark:text-teal-300',
+      border: 'border-teal-200 dark:border-teal-800',
+      activeBg: 'bg-teal-600',
+      activeText: 'text-white',
+      activeBorder: 'border-teal-600',
+      dot: 'bg-teal-500',
+   },
+   ADMIN: {
+      bg: 'bg-rose-50 dark:bg-rose-950/30',
+      text: 'text-rose-700 dark:text-rose-300',
+      border: 'border-rose-200 dark:border-rose-800',
+      activeBg: 'bg-rose-600',
+      activeText: 'text-white',
+      activeBorder: 'border-rose-600',
+      dot: 'bg-rose-500',
+   },
+};
+
 const AccessRow = React.memo(({
    email,
    isSelected,
@@ -392,52 +486,285 @@ const AccessRow = React.memo(({
    onToggleManualInput: (email: string) => void,
    availableRoles: string[]
 }) => {
+   const userInitial = (email || 'U').charAt(0).toUpperCase();
+   const activeRolesCount = permissions?.length || 0;
+
    return (
-      <tr className={`${isSelected ? 'bg-blue-50 dark:bg-blue-900/10' : ''} ${isBlocked ? 'opacity-60 bg-red-50 dark:bg-red-900/10' : ''}`}>
-         <td className="p-4 bg-white dark:bg-gray-800 sticky left-0 z-10">
-            <button onClick={() => onSelect(email)} className={`w-5 h-5 rounded border flex items-center justify-center ${isSelected ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-300'}`}>
-               {isSelected && <Check size={14} />}
+      <tr className={`group transition-colors ${
+         isSelected 
+            ? 'bg-blue-50/80 dark:bg-blue-900/20' 
+            : isBlocked 
+            ? 'bg-red-50/40 dark:bg-red-950/10 opacity-75 hover:opacity-100 hover:bg-red-50/70' 
+            : 'hover:bg-slate-50/80 dark:hover:bg-gray-800/60'
+      }`}>
+         {/* Checkbox */}
+         <td className="p-3 pl-4 sm:pl-6 w-12 sticky left-0 z-10 bg-white dark:bg-gray-800 group-hover:bg-slate-50 dark:group-hover:bg-gray-800 border-b border-gray-100 dark:border-gray-700">
+            <button 
+               onClick={() => onSelect(email)} 
+               className={`w-5 h-5 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${
+                  isSelected 
+                     ? 'bg-blue-600 border-blue-600 text-white shadow-sm shadow-blue-500/30' 
+                     : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-blue-400'
+               }`}
+               title={isSelected ? "Deselect" : "Select user"}
+            >
+               {isSelected && <Check size={13} strokeWidth={3} />}
             </button>
          </td>
-         <td className="p-4 font-medium text-sm sticky left-12 bg-white dark:bg-gray-800 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.05)] min-w-[200px]">
-            {email}
-            {isBlocked && <span className="ml-2 text-xs text-red-500 font-bold px-1 border border-red-200 rounded">BLOCKED</span>}
+
+         {/* User Account */}
+         <td className="p-3 font-medium text-sm sticky left-12 z-10 bg-white dark:bg-gray-800 group-hover:bg-slate-50 dark:group-hover:bg-gray-800 border-b border-gray-100 dark:border-gray-700 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)] min-w-[220px] max-w-[320px]">
+            <div className="flex items-center gap-2.5">
+               <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 shadow-sm ${
+                  isBlocked 
+                     ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' 
+                     : activeRolesCount > 0 
+                     ? 'bg-gradient-to-br from-indigo-500 to-blue-600 text-white shadow-indigo-500/20' 
+                     : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+               }`}>
+                  {userInitial}
+               </div>
+               <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                     <span className="font-semibold text-gray-900 dark:text-gray-100 truncate text-xs sm:text-sm">{email}</span>
+                     {isBlocked && (
+                        <span className="text-[10px] uppercase tracking-wider font-extrabold px-1.5 py-0.2 rounded bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300 border border-red-200 dark:border-red-800 shrink-0">
+                           Blocked
+                        </span>
+                     )}
+                  </div>
+                  <div className="text-[11px] text-gray-400 dark:text-gray-500 flex items-center gap-1 mt-0.5">
+                     <span className={`inline-block w-1.5 h-1.5 rounded-full ${activeRolesCount > 0 ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`} />
+                     <span>{activeRolesCount} role aktif</span>
+                  </div>
+               </div>
+            </div>
          </td>
-         {availableRoles.map(role => (
-            <td key={role} className="p-4 text-center min-w-[100px]">
-               <button onClick={() => onToggleRole(email, role)} className={`p-2 rounded-lg ${permissions?.includes(role as UserRole) ? 'bg-blue-50 text-blue-600' : 'text-gray-300'}`}>
-                  {permissions?.includes(role as UserRole) ? <CheckSquare size={20} /> : <Square size={20} />}
-               </button>
-            </td>
-         ))}
-         <td className="p-4 text-center min-w-[120px]">
+
+         {/* Role Checkboxes / Toggle Pills */}
+         {availableRoles.map(role => {
+            const hasRole = permissions?.includes(role as UserRole);
+            const style = ROLE_BADGE_STYLES[role] || {
+               bg: 'bg-gray-50 dark:bg-gray-800',
+               text: 'text-gray-700 dark:text-gray-300',
+               border: 'border-gray-200 dark:border-gray-700',
+               activeBg: 'bg-blue-600',
+               activeText: 'text-white',
+               activeBorder: 'border-blue-600',
+               dot: 'bg-blue-500',
+            };
+
+            return (
+               <td key={role} className="p-2 text-center min-w-[90px] border-b border-gray-100 dark:border-gray-700">
+                  <button
+                     onClick={() => onToggleRole(email, role)}
+                     className={`w-full max-w-[80px] py-1.5 px-2 rounded-xl text-xs font-bold transition-all duration-150 inline-flex items-center justify-center gap-1 cursor-pointer border ${
+                        hasRole
+                           ? `${style.activeBg} ${style.activeText} ${style.activeBorder} shadow-sm shadow-blue-500/20 scale-100`
+                           : 'bg-gray-50/80 dark:bg-gray-800/40 text-gray-400 dark:text-gray-500 border-gray-200/80 dark:border-gray-700/60 hover:border-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                     }`}
+                     title={`${hasRole ? 'Cabut' : 'Beri'} akses ${role}`}
+                  >
+                     {hasRole ? <Check size={12} strokeWidth={3} /> : <span className="w-2.5 h-2.5 rounded-sm border border-gray-300 dark:border-gray-600 inline-block" />}
+                  </button>
+               </td>
+            );
+         })}
+
+         {/* Manual Input Toggle */}
+         <td className="p-2 text-center min-w-[110px] border-b border-gray-100 dark:border-gray-700">
             <button
                onClick={() => onToggleManualInput(email)}
-               className={`p-2 rounded-lg transition-colors border ${canManualInput ? 'bg-green-50 text-green-600 border-green-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}
-               title={canManualInput ? "Manual Input Enabled" : "Manual Input Locked"}
+               className={`px-3 py-1.5 rounded-xl transition-all text-xs font-bold inline-flex items-center gap-1.5 border cursor-pointer ${
+                  canManualInput
+                     ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 shadow-sm'
+                     : 'bg-gray-50 dark:bg-gray-800 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-700 hover:text-gray-600'
+               }`}
+               title={canManualInput ? "Manual Input Aktif (Klik untuk kunci)" : "Manual Input Terkunci (Klik untuk aktifkan)"}
             >
-               {canManualInput ? <Unlock size={18} /> : <Lock size={18} />}
+               {canManualInput ? <Unlock size={14} className="text-emerald-600 dark:text-emerald-400" /> : <Lock size={14} />}
+               <span>{canManualInput ? "Allowed" : "Locked"}</span>
             </button>
          </td>
-         <td className="p-4 text-right min-w-[100px]">
-            <div className="flex justify-end gap-2">
+
+         {/* Actions */}
+         <td className="p-3 pr-4 sm:pr-6 text-right min-w-[100px] border-b border-gray-100 dark:border-gray-700">
+            <div className="flex justify-end items-center gap-1">
                <button
                   onClick={() => onBlock(email)}
-                  className={`p-2 rounded-lg transition-colors ${isBlocked ? 'bg-red-100 text-red-600' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
-                  title={isBlocked ? "Unblock User" : "Block User"}
+                  className={`p-2 rounded-xl transition-all cursor-pointer ${
+                     isBlocked
+                        ? 'bg-red-600 text-white shadow-sm shadow-red-500/30 hover:bg-red-700'
+                        : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30'
+                  }`}
+                  title={isBlocked ? "Buka Blokir User (Unblock)" : "Blokir User"}
                >
-                  <Ban size={18} />
+                  <Ban size={15} />
                </button>
                <button
                   onClick={() => onPromptDelete(email)}
-                  className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                  title="Delete User"
+                  className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl transition-all cursor-pointer"
+                  title="Hapus User"
                >
-                  <Trash2 size={18} />
+                  <Trash2 size={15} />
                </button>
             </div>
          </td>
       </tr>
+   );
+});
+
+const AccessUserCard = React.memo(({
+   email,
+   isSelected,
+   permissions,
+   onSelect,
+   onToggleRole,
+   isBlocked,
+   onBlock,
+   onPromptDelete,
+   canManualInput,
+   onToggleManualInput,
+   availableRoles
+}: {
+   email: string,
+   isSelected: boolean,
+   permissions: (UserRole | string)[],
+   onSelect: (email: string) => void,
+   onToggleRole: (email: string, role: string) => void,
+   isBlocked: boolean,
+   onBlock: (email: string) => void,
+   onPromptDelete: (email: string) => void,
+   canManualInput: boolean,
+   onToggleManualInput: (email: string) => void,
+   availableRoles: string[]
+}) => {
+   const userInitial = (email || 'U').charAt(0).toUpperCase();
+   const activeRolesCount = permissions?.length || 0;
+
+   return (
+      <div className={`p-4 rounded-2xl border transition-all duration-200 flex flex-col gap-3.5 ${
+         isSelected
+            ? 'bg-blue-50/90 dark:bg-blue-900/25 border-blue-400 dark:border-blue-600 shadow-md shadow-blue-500/10 ring-2 ring-blue-500/20'
+            : isBlocked
+            ? 'bg-red-50/40 dark:bg-red-950/15 border-red-200 dark:border-red-900/50 shadow-sm opacity-85'
+            : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600'
+      }`}>
+         {/* Top Row: Select Checkbox + Avatar + Email + Block Tag + Action Buttons */}
+         <div className="flex items-start justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+               <button
+                  onClick={() => onSelect(email)}
+                  className={`w-5 h-5 rounded-lg border flex items-center justify-center transition-all shrink-0 cursor-pointer ${
+                     isSelected
+                        ? 'bg-blue-600 border-blue-600 text-white shadow-sm shadow-blue-500/30'
+                        : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-blue-400'
+                  }`}
+               >
+                  {isSelected && <Check size={13} strokeWidth={3} />}
+               </button>
+
+               <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 shadow-sm ${
+                  isBlocked
+                     ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                     : activeRolesCount > 0
+                     ? 'bg-gradient-to-br from-indigo-500 to-blue-600 text-white shadow-indigo-500/20'
+                     : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+               }`}>
+                  {userInitial}
+               </div>
+
+               <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                     <p className="font-bold text-xs sm:text-sm text-gray-900 dark:text-white truncate" title={email}>{email}</p>
+                     {isBlocked && (
+                        <span className="text-[10px] uppercase font-extrabold px-1.5 py-0.2 rounded bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300 border border-red-200 dark:border-red-800 shrink-0">
+                           Blocked
+                        </span>
+                     )}
+                  </div>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1.5 mt-0.5">
+                     <span className={`w-2 h-2 rounded-full ${activeRolesCount > 0 ? 'bg-emerald-500' : 'bg-gray-400'}`}></span>
+                     <span>{activeRolesCount} role aktif</span>
+                  </p>
+               </div>
+            </div>
+
+            {/* Quick Actions (Block & Delete) */}
+            <div className="flex items-center gap-1 shrink-0">
+               <button
+                  onClick={() => onBlock(email)}
+                  className={`p-2 rounded-xl transition-colors cursor-pointer ${
+                     isBlocked
+                        ? 'bg-red-600 text-white shadow-sm'
+                        : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30'
+                  }`}
+                  title={isBlocked ? "Buka Blokir User" : "Blokir User"}
+               >
+                  <Ban size={15} />
+               </button>
+               <button
+                  onClick={() => onPromptDelete(email)}
+                  className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl transition-colors cursor-pointer"
+                  title="Hapus User"
+               >
+                  <Trash2 size={15} />
+               </button>
+            </div>
+         </div>
+
+         {/* Manual Input Toggle Row */}
+         <div className="flex items-center justify-between p-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-800">
+            <span className="text-xs font-bold text-gray-600 dark:text-gray-300 flex items-center gap-1.5">
+               <KeyRound size={13} className="text-gray-400" /> Manual Barcode Input
+            </span>
+            <button
+               onClick={() => onToggleManualInput(email)}
+               className={`px-3 py-1.5 rounded-lg transition-all text-xs font-bold flex items-center gap-1.5 border cursor-pointer ${
+                  canManualInput
+                     ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
+                     : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-700'
+               }`}
+            >
+               {canManualInput ? <Unlock size={13} className="text-emerald-600" /> : <Lock size={13} />}
+               <span>{canManualInput ? "Allowed" : "Locked"}</span>
+            </button>
+         </div>
+
+         {/* Interactive Role Chips */}
+         <div className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Perizinan Role</span>
+            <div className="flex flex-wrap gap-1.5">
+               {availableRoles.map(role => {
+                  const hasRole = permissions?.includes(role as UserRole);
+                  const style = ROLE_BADGE_STYLES[role] || {
+                     bg: 'bg-gray-50',
+                     text: 'text-gray-700',
+                     border: 'border-gray-200',
+                     activeBg: 'bg-blue-600',
+                     activeText: 'text-white',
+                     activeBorder: 'border-blue-600',
+                     dot: 'bg-blue-500',
+                  };
+
+                  return (
+                     <button
+                        key={role}
+                        onClick={() => onToggleRole(email, role)}
+                        className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 border cursor-pointer ${
+                           hasRole
+                              ? `${style.activeBg} ${style.activeText} ${style.activeBorder} shadow-sm`
+                              : 'bg-gray-50 dark:bg-gray-800/80 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-700 hover:border-gray-300 hover:text-gray-600'
+                        }`}
+                     >
+                        {hasRole ? <Check size={11} strokeWidth={3} /> : <span className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600" />}
+                        <span>{role}</span>
+                     </button>
+                  );
+               })}
+            </div>
+         </div>
+      </div>
    );
 });
 
@@ -773,6 +1100,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [adminSearch, setAdminSearch] = useState('');
    const [packingSearch, setPackingSearch] = useState('');
    const [filterAccessRole, setFilterAccessRole] = useState<string>('ALL'); // New Filter for Access Control
+   const [accessViewLayout, setAccessViewLayout] = useState<'AUTO' | 'TABLE' | 'CARDS'>('AUTO');
 
    // 3b. Global Search State
    const [globalSearchTerm, setGlobalSearchTerm] = useState('');
@@ -3479,6 +3807,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          return matchesSearch && matchesRole;
       }),
       [allUsers, accessSearch, filterAccessRole, localPermissions, isSuperAdmin]);
+
+   const accessStats = useMemo(() => {
+      const total = allUsers.length;
+      let withAccess = 0;
+      let manualAllowed = 0;
+      let blocked = 0;
+
+      allUsers.forEach(email => {
+         const roles = localPermissions[email] || [];
+         if (roles.length > 0) withAccess++;
+         if (localManualInput[email]) manualAllowed++;
+         if (blockedUsers[email]) blocked++;
+      });
+
+      return { total, withAccess, manualAllowed, blocked, filteredCount: filteredUsers.length };
+   }, [allUsers, localPermissions, localManualInput, blockedUsers, filteredUsers.length]);
 
    const filteredEmployees = useMemo(() =>
       employees.filter(emp => {
@@ -9872,10 +10216,10 @@ if (filterPackingShift !== 'ALL') {
                                     {activeView === 'ADMIN_MANAGEMENT' && (<SearchInput value={adminSearch} onChange={setAdminSearch} placeholder="Search admin users..." className="w-full" />)}
                                  </div>
                                  {activeView === 'ACCESS' && (
-                                    <div className="relative w-full sm:w-40">
+                                    <div className="relative w-full sm:w-44">
                                        <Filter size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                                       <select value={filterAccessRole} onChange={(e) => setFilterAccessRole(e.target.value)} className="w-full pl-9 pr-8 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer h-11">
-                                          <option value="ALL">All Roles</option><option value="NONE">No Access</option>{accessTableVisibleRoles.map(r => <option key={r} value={r}>{r}</option>)}
+                                       <select value={filterAccessRole} onChange={(e) => setFilterAccessRole(e.target.value)} className="w-full pl-9 pr-8 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer h-11 font-medium text-gray-700 dark:text-gray-200">
+                                          <option value="ALL">Semua Role</option><option value="NONE">Tanpa Akses</option>{accessTableVisibleRoles.map(r => <option key={r} value={r}>{r}</option>)}
                                        </select>
                                        <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                                     </div>
@@ -9885,7 +10229,69 @@ if (filterPackingShift !== 'ALL') {
 
                            <div className={`flex flex-wrap gap-2 w-full xl:w-auto justify-start sm:justify-end ${activeView === 'EMPLOYEES' ? 'items-center mt-2 xl:mt-0' : ''}`}>
                               {activeView === 'EMPLOYEES' && (<><input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleFileInputChange} /><div className="flex flex-wrap gap-2 w-full sm:w-auto"><button onClick={() => setIsImportModalOpen(true)} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl font-bold text-xs sm:text-sm bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-200 h-11"><Upload size={14} /> Import</button><button onClick={handleExportCSV} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl font-bold text-xs sm:text-sm bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-200 h-11"><Download size={14} /> Export</button>{selectedEmployeeIds.length > 0 && (<><button onClick={() => setIsBulkDeleteModalOpen(true)} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl font-bold text-xs sm:text-sm bg-red-500 text-white shadow-md hover:bg-red-600 h-11"><Trash2 size={14} /> Delete</button><button onClick={handleOpenBulkTargetModal} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl font-bold text-xs sm:text-sm bg-indigo-600 text-white shadow-md hover:bg-indigo-700 h-11"><Target size={14} /> Target</button><button onClick={handleOpenBulkEditModal} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl font-bold text-xs sm:text-sm bg-purple-600 text-white shadow-md hover:bg-purple-700 h-11"><CheckSquare size={14} /> Edit</button></>)}<button onClick={() => handleOpenEmployeeModal()} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-4 py-2 rounded-xl font-bold text-xs sm:text-sm bg-blue-600 text-white shadow-md hover:bg-blue-700 h-11"><Plus size={16} /> Tambah</button></div></>)}
-                              {activeView === 'ACCESS' && (<><button onClick={() => setIsAddUserModalOpen(true)} className="flex-grow sm:flex-grow-0 flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:hover:bg-indigo-900/50 shadow-sm h-11"><UserPlus size={18} /> Add User</button>{selectedAccessEmails.length > 0 && (<button onClick={() => setIsBulkAccessModalOpen(true)} className="flex-grow sm:flex-grow-0 flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm bg-purple-600 text-white shadow-md hover:bg-purple-700 h-11"><CheckSquare size={16} /> Edit Access</button>)}<button onClick={handleSave} className={`flex-grow sm:flex-grow-0 flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm shadow-md h-11 ${saved ? 'bg-green-500 text-white' : 'bg-blue-600 text-white'}`}><Save size={18} /> {saved ? 'Saved' : 'Save'}</button></>)}
+                              {activeView === 'ACCESS' && (
+                                 <>
+                                    {/* Layout View Switcher */}
+                                    <div className="flex items-center bg-gray-100 dark:bg-gray-800 p-1 rounded-xl border border-gray-200 dark:border-gray-700 h-11">
+                                       <button
+                                          type="button"
+                                          onClick={() => setAccessViewLayout('AUTO')}
+                                          className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                             accessViewLayout === 'AUTO'
+                                                ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                                                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                          }`}
+                                          title="Tampilan Otomatis (Tabel di Desktop, Kartu di Mobile)"
+                                       >
+                                          <SlidersHorizontal size={13} />
+                                          <span className="hidden sm:inline">Auto</span>
+                                       </button>
+                                       <button
+                                          type="button"
+                                          onClick={() => setAccessViewLayout('TABLE')}
+                                          className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                             accessViewLayout === 'TABLE'
+                                                ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                                                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                          }`}
+                                          title="Paksa Tampilan Tabel"
+                                       >
+                                          <Layers size={13} />
+                                          <span className="hidden sm:inline">Tabel</span>
+                                       </button>
+                                       <button
+                                          type="button"
+                                          onClick={() => setAccessViewLayout('CARDS')}
+                                          className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                             accessViewLayout === 'CARDS'
+                                                ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                                                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                          }`}
+                                          title="Paksa Tampilan Kartu"
+                                       >
+                                          <LayoutGrid size={13} />
+                                          <span className="hidden sm:inline">Kartu</span>
+                                       </button>
+                                    </div>
+
+                                    <button onClick={() => setIsAddUserModalOpen(true)} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl font-bold text-xs sm:text-sm bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:hover:bg-indigo-900/50 border border-indigo-200 dark:border-indigo-800 shadow-sm h-11 transition-all cursor-pointer">
+                                       <UserPlus size={16} /> 
+                                       <span>Tambah User</span>
+                                    </button>
+
+                                    {selectedAccessEmails.length > 0 && (
+                                       <button onClick={() => setIsBulkAccessModalOpen(true)} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl font-bold text-xs sm:text-sm bg-purple-600 text-white shadow-md hover:bg-purple-700 h-11 transition-all cursor-pointer">
+                                          <CheckSquare size={15} /> 
+                                          <span>Edit Role ({selectedAccessEmails.length})</span>
+                                       </button>
+                                    )}
+
+                                    <button onClick={handleSave} className={`flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-4 py-2 rounded-xl font-bold text-xs sm:text-sm shadow-md h-11 transition-all cursor-pointer ${saved ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20'}`}>
+                                       {saved ? <Check size={16} strokeWidth={3} /> : <Save size={16} />} 
+                                       <span>{saved ? 'Tersimpan' : 'Simpan'}</span>
+                                    </button>
+                                 </>
+                              )}
                               {activeView === 'ADMIN_MANAGEMENT' && (<button onClick={() => handleOpenAdminModal()} className="flex-grow sm:flex-grow-0 flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm bg-blue-600 text-white shadow-md hover:bg-blue-700 h-11"><Plus size={18} /> Add Admin</button>)}
                               {['DASHBOARD'].includes(activeView) && (<button onClick={handleSave} className={`flex-grow sm:flex-grow-0 flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm shadow-md h-11 ${saved ? 'bg-green-500 text-white' : 'bg-blue-600 text-white'}`}><Save size={18} /> {saved ? 'Saved' : 'Save Changes'}</button>)}
                            </div>
@@ -9935,26 +10341,254 @@ if (filterPackingShift !== 'ALL') {
                         )}
 
                         {activeView === 'ACCESS' && (
-                           <div className="w-full h-full bg-white dark:bg-gray-800 flex flex-col">
-                              <div className="flex-1 overflow-auto">
-                                 <table className="w-full text-left whitespace-nowrap">
-                                    <thead className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-20">
-                                       <tr>
-                                          <th className="p-4 w-12 sticky left-0 z-30 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700"><button onClick={triggerSelectAllAccess} className={`w-5 h-5 rounded border flex items-center justify-center ${selectedAccessEmails.length > 0 ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-300'}`}>{selectedAccessEmails.length > 0 && <Check size={14} />}</button></th>
-                                          <th className="p-4 text-xs font-bold text-gray-500 uppercase sticky left-12 z-20 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">User Account</th>
-                                          {/* Filter Columns for non-super admins */}
-                                          {accessTableVisibleRoles.map(r => <th key={r} className="p-4 text-xs font-bold text-center bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">{r}</th>)}
-                                          <th className="p-4 text-xs font-bold text-gray-500 uppercase text-center bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Manual Input</th>
-                                          <th className="p-4 text-xs font-bold text-gray-500 uppercase text-right bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Block / Delete</th>
-                                       </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                                       {filteredUsers.map(email => (
-                                          <AccessRow key={email} email={email} isSelected={selectedAccessEmails.includes(email)} permissions={localPermissions[email]} onSelect={(e) => handleSelectAccessRow(e, !selectedAccessEmails.includes(e))} onToggleRole={toggleRole} isBlocked={blockedUsers[email]} onBlock={handleBlockUser} onPromptDelete={(email) => setUserToDelete(email)} canManualInput={localManualInput[email] || false} onToggleManualInput={toggleManualInput} availableRoles={accessTableVisibleRoles} />
-                                       ))}
-                                    </tbody>
-                                 </table>
+                           <div className="w-full h-full bg-slate-50/60 dark:bg-gray-900 flex flex-col overflow-hidden relative">
+                              {/* 1. TOP METRIC STATS BANNER */}
+                              <div className="p-4 sm:p-5 border-b border-gray-200/80 dark:border-gray-800 bg-white/80 dark:bg-gray-800/80 backdrop-blur-md shrink-0">
+                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                                    {/* Stat 1: Total User */}
+                                    <div className="bg-gradient-to-br from-blue-50/80 to-indigo-50/40 dark:from-blue-950/20 dark:to-indigo-950/10 border border-blue-100 dark:border-blue-900/40 rounded-2xl p-3.5 sm:p-4 shadow-sm">
+                                       <div className="flex items-center justify-between">
+                                          <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300">Total Akun</span>
+                                          <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                                             <Users size={16} />
+                                          </div>
+                                       </div>
+                                       <div className="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-white mt-1.5">{accessStats.total}</div>
+                                       <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Pengguna terdaftar</p>
+                                    </div>
+
+                                    {/* Stat 2: Memiliki Akses Role */}
+                                    <div className="bg-gradient-to-br from-emerald-50/80 to-teal-50/40 dark:from-emerald-950/20 dark:to-teal-950/10 border border-emerald-100 dark:border-emerald-900/40 rounded-2xl p-3.5 sm:p-4 shadow-sm">
+                                       <div className="flex items-center justify-between">
+                                          <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Memiliki Akses</span>
+                                          <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                                             <ShieldCheck size={16} />
+                                          </div>
+                                       </div>
+                                       <div className="text-2xl sm:text-3xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-1.5">{accessStats.withAccess}</div>
+                                       <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Ada role aktif</p>
+                                    </div>
+
+                                    {/* Stat 3: Manual Input Allowed */}
+                                    <div className="bg-gradient-to-br from-amber-50/80 to-orange-50/40 dark:from-amber-950/20 dark:to-orange-950/10 border border-amber-100 dark:border-amber-900/40 rounded-2xl p-3.5 sm:p-4 shadow-sm">
+                                       <div className="flex items-center justify-between">
+                                          <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">Manual Input</span>
+                                          <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                                             <KeyRound size={16} />
+                                          </div>
+                                       </div>
+                                       <div className="text-2xl sm:text-3xl font-extrabold text-amber-600 dark:text-amber-400 mt-1.5">{accessStats.manualAllowed}</div>
+                                       <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Izin ketik barcode</p>
+                                    </div>
+
+                                    {/* Stat 4: Akun Diblokir */}
+                                    <div className="bg-gradient-to-br from-rose-50/80 to-red-50/40 dark:from-rose-950/20 dark:to-red-950/10 border border-rose-100 dark:border-rose-900/40 rounded-2xl p-3.5 sm:p-4 shadow-sm">
+                                       <div className="flex items-center justify-between">
+                                          <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-rose-700 dark:text-rose-300">Diblokir</span>
+                                          <div className="w-8 h-8 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                                             <Ban size={16} />
+                                          </div>
+                                       </div>
+                                       <div className="text-2xl sm:text-3xl font-extrabold text-rose-600 dark:text-rose-400 mt-1.5">{accessStats.blocked}</div>
+                                       <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Akses ditutup</p>
+                                    </div>
+                                 </div>
+
+                                 {/* Filter & Selection Sub-banner */}
+                                 {(accessSearch || filterAccessRole !== 'ALL' || selectedAccessEmails.length > 0) && (
+                                    <div className="flex flex-wrap items-center justify-between gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-800 text-xs">
+                                       <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="text-gray-500 dark:text-gray-400">
+                                             Menampilkan <strong className="text-gray-900 dark:text-white font-bold">{filteredUsers.length}</strong> dari {accessStats.total} akun
+                                          </span>
+                                          {filterAccessRole !== 'ALL' && (
+                                             <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold text-[11px]">
+                                                Role: {filterAccessRole === 'NONE' ? 'Tanpa Akses' : filterAccessRole}
+                                             </span>
+                                          )}
+                                          {accessSearch && (
+                                             <span className="px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-semibold text-[11px]">
+                                                Cari: &ldquo;{accessSearch}&rdquo;
+                                             </span>
+                                          )}
+                                       </div>
+                                       {(accessSearch || filterAccessRole !== 'ALL') && (
+                                          <button
+                                             onClick={() => { setAccessSearch(''); setFilterAccessRole('ALL'); }}
+                                             className="text-blue-600 dark:text-blue-400 hover:underline font-semibold cursor-pointer"
+                                          >
+                                             Reset Filter
+                                          </button>
+                                       )}
+                                    </div>
+                                 )}
                               </div>
+
+                              {/* 2. MAIN CONTENT AREA (TABLE OR CARDS) */}
+                              <div className="flex-1 overflow-auto p-3 sm:p-5">
+                                 {filteredUsers.length === 0 ? (
+                                    <div className="h-full min-h-[300px] flex flex-col items-center justify-center text-center p-8 bg-white dark:bg-gray-800 rounded-3xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm">
+                                       <div className="w-16 h-16 rounded-2xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-4">
+                                          <Users size={32} />
+                                       </div>
+                                       <h3 className="text-lg font-bold text-gray-900 dark:text-white">Tidak ada akun yang ditemukan</h3>
+                                       <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mt-1 mb-5">
+                                          {accessSearch || filterAccessRole !== 'ALL' 
+                                             ? 'Coba ubah kata kunci pencarian atau sesuaikan filter role untuk melihat akun lainnya.' 
+                                             : 'Belum ada akun user yang terdaftar di sistem. Anda dapat menambah akun baru secara manual.'}
+                                       </p>
+                                       <div className="flex items-center gap-3">
+                                          {(accessSearch || filterAccessRole !== 'ALL') && (
+                                             <button
+                                                onClick={() => { setAccessSearch(''); setFilterAccessRole('ALL'); }}
+                                                className="px-4 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-bold text-sm hover:bg-gray-200 cursor-pointer"
+                                             >
+                                                Reset Filter
+                                             </button>
+                                          )}
+                                          <button
+                                             onClick={() => setIsAddUserModalOpen(true)}
+                                             className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold text-sm shadow-md hover:bg-blue-700 cursor-pointer flex items-center gap-2"
+                                          >
+                                             <UserPlus size={16} /> Tambah User
+                                          </button>
+                                       </div>
+                                    </div>
+                                 ) : (
+                                    <>
+                                       {/* DESKTOP / TABLE VIEW */}
+                                       <div className={`${
+                                          accessViewLayout === 'TABLE' 
+                                             ? 'block' 
+                                             : accessViewLayout === 'CARDS' 
+                                             ? 'hidden' 
+                                             : 'hidden md:block'
+                                       }`}>
+                                          <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm overflow-hidden">
+                                             <div className="overflow-x-auto">
+                                                <table className="w-full text-left whitespace-nowrap">
+                                                   <thead className="bg-slate-50 dark:bg-gray-900/90 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-20 backdrop-blur-sm">
+                                                      <tr>
+                                                         <th className="p-3.5 pl-4 sm:pl-6 w-12 sticky left-0 z-30 bg-slate-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                                                            <button 
+                                                               onClick={triggerSelectAllAccess} 
+                                                               className={`w-5 h-5 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${
+                                                                  selectedAccessEmails.length > 0 && selectedAccessEmails.length === filteredUsers.length
+                                                                     ? 'bg-blue-600 border-blue-600 text-white shadow-sm shadow-blue-500/30' 
+                                                                     : selectedAccessEmails.length > 0
+                                                                     ? 'bg-blue-600 border-blue-600 text-white'
+                                                                     : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-blue-400'
+                                                               }`}
+                                                               title={selectedAccessEmails.length > 0 ? "Batal pilih semua" : "Pilih semua akun"}
+                                                            >
+                                                               {selectedAccessEmails.length > 0 && (
+                                                                  selectedAccessEmails.length === filteredUsers.length 
+                                                                     ? <Check size={13} strokeWidth={3} />
+                                                                     : <Minus size={13} strokeWidth={3} />
+                                                               )}
+                                                            </button>
+                                                         </th>
+                                                         <th className="p-3.5 text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider sticky left-12 z-20 bg-slate-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)] min-w-[220px]">
+                                                            Akun User ({filteredUsers.length})
+                                                         </th>
+                                                         {accessTableVisibleRoles.map(r => (
+                                                            <th key={r} className="p-3.5 text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider text-center min-w-[90px] border-b border-gray-200 dark:border-gray-700">
+                                                               {r}
+                                                            </th>
+                                                         ))}
+                                                         <th className="p-3.5 text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider text-center min-w-[110px] border-b border-gray-200 dark:border-gray-700">
+                                                            Manual Input
+                                                         </th>
+                                                         <th className="p-3.5 pr-4 sm:pr-6 text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider text-right min-w-[100px] border-b border-gray-200 dark:border-gray-700">
+                                                            Aksi
+                                                         </th>
+                                                      </tr>
+                                                   </thead>
+                                                   <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                                                      {filteredUsers.map(email => (
+                                                         <AccessRow 
+                                                            key={email} 
+                                                            email={email} 
+                                                            isSelected={selectedAccessEmails.includes(email)} 
+                                                            permissions={localPermissions[email] || []} 
+                                                            onSelect={(e) => handleSelectAccessRow(e, !selectedAccessEmails.includes(e))} 
+                                                            onToggleRole={toggleRole} 
+                                                            isBlocked={blockedUsers[email] || false} 
+                                                            onBlock={handleBlockUser} 
+                                                            onPromptDelete={(email) => setUserToDelete(email)} 
+                                                            canManualInput={localManualInput[email] || false} 
+                                                            onToggleManualInput={toggleManualInput} 
+                                                            availableRoles={accessTableVisibleRoles} 
+                                                         />
+                                                      ))}
+                                                   </tbody>
+                                                </table>
+                                             </div>
+                                          </div>
+                                       </div>
+
+                                       {/* MOBILE / CARD GRID VIEW */}
+                                       <div className={`${
+                                          accessViewLayout === 'CARDS' 
+                                             ? 'block' 
+                                             : accessViewLayout === 'TABLE' 
+                                             ? 'hidden' 
+                                             : 'block md:hidden'
+                                       }`}>
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 pb-16">
+                                             {filteredUsers.map(email => (
+                                                <AccessUserCard
+                                                   key={email}
+                                                   email={email}
+                                                   isSelected={selectedAccessEmails.includes(email)}
+                                                   permissions={localPermissions[email] || []}
+                                                   onSelect={(e) => handleSelectAccessRow(e, !selectedAccessEmails.includes(e))}
+                                                   onToggleRole={toggleRole}
+                                                   isBlocked={blockedUsers[email] || false}
+                                                   onBlock={handleBlockUser}
+                                                   onPromptDelete={(email) => setUserToDelete(email)}
+                                                   canManualInput={localManualInput[email] || false}
+                                                   onToggleManualInput={toggleManualInput}
+                                                   availableRoles={accessTableVisibleRoles}
+                                                />
+                                             ))}
+                                          </div>
+                                       </div>
+                                    </>
+                                 )}
+                              </div>
+
+                              {/* 3. FLOATING BULK SELECTION ACTION BAR */}
+                              {selectedAccessEmails.length > 0 && (
+                                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 w-[92%] max-w-xl animate-in fade-in slide-in-from-bottom-4 duration-200">
+                                    <div className="bg-gray-900/95 dark:bg-slate-800/95 text-white p-3 sm:p-4 rounded-2xl shadow-2xl backdrop-blur-md border border-gray-700/60 flex items-center justify-between gap-3">
+                                       <div className="flex items-center gap-2.5">
+                                          <div className="w-8 h-8 rounded-xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center font-bold text-blue-400 text-xs">
+                                             {selectedAccessEmails.length}
+                                          </div>
+                                          <div>
+                                             <p className="text-xs sm:text-sm font-bold">{selectedAccessEmails.length} Akun Terpilih</p>
+                                             <p className="text-[11px] text-gray-400 hidden sm:block">Aksi massal untuk akun terpilih</p>
+                                          </div>
+                                       </div>
+                                       <div className="flex items-center gap-2">
+                                          <button
+                                             onClick={() => setIsBulkAccessModalOpen(true)}
+                                             className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs sm:text-sm shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                                          >
+                                             <CheckSquare size={14} /> Edit Role Massal
+                                          </button>
+                                          <button
+                                             onClick={() => setSelectedAccessEmails([])}
+                                             className="p-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-all cursor-pointer"
+                                             title="Batalkan pilihan"
+                                          >
+                                             <X size={16} />
+                                          </button>
+                                       </div>
+                                    </div>
+                                 </div>
+                              )}
                            </div>
                         )}
 
