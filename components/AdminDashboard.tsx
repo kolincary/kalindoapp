@@ -14300,29 +14300,35 @@ if (filterPackingShift !== 'ALL') {
                                           className="w-full py-2 px-4 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-gray-200 dark:border-gray-700"
                                        >
                                           <RotateCcw size={13} /> Reset Filter Staff
-                                       </button>
-                                    </div>
-                                 </div>
+                                        </button>
+                                     </div>
+                                  </div>
                               )}
                            </div>
                         )}
 
                         {activeView === 'BATCH_DATA' && (
                            <div className="w-full flex flex-col bg-white dark:bg-gray-800">
-                              <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 bg-indigo-50 dark:bg-indigo-900/20 shrink-0">
-                                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 max-w-7xl mx-auto w-full">
+                              <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shrink-0">
+                                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 w-full">
                                     <div className="flex items-center gap-3">
-                                       <div className="w-10 h-10 sm:w-12 sm:h-12 bg-indigo-100 dark:bg-indigo-800 rounded-2xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 shadow-sm border border-indigo-200 dark:border-indigo-700 shrink-0">
-                                          <Database size={22} className="sm:w-6 sm:h-6" />
+                                       <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 border border-indigo-200/60 dark:border-indigo-800/60 shadow-sm">
+                                          <Database className="w-5 h-5 sm:w-6 sm:h-6" />
                                        </div>
                                        <div>
-                                          <h3 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white">Batch Management Old</h3>
-                                          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Kelola daftar barcode per batch untuk sinkronisasi otomatis.</p>
+                                          <div className="flex items-center gap-2">
+                                             <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">
+                                                Batch Management Old
+                                             </h2>
+                                          </div>
+                                          <p className="text-gray-500 dark:text-gray-400 text-xs sm:text-sm mt-0.5">
+                                             Kelola daftar barcode per batch untuk sinkronisasi otomatis.
+                                          </p>
                                        </div>
                                     </div>
                                     <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                                        {currentAdmin?.username !== 'Tamu' && (<>
-<button
+                                       <button
                                           onClick={() => setIsImportCancelModalOpen(true)}
                                           disabled={isLoadingBatchData}
                                           className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-xs sm:text-sm transition-all shadow-lg shadow-amber-200 dark:shadow-none h-10 sm:h-11 cursor-pointer"
@@ -14345,7 +14351,7 @@ if (filterPackingShift !== 'ALL') {
                                        >
                                           <Plus size={16} /> Import Text
                                        </button>
-</>)}
+                                       </>)}
                                        <button
                                           onClick={async () => {
                                              fetchBatchData();
@@ -14362,13 +14368,13 @@ if (filterPackingShift !== 'ALL') {
                                                 }
                                              }
                                           }}
-                                          className="p-2 bg-white dark:bg-gray-700 border border-gray-200 dark:bg-gray-600 rounded-xl hover:bg-gray-50 transition-colors"
+                                          className="p-2 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl hover:bg-gray-50 transition-colors"
                                        >
                                           <RefreshCw size={20} className={isLoadingBatchData ? 'animate-spin' : ''} />
                                        </button>
                                     </div>
                                  </div>
-                                 <div className="flex items-center gap-4 mt-6 border-b border-gray-200 dark:border-gray-700">
+                                 <div className="flex items-center gap-4 mt-6 border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
                                     <button 
                                        onClick={() => setActiveBatchTab('ITEMS')} 
                                        disabled={isAuditBusy}
@@ -14389,7 +14395,6 @@ if (filterPackingShift !== 'ALL') {
                                        className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'REKAP_ADMIN' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'} ${isAuditBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                     >
                                        Rekap Admin Print
-                                       <span className="text-[9px] bg-red-500 text-white px-1.5 py-0.5 rounded-full shadow-sm">NEW</span>
                                     </button>
                                     <button 
                                        onClick={() => setActiveBatchTab('AUDIT_KOMPARASI')} 
@@ -14397,20 +14402,17 @@ if (filterPackingShift !== 'ALL') {
                                        className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'AUDIT_KOMPARASI' ? 'border-purple-600 text-purple-600 dark:text-purple-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'} ${isAuditBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                     >
                                        Cek Selisih Resi
-                                       <span className="text-[9px] bg-red-500 text-white px-1.5 py-0.5 rounded-full animate-pulse shadow-sm">NEW</span>
                                     </button>
-
                                     <button 
                                        onClick={() => setActiveBatchTab('MASS_SEARCH')} 
                                        disabled={isAuditBusy}
                                        className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'MASS_SEARCH' ? 'border-amber-600 text-amber-600 dark:text-amber-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'} ${isAuditBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                     >
                                        Pencarian Massal
-                                       <span className="text-[9px] bg-red-500 text-white px-1.5 py-0.5 rounded-full shadow-sm">NEW</span>
                                     </button>
                                  </div>
                               </div>
-                               {/* MASS SEARCH UI */}
+                              {/* MASS SEARCH UI */}
                                {activeBatchTab === 'MASS_SEARCH' && (
                                   <div className="flex-1 flex flex-col p-4 sm:p-6 overflow-hidden bg-gray-50 dark:bg-gray-900/30">
                                      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 mb-4 shrink-0">
@@ -16206,20 +16208,26 @@ LXAD-1234567890`}
 
 {(activeView === 'BATCH_DATA_2' || activeView === 'BATCH_DATA_3') && (
                            <div className="w-full flex flex-col bg-white dark:bg-gray-800">
-                              <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 bg-indigo-50 dark:bg-indigo-900/20 shrink-0">
-                                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 max-w-7xl mx-auto w-full">
+                              <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shrink-0">
+                                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 w-full">
                                     <div className="flex items-center gap-3">
-                                       <div className="w-10 h-10 sm:w-12 sm:h-12 bg-indigo-100 dark:bg-indigo-800 rounded-2xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 shadow-sm border border-indigo-200 dark:border-indigo-700 shrink-0">
-                                          <Database size={22} className="sm:w-6 sm:h-6" />
+                                       <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 border border-indigo-200/60 dark:border-indigo-800/60 shadow-sm">
+                                          <Database className="w-5 h-5 sm:w-6 sm:h-6" />
                                        </div>
                                        <div>
-                                          <h3 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white">{activeView === 'BATCH_DATA_3' ? 'Batch management' : 'Progress Order'}</h3>
-                                          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Kelola daftar barcode per batch untuk sinkronisasi otomatis.</p>
+                                          <div className="flex items-center gap-2">
+                                             <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">
+                                                {activeView === 'BATCH_DATA_3' ? 'Batch management' : 'Progress Order'}
+                                             </h2>
+                                          </div>
+                                          <p className="text-gray-500 dark:text-gray-400 text-xs sm:text-sm mt-0.5">
+                                             Kelola daftar barcode per batch untuk sinkronisasi otomatis.
+                                          </p>
                                        </div>
                                     </div>
                                     <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                                        {currentAdmin?.username !== 'Tamu' && (<>
-<button
+                                       <button
                                           onClick={() => setIsImportCancelModalOpen(true)}
                                           disabled={isLoadingBatchData}
                                           className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-xs sm:text-sm transition-all shadow-lg shadow-amber-200 dark:shadow-none h-10 sm:h-11 cursor-pointer"
@@ -16242,7 +16250,7 @@ LXAD-1234567890`}
                                        >
                                           <Plus size={16} /> Import Text
                                        </button>
-</>)}
+                                       </>)}
                                        <button
                                           onClick={async () => {
                                              fetchBatchData();
@@ -16259,15 +16267,15 @@ LXAD-1234567890`}
                                                 }
                                              }
                                           }}
-                                          className="p-2 bg-white dark:bg-gray-700 border border-gray-200 dark:bg-gray-600 rounded-xl hover:bg-gray-50 transition-colors"
+                                          className="p-2 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl hover:bg-gray-50 transition-colors"
                                        >
                                           <RefreshCw size={20} className={isLoadingBatchData ? 'animate-spin' : ''} />
                                        </button>
                                     </div>
                                  </div>
-                                 <div className="flex items-center gap-4 mt-6 border-b border-gray-200 dark:border-gray-700">
+                                 <div className="flex items-center gap-4 mt-6 border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
                                     {currentAdmin?.username !== 'Tamu' && (<>
-<button 
+                                    <button 
                                        onClick={() => setActiveBatchTab('ITEMS')} 
                                        disabled={isAuditBusy}
                                        className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors ${activeBatchTab === 'ITEMS' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'} ${isAuditBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
@@ -16287,31 +16295,28 @@ LXAD-1234567890`}
                                        className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'REKAP_ADMIN' ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'} ${isAuditBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                     >
                                        Rekap Admin Print
-                                       <span className="text-[9px] bg-red-500 text-white px-1.5 py-0.5 rounded-full shadow-sm">NEW</span>
                                     </button>
-</>)}
+                                    </>)}
                                     <button 
                                        onClick={() => setActiveBatchTab('AUDIT_KOMPARASI')} 
                                        disabled={isAuditBusy}
                                        className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'AUDIT_KOMPARASI' ? 'border-purple-600 text-purple-600 dark:text-purple-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'} ${isAuditBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                     >
                                        Cek Selisih Resi
-                                       <span className="text-[9px] bg-red-500 text-white px-1.5 py-0.5 rounded-full animate-pulse shadow-sm">NEW</span>
                                     </button>
 
                                     {currentAdmin?.username !== 'Tamu' && (
-<button 
+                                    <button 
                                        onClick={() => setActiveBatchTab('MASS_SEARCH')} 
                                        disabled={isAuditBusy}
                                        className={`px-4 py-2 font-bold text-sm border-b-2 transition-colors flex items-center gap-2 ${activeBatchTab === 'MASS_SEARCH' ? 'border-amber-600 text-amber-600 dark:text-amber-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'} ${isAuditBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                     >
                                        Pencarian Massal
-                                       <span className="text-[9px] bg-red-500 text-white px-1.5 py-0.5 rounded-full shadow-sm">NEW</span>
                                     </button>
-)}
+                                    )}
                                  </div>
                               </div>
-                               {/* MASS SEARCH UI */}
+                              {/* MASS SEARCH UI */}
                                {activeBatchTab === 'MASS_SEARCH' && (
                                   <div className="flex-1 flex flex-col p-4 sm:p-6 overflow-hidden bg-gray-50 dark:bg-gray-900/30">
                                      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 mb-4 shrink-0">
@@ -18441,22 +18446,25 @@ LXAD-1234567890`}
                         {/* CANCEL DATA VIEW */}
                         {activeView === 'CANCEL_DATA' && (
                            <div className="w-full h-full min-h-full flex flex-col bg-white dark:bg-gray-800 overflow-y-auto">
-                              {/* Header Banner */}
-                              <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-orange-50/80 via-amber-50/50 to-white dark:from-orange-950/20 dark:via-gray-900/60 dark:to-gray-900 shrink-0">
-                                 <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 max-w-7xl mx-auto w-full">
-                                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-orange-500 to-amber-600 text-white rounded-2xl flex items-center justify-center shrink-0 shadow-md shadow-orange-500/20">
-                                       <AlertTriangle size={24} className="sm:w-7 sm:h-7" />
-                                    </div>
-                                    <div className="flex-1 w-full">
-                                       <div className="flex items-center gap-2">
-                                          <h3 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white">Manajemen Data Cancel</h3>
-                                          <span className="bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 text-xs font-black px-2.5 py-0.5 rounded-full border border-orange-200 dark:border-orange-800">
-                                             {cancelledOrders.length} Order
-                                          </span>
+                              <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shrink-0">
+                                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 w-full">
+                                    <div className="flex items-center gap-3">
+                                       <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 border border-amber-200/60 dark:border-amber-800/60 shadow-sm">
+                                          <AlertTriangle className="w-5 h-5 sm:w-6 sm:h-6" />
                                        </div>
-                                       <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-0.5 max-w-2xl">
-                                          Tambahkan barcode orderan yang sudah di-cancel. Ketika barcode ini di-scan di <strong>Sortir</strong> atau <strong>Packing</strong>, sistem akan menampilkan peringatan full-screen untuk memisahkan orderan ke tempat khusus.
-                                       </p>
+                                       <div>
+                                          <div className="flex items-center gap-2">
+                                             <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">
+                                                Manajemen Data Cancel
+                                             </h2>
+                                             <span className="bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-xs font-black px-2.5 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">
+                                                {cancelledOrders.length} Order
+                                             </span>
+                                          </div>
+                                          <p className="text-gray-500 dark:text-gray-400 text-xs sm:text-sm mt-0.5 max-w-2xl">
+                                             Tambahkan barcode orderan yang sudah di-cancel. Ketika barcode ini di-scan di <strong>Sortir</strong> atau <strong>Packing</strong>, sistem akan menampilkan peringatan full-screen untuk memisahkan orderan ke tempat khusus.
+                                          </p>
+                                       </div>
                                     </div>
                                     <div className="shrink-0 w-full sm:w-auto">
                                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Filter Tanggal</label>
@@ -18478,7 +18486,7 @@ LXAD-1234567890`}
                                              value={cancelDateFilter}
                                              onChange={(e) => setCancelDateFilter(e.target.value)}
                                              onMouseDown={(e) => e.preventDefault()}
-                                             className="w-full sm:w-auto h-10 px-3.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-orange-500 cursor-pointer select-none shadow-2xs"
+                                             className="w-full sm:w-auto h-10 px-3.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer select-none shadow-2xs"
                                              style={{ colorScheme: isDarkMode ? 'dark' : 'light', userSelect: 'none', WebkitUserSelect: 'none' }}
                                           />
                                        </div>
