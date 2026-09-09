@@ -791,6 +791,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [isToastMinimized, setIsToastMinimized] = useState(false);
    const [unreadNoteIndex, setUnreadNoteIndex] = useState(0);
 
+   // --- STATE: SALIN PER BATCH (500 DATA) FOR CEK SELISIH RESI ---
+   const [isAuditBatchCopyModalOpen, setIsAuditBatchCopyModalOpen] = useState(false);
+   const [auditBatchCopyModalTitle, setAuditBatchCopyModalTitle] = useState('');
+   const [auditBatchCopyData, setAuditBatchCopyData] = useState<string[]>([]);
+   const [copiedAuditBatchIndex, setCopiedAuditBatchIndex] = useState<number | null>(null);
+
+   const chunkArray = useCallback(<T,>(arr: T[], size: number): T[][] => {
+      const chunks: T[][] = [];
+      for (let i = 0; i < arr.length; i += size) {
+         chunks.push(arr.slice(i, i + size));
+      }
+      return chunks;
+   }, []);
+
+   const openAuditBatchCopyModal = useCallback((title: string, barcodes: string[]) => {
+      const uniqueList = Array.from(new Set(barcodes.filter(b => !!b && typeof b === 'string' && b.trim() !== '')));
+      setAuditBatchCopyModalTitle(title);
+      setAuditBatchCopyData(uniqueList);
+      setCopiedAuditBatchIndex(null);
+      setIsAuditBatchCopyModalOpen(true);
+   }, []);
+
    // Dual-Sync (Supabase + Firestore) listener & fast hydration for Admin Shift Notes
    useEffect(() => {
       let unsubscribe: (() => void) | null = null;
@@ -15104,15 +15126,28 @@ LXAD-1234567890`}
                                                                    {showOnlyCrossDateAdmin && <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold">Filter: Susulan</span>}
                                                                    {showOnlyBelumScanAdmin && <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-bold">Filter: Belum Scan</span>}
                                                                 </div>
-                                                                <button 
-                                                                   onClick={() => {
-                                                                      navigator.clipboard.writeText(adminListToDisplay.join('\n'));
-                                                                      setSuccessToast(`Tersalin ${adminListToDisplay.length} data ${showOnlyTerkirimBersih ? 'Terkirim Bersih H+0' : showOnlyCancelAdmin ? 'Cancel' : showOnlyReadyAdmin ? 'Ready Gudang' : showOnlyCrossDateAdmin ? 'Scan Tanggal Susulan' : showOnlyBelumScanAdmin ? 'Belum Scan' : 'Admin'}!`);
-                                                                   }} 
-                                                                   className="text-xs flex items-center gap-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 px-2.5 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold transition-colors cursor-pointer"
-                                                                >
-                                                                   <Copy size={12}/> Salin ({adminListToDisplay.length})
-                                                                </button>
+                                                                 <div className="flex items-center gap-2">
+                                                                    <button 
+                                                                       onClick={() => {
+                                                                          navigator.clipboard.writeText(adminListToDisplay.join('\n'));
+                                                                          setSuccessToast(`Tersalin ${adminListToDisplay.length} data ${showOnlyTerkirimBersih ? 'Terkirim Bersih H+0' : showOnlyCancelAdmin ? 'Cancel' : showOnlyReadyAdmin ? 'Ready Gudang' : showOnlyCrossDateAdmin ? 'Scan Tanggal Susulan' : showOnlyBelumScanAdmin ? 'Belum Scan' : 'Admin'}!`);
+                                                                       }} 
+                                                                       className="text-xs flex items-center gap-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 px-2.5 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold transition-colors cursor-pointer shadow-sm"
+                                                                       title="Salin semua data sekaligus"
+                                                                    >
+                                                                       <Copy size={12}/> Salin ({adminListToDisplay.length})
+                                                                    </button>
+                                                                    <button 
+                                                                       onClick={() => {
+                                                                          const filterLabel = showOnlyTerkirimBersih ? 'Admin (Terkirim Bersih H+0)' : showOnlyCancelAdmin ? 'Admin (Cancel)' : showOnlyReadyAdmin ? 'Admin (Ready Gudang)' : showOnlyCrossDateAdmin ? 'Admin (Susulan)' : showOnlyBelumScanAdmin ? 'Admin (Belum Scan)' : 'Resi Admin Global';
+                                                                          openAuditBatchCopyModal(filterLabel, adminListToDisplay);
+                                                                       }} 
+                                                                       className="text-xs flex items-center gap-1 bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-700 px-2.5 py-1.5 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-800/40 text-indigo-700 dark:text-indigo-300 font-bold transition-colors cursor-pointer shadow-sm"
+                                                                       title="Salin per 500 resi per batch"
+                                                                    >
+                                                                       <Boxes size={12}/> Salin per Batch ({adminListToDisplay.length})
+                                                                    </button>
+                                                                 </div>
                                                              </div>
                                                              {/* Filter Checkboxes */}
                                                              <div className="flex flex-wrap items-center gap-3">
@@ -15334,15 +15369,26 @@ LXAD-1234567890`}
                                                                          <Trash2 size={12}/> Hapus Ekstra ({scanEkstra.length})
                                                                       </button>
                                                                    )}
-                                                                   <button 
-                                                                      onClick={() => {
-                                                                         navigator.clipboard.writeText(listToRender.join('\n'));
-                                                                         setSuccessToast(`Tersalin ${listToRender.length} data ${showOnlySusulanRole ? 'Susulan Tgl Lalu' : showOnlyExtraPicker ? 'Ekstra' : auditRoleFilter}!`);
-                                                                      }} 
-                                                                      className="text-xs flex items-center gap-1 bg-white dark:bg-gray-800 border border-purple-300 dark:border-purple-600 px-2.5 py-1.5 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-bold transition-colors cursor-pointer"
-                                                                   >
-                                                                      <Copy size={12}/> Salin ({listToRender.length})
-                                                                   </button>
+                                                                    <button 
+                                                                       onClick={() => {
+                                                                          navigator.clipboard.writeText(listToRender.join('\n'));
+                                                                          setSuccessToast(`Tersalin ${listToRender.length} data ${showOnlySusulanRole ? 'Susulan Tgl Lalu' : showOnlyExtraPicker ? 'Ekstra' : auditRoleFilter}!`);
+                                                                       }} 
+                                                                       className="text-xs flex items-center gap-1 bg-white dark:bg-gray-800 border border-purple-300 dark:border-purple-600 px-2.5 py-1.5 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-bold transition-colors cursor-pointer shadow-sm"
+                                                                       title="Salin semua data scan role"
+                                                                    >
+                                                                       <Copy size={12}/> Salin ({listToRender.length})
+                                                                    </button>
+                                                                    <button 
+                                                                       onClick={() => {
+                                                                          const roleLabel = `Resi ${auditRoleFilter}${showOnlySusulanRole ? ' (Susulan Tgl Lalu)' : showOnlyExtraPicker ? ' (Ekstra)' : ''}`;
+                                                                          openAuditBatchCopyModal(roleLabel, listToRender);
+                                                                       }} 
+                                                                       className="text-xs flex items-center gap-1 bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-700 px-2.5 py-1.5 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-800/40 text-purple-700 dark:text-purple-300 font-bold transition-colors cursor-pointer shadow-sm"
+                                                                       title="Salin per 500 resi per batch"
+                                                                    >
+                                                                       <Boxes size={12}/> Salin per Batch ({listToRender.length})
+                                                                    </button>
                                                                 </div>
                                                              </div>
                                                              <div className="flex flex-wrap items-center gap-3">
@@ -15435,12 +15481,23 @@ LXAD-1234567890`}
                                                     <>
                                                        <div className="p-3 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800 flex justify-between items-center shrink-0">
                                                           <h3 className="text-sm font-bold text-red-700 dark:text-red-400 flex items-center gap-2"><AlertCircle size={16} /> Pending LT3</h3>
-                                                          <button onClick={() => {
-                                                             navigator.clipboard.writeText(Array.from(pendingResi).join('\n'));
-                                                             setSuccessToast(`Tersalin ${pendingResi.size} data Pending!`);
-                                                          }} className="text-xs flex items-center gap-1 bg-white dark:bg-gray-800 border border-red-300 dark:border-red-600 px-2.5 py-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-700 dark:text-red-300 font-bold transition-colors cursor-pointer">
-                                                             <Copy size={12}/> Salin ({pendingResi.size})
-                                                          </button>
+                                                           <div className="flex items-center gap-2">
+                                                              <button onClick={() => {
+                                                                 navigator.clipboard.writeText(Array.from(pendingResi).join('\n'));
+                                                                 setSuccessToast(`Tersalin ${pendingResi.size} data Pending!`);
+                                                              }} className="text-xs flex items-center gap-1 bg-white dark:bg-gray-800 border border-red-300 dark:border-red-600 px-2.5 py-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-700 dark:text-red-300 font-bold transition-colors cursor-pointer shadow-sm"
+                                                                 title="Salin semua data pending"
+                                                              >
+                                                                 <Copy size={12}/> Salin ({pendingResi.size})
+                                                              </button>
+                                                              <button onClick={() => {
+                                                                 openAuditBatchCopyModal('Pending LT3', Array.from(pendingResi));
+                                                              }} className="text-xs flex items-center gap-1 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 px-2.5 py-1.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-800/40 text-red-700 dark:text-red-300 font-bold transition-colors cursor-pointer shadow-sm"
+                                                                 title="Salin per 500 resi per batch"
+                                                              >
+                                                                 <Boxes size={12}/> Salin per Batch ({pendingResi.size})
+                                                              </button>
+                                                           </div>
                                                        </div>
                                                        <div className="flex-1 overflow-y-auto p-3">
                                                           {isLoadingAuditData ? (
@@ -19499,6 +19556,132 @@ LXAD-1234567890`}
                </div>
             </div>
          )}
+
+         {/* --- MODAL SALIN PER BATCH (500 DATA) CEK SELISIH RESI --- */}
+         {isAuditBatchCopyModalOpen && (() => {
+            const batchChunks = chunkArray(auditBatchCopyData, 500);
+            return (
+               <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 animate-in fade-in duration-200">
+                  <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 w-full max-w-xl max-h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+                     {/* Header */}
+                     <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50/80 dark:bg-gray-900/50">
+                        <div className="flex items-center gap-3">
+                           <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 shadow-inner">
+                              <Boxes size={22} />
+                           </div>
+                           <div>
+                              <h3 className="font-extrabold text-gray-900 dark:text-white text-base flex items-center gap-2">
+                                 Salin per Batch (500 Data)
+                              </h3>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+                                 {auditBatchCopyModalTitle} • Total <span className="font-bold text-indigo-600 dark:text-indigo-400">{auditBatchCopyData.length.toLocaleString()}</span> data unik ({batchChunks.length} Batch)
+                              </p>
+                           </div>
+                        </div>
+                        <button 
+                           onClick={() => setIsAuditBatchCopyModalOpen(false)} 
+                           className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-200/50 dark:hover:bg-gray-700/50 p-2 rounded-xl transition-colors cursor-pointer"
+                        >
+                           <X size={20} />
+                        </button>
+                     </div>
+
+                     {/* Body */}
+                     <div className="flex-1 overflow-y-auto p-5 space-y-3">
+                        {batchChunks.length === 0 ? (
+                           <div className="text-center py-12 flex flex-col items-center justify-center text-gray-400 gap-3">
+                              <AlertCircle size={40} className="text-gray-300 dark:text-gray-600" />
+                              <p className="text-sm font-semibold text-gray-500 dark:text-gray-400">Tidak ada data resi untuk disalin</p>
+                           </div>
+                        ) : (
+                           batchChunks.map((chunk, idx) => {
+                              const startNum = idx * 500 + 1;
+                              const endNum = idx * 500 + chunk.length;
+                              const isCopied = copiedAuditBatchIndex === idx;
+
+                              return (
+                                 <div 
+                                    key={idx}
+                                    className="bg-gray-50/80 dark:bg-gray-900/40 hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 border border-gray-200 dark:border-gray-700 hover:border-indigo-300 dark:hover:border-indigo-600/60 rounded-xl p-3.5 flex items-center justify-between transition-all duration-150 shadow-sm"
+                                 >
+                                    <div className="flex items-center gap-3 min-w-0">
+                                       <span className="bg-indigo-600 text-white font-extrabold text-xs px-2.5 py-1 rounded-lg shadow-sm shrink-0">
+                                          Batch {idx + 1}
+                                       </span>
+                                       <div className="min-w-0">
+                                          <div className="text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
+                                             <span>Data ke {startNum.toLocaleString()} - {endNum.toLocaleString()}</span>
+                                          </div>
+                                          <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2 mt-0.5">
+                                             <span className="font-semibold text-indigo-600 dark:text-indigo-400">{chunk.length} Resi</span>
+                                             {chunk.length > 0 && (
+                                                <span className="text-[11px] text-gray-400 dark:text-gray-500 truncate font-mono">
+                                                   ({chunk[0]} ... {chunk[chunk.length - 1]})
+                                                </span>
+                                             )}
+                                          </div>
+                                       </div>
+                                    </div>
+
+                                    <button
+                                       onClick={() => {
+                                          navigator.clipboard.writeText(chunk.join('\n'));
+                                          setCopiedAuditBatchIndex(idx);
+                                          setSuccessToast(`Tersalin Batch ${idx + 1} (${chunk.length} data resi)!`);
+                                          setTimeout(() => {
+                                             setCopiedAuditBatchIndex(prev => prev === idx ? null : prev);
+                                          }, 2500);
+                                       }}
+                                       className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm shrink-0 cursor-pointer ${
+                                          isCopied
+                                             ? 'bg-emerald-600 text-white shadow-emerald-500/20 animate-in zoom-in-90'
+                                             : 'bg-white dark:bg-gray-800 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-700 hover:border-transparent'
+                                       }`}
+                                    >
+                                       {isCopied ? (
+                                          <>
+                                             <Check size={14} className="animate-bounce" />
+                                             <span>Tersalin!</span>
+                                          </>
+                                       ) : (
+                                          <>
+                                             <Copy size={14} />
+                                             <span>Salin Batch {idx + 1} ({chunk.length})</span>
+                                          </>
+                                       )}
+                                    </button>
+                                 </div>
+                              );
+                           })
+                        )}
+                     </div>
+
+                     {/* Footer */}
+                     <div className="px-6 py-3.5 border-t border-gray-200 dark:border-gray-700 bg-gray-50/90 dark:bg-gray-900/60 flex items-center justify-between shrink-0">
+                        <button
+                           onClick={() => {
+                              if (auditBatchCopyData.length === 0) return;
+                              navigator.clipboard.writeText(auditBatchCopyData.join('\n'));
+                              setSuccessToast(`Tersalin semua ${auditBatchCopyData.length} data resi!`);
+                           }}
+                           disabled={auditBatchCopyData.length === 0}
+                           className="px-3.5 py-2 text-xs font-bold text-gray-700 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 bg-white dark:bg-gray-800 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 border border-gray-300 dark:border-gray-600 rounded-xl transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                        >
+                           <Copy size={13} />
+                           <span>Salin Semua ({auditBatchCopyData.length})</span>
+                        </button>
+
+                        <button
+                           onClick={() => setIsAuditBatchCopyModalOpen(false)}
+                           className="px-5 py-2 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:hover:bg-gray-100 dark:text-gray-900 text-white rounded-xl font-bold text-xs transition-colors shadow-sm cursor-pointer"
+                        >
+                           Tutup
+                        </button>
+                     </div>
+                  </div>
+               </div>
+            );
+         })()}
 
          <style>{`
             @keyframes popIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
