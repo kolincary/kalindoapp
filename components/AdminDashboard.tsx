@@ -974,6 +974,353 @@ const AccessUserCard = React.memo(({
    );
 });
 
+const PackingCard = React.memo(({
+   item,
+   index,
+   page,
+   rowsPerPage,
+   onCopyBarcode
+}: {
+   item: any,
+   index: number,
+   page: number,
+   rowsPerPage: number,
+   onCopyBarcode?: (barcode: string) => void
+}) => {
+   const staffInitial = (item.employee_name || '?').charAt(0).toUpperCase();
+   const roleStyle = ROLE_BADGE_STYLES[item.role] || ROLE_BADGE_STYLES['PACKING'] || {
+      bg: 'bg-emerald-50 dark:bg-emerald-950/30',
+      text: 'text-emerald-700 dark:text-emerald-300',
+      border: 'border-emerald-200 dark:border-emerald-800',
+   };
+
+   return (
+      <div className="p-4 rounded-2xl border bg-white dark:bg-gray-800 border-gray-200/80 dark:border-gray-700/80 shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600 transition-all duration-200 flex flex-col gap-3">
+         {/* Top Row: Index + Barcode + Copy */}
+         <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+               <span className="w-6 h-6 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 font-mono font-bold text-[11px] flex items-center justify-center shrink-0">
+                  {(page - 1) * rowsPerPage + index + 1}
+               </span>
+               <div className="font-mono font-bold text-xs sm:text-sm text-gray-900 dark:text-white tracking-wide truncate bg-slate-50 dark:bg-gray-900/60 px-2.5 py-1 rounded-xl border border-gray-200 dark:border-gray-700 select-all">
+                  {item.barcode}
+               </div>
+            </div>
+            <button
+               type="button"
+               onClick={() => {
+                  if (item.barcode) {
+                     navigator.clipboard.writeText(item.barcode);
+                     if (onCopyBarcode) onCopyBarcode(item.barcode);
+                  }
+               }}
+               className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded-xl transition-colors cursor-pointer shrink-0"
+               title="Salin barcode"
+            >
+               <Copy size={14} />
+            </button>
+         </div>
+
+         {/* Middle Row: Staff Avatar + Name + Timestamp */}
+         <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-800">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-sm shadow-blue-500/20">
+                  {staffInitial}
+               </div>
+               <div className="min-w-0 flex-1">
+                  <span className="font-bold text-xs text-gray-900 dark:text-white block truncate">{item.employee_name || '-'}</span>
+                  <span className="text-[11px] text-gray-400 font-mono">
+                     {new Date(item.timestamp).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+               </div>
+            </div>
+         </div>
+
+         {/* Bottom Row: Shift & Role Badges */}
+         <div className="flex items-center justify-between gap-2 pt-0.5">
+            <div>
+               {item.shift ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-lg font-bold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60">
+                     <Clock size={11} className="text-blue-500" />
+                     {item.shift}
+                  </span>
+               ) : (
+                  <span className="text-[11px] px-2 py-0.5 rounded-lg text-gray-400 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 italic">
+                     Tanpa Shift
+                  </span>
+               )}
+            </div>
+
+            <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-lg border ${roleStyle.bg} ${roleStyle.text} ${roleStyle.border}`}>
+               {item.role || 'PACKING'}
+            </span>
+         </div>
+      </div>
+   );
+});
+
+const GlobalSearchCard = React.memo(({
+   item,
+   onCopyBarcode
+}: {
+   item: any,
+   onCopyBarcode?: (barcode: string) => void
+}) => {
+   const staffName = item.employee_name || item.staff || item.user_email || '-';
+   const staffInitial = staffName.charAt(0).toUpperCase();
+   const roleStyle = ROLE_BADGE_STYLES[item.role] || {
+      bg: 'bg-gray-100 dark:bg-gray-800',
+      text: 'text-gray-700 dark:text-gray-300',
+      border: 'border-gray-200 dark:border-gray-700'
+   };
+
+   return (
+      <div className="p-4 rounded-2xl border bg-white dark:bg-gray-800 border-gray-200/80 dark:border-gray-700/80 shadow-sm hover:shadow-md hover:border-indigo-300 dark:hover:border-indigo-700 transition-all duration-200 flex flex-col gap-3">
+         {/* Top Row: Barcode + Server Origin + Copy */}
+         <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+               <div className="font-mono font-bold text-xs sm:text-sm text-gray-900 dark:text-white tracking-wide truncate bg-slate-50 dark:bg-gray-900/60 px-2.5 py-1 rounded-xl border border-gray-200 dark:border-gray-700 select-all">
+                  {item.barcode}
+               </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+               {item.source_db === 'SUPABASE_PRIMARY' && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                     <Zap size={10} className="text-emerald-500" />
+                     <span>Utama</span>
+                  </span>
+               )}
+               {item.source_db === 'SUPABASE_ARCHIVE' && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                     <Archive size={10} className="text-purple-500" />
+                     <span>Archive</span>
+                  </span>
+               )}
+               {item.source_db === 'SUPABASE_OLD' && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                     <Database size={10} className="text-blue-500" />
+                     <span>Lama</span>
+                  </span>
+               )}
+               {item.source_db === 'FIRESTORE' && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                     <Flame size={10} className="text-amber-500 fill-amber-500/30" />
+                     <span>Firestore</span>
+                  </span>
+               )}
+               <button
+                  type="button"
+                  onClick={() => {
+                     if (item.barcode) {
+                        navigator.clipboard.writeText(item.barcode);
+                        if (onCopyBarcode) onCopyBarcode(item.barcode);
+                     }
+                  }}
+                  className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 rounded-lg transition-colors cursor-pointer"
+                  title="Salin barcode"
+               >
+                  <Copy size={13} />
+               </button>
+            </div>
+         </div>
+
+         {/* Middle: Staff Info + Timestamp */}
+         <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-800">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-sm shadow-indigo-500/20">
+                  {staffInitial}
+               </div>
+               <div className="min-w-0 flex-1">
+                  <span className="font-bold text-xs text-gray-900 dark:text-white block truncate">{staffName}</span>
+                  <span className="text-[11px] text-gray-400 font-mono">
+                     {item.timestamp ? new Date(item.timestamp).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}
+                  </span>
+               </div>
+            </div>
+         </div>
+
+         {/* Destination / Description if available */}
+         {(item.destination || item.description) && (
+            <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5 px-1 truncate">
+               <MapPin size={11} className="text-gray-400 shrink-0" />
+               <span className="truncate">{item.destination || item.description}</span>
+            </div>
+         )}
+
+         {/* Bottom Row: Role & Status */}
+         <div className="flex items-center justify-between gap-2 pt-0.5 border-t border-gray-100 dark:border-gray-800">
+            <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-lg border ${roleStyle.bg} ${roleStyle.text} ${roleStyle.border}`}>
+               {item.role || 'UNKNOWN'}
+            </span>
+            <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-lg border ${item.status === 'COMPLETED' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' : 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300 border-red-200 dark:border-red-800'}`}>
+               {item.status || 'COMPLETED'}
+            </span>
+         </div>
+      </div>
+   );
+});
+
+const FirestoreSearchCard = React.memo(({
+   item,
+   onCopyBarcode
+}: {
+   item: any,
+   onCopyBarcode?: (barcode: string) => void
+}) => {
+   const staffName = item.employee_name || item.staff || item.user_email || '-';
+   const staffInitial = staffName.charAt(0).toUpperCase();
+   const roleStyle = ROLE_BADGE_STYLES[item.role] || {
+      bg: 'bg-orange-50 dark:bg-orange-950/30',
+      text: 'text-orange-700 dark:text-orange-300',
+      border: 'border-orange-200 dark:border-orange-800'
+   };
+
+   return (
+      <div className="p-4 rounded-2xl border bg-white dark:bg-gray-800 border-gray-200/80 dark:border-gray-700/80 shadow-sm hover:shadow-md hover:border-orange-300 dark:hover:border-orange-700 transition-all duration-200 flex flex-col gap-3">
+         {/* Top Row: Barcode + Copy */}
+         <div className="flex items-center justify-between gap-2">
+            <div className="font-mono font-bold text-xs sm:text-sm text-gray-900 dark:text-white tracking-wide truncate bg-slate-50 dark:bg-gray-900/60 px-2.5 py-1 rounded-xl border border-gray-200 dark:border-gray-700 select-all flex-1 min-w-0">
+               {item.barcode}
+            </div>
+            <button
+               type="button"
+               onClick={() => {
+                  if (item.barcode) {
+                     navigator.clipboard.writeText(item.barcode);
+                     if (onCopyBarcode) onCopyBarcode(item.barcode);
+                  }
+               }}
+               className="p-1.5 text-gray-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950/30 rounded-lg transition-colors cursor-pointer shrink-0"
+               title="Salin barcode"
+            >
+               <Copy size={13} />
+            </button>
+         </div>
+
+         {/* Middle: Staff Info + Timestamp */}
+         <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-800">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-sm shadow-orange-500/20">
+                  {staffInitial}
+               </div>
+               <div className="min-w-0 flex-1">
+                  <span className="font-bold text-xs text-gray-900 dark:text-white block truncate">{staffName}</span>
+                  <span className="text-[11px] text-gray-400 font-mono">
+                     {item.timestamp ? new Date(item.timestamp).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}
+                  </span>
+               </div>
+            </div>
+         </div>
+
+         {/* Destination / Description if available */}
+         {(item.destination || item.description) && (
+            <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5 px-1 truncate">
+               <MapPin size={11} className="text-gray-400 shrink-0" />
+               <span className="truncate">{item.destination || item.description}</span>
+            </div>
+         )}
+
+         {/* Bottom Row: Role & Status */}
+         <div className="flex items-center justify-between gap-2 pt-0.5 border-t border-gray-100 dark:border-gray-800">
+            <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-lg border ${roleStyle.bg} ${roleStyle.text} ${roleStyle.border}`}>
+               {item.role || 'FIRESTORE'}
+            </span>
+            <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-lg border ${item.status === 'COMPLETED' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' : 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300 border-red-200 dark:border-red-800'}`}>
+               {item.status || 'COMPLETED'}
+            </span>
+         </div>
+      </div>
+   );
+});
+
+const OjolCard = React.memo(({
+   item,
+   index,
+   page,
+   rowsPerPage,
+   onCopyBarcode
+}: {
+   item: any,
+   index: number,
+   page: number,
+   rowsPerPage: number,
+   onCopyBarcode?: (barcode: string) => void
+}) => {
+   const driverInitial = (item.employee_name || '?').charAt(0).toUpperCase();
+
+   return (
+      <div className="p-4 rounded-2xl border bg-white dark:bg-gray-800 border-gray-200/80 dark:border-gray-700/80 shadow-sm hover:shadow-md hover:border-cyan-300 dark:hover:border-cyan-700 transition-all duration-200 flex flex-col gap-3">
+         {/* Top Row: Index + Barcode + Copy */}
+         <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+               <span className="w-6 h-6 rounded-lg bg-cyan-50 dark:bg-cyan-950/50 text-cyan-600 dark:text-cyan-400 font-mono font-bold text-[11px] flex items-center justify-center shrink-0 border border-cyan-100 dark:border-cyan-900/50">
+                  {(page - 1) * rowsPerPage + index + 1}
+               </span>
+               <div className="font-mono font-bold text-xs sm:text-sm text-gray-900 dark:text-white tracking-wide truncate bg-slate-50 dark:bg-gray-900/60 px-2.5 py-1 rounded-xl border border-gray-200 dark:border-gray-700 select-all">
+                  {item.barcode}
+               </div>
+            </div>
+            <button
+               type="button"
+               onClick={() => {
+                  if (item.barcode) {
+                     navigator.clipboard.writeText(item.barcode);
+                     if (onCopyBarcode) onCopyBarcode(item.barcode);
+                  }
+               }}
+               className="p-2 text-gray-400 hover:text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-950/30 rounded-xl transition-colors cursor-pointer shrink-0"
+               title="Salin barcode"
+            >
+               <Copy size={14} />
+            </button>
+         </div>
+
+         {/* Middle Row: Driver Avatar + Name + Timestamp */}
+         <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-800">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-sm shadow-cyan-500/20">
+                  {driverInitial}
+               </div>
+               <div className="min-w-0 flex-1">
+                  <span className="font-bold text-xs text-gray-900 dark:text-white block truncate">{item.employee_name || '-'}</span>
+                  <span className="text-[11px] text-gray-400 font-mono">
+                     {new Date(item.timestamp).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+               </div>
+            </div>
+         </div>
+
+         {/* Destination / Context if available */}
+         {item.destination && (
+            <div className="text-xs text-cyan-700 dark:text-cyan-300 bg-cyan-50 dark:bg-cyan-950/40 p-2 rounded-xl border border-cyan-100 dark:border-cyan-900/50 flex items-center gap-1.5 truncate">
+               <MapPin size={12} className="shrink-0 text-cyan-600" />
+               <span className="truncate">{item.destination}</span>
+            </div>
+         )}
+
+         {/* Bottom Row: Shift & Role Badges */}
+         <div className="flex items-center justify-between gap-2 pt-0.5">
+            <div>
+               {item.shift ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-lg font-bold bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                     <Clock size={11} className="text-gray-500" />
+                     {item.shift}
+                  </span>
+               ) : (
+                  <span className="text-[11px] px-2 py-0.5 rounded-lg text-gray-400 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 italic">
+                     Tanpa Shift
+                  </span>
+               )}
+            </div>
+
+            <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-lg border bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300 border-cyan-200 dark:border-cyan-800">
+               OJOL
+            </span>
+         </div>
+      </div>
+   );
+});
+
 const AdminTableRow = React.memo(({
    admin,
    onEdit,
@@ -1308,6 +1655,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [filterAccessRole, setFilterAccessRole] = useState<string>('ALL'); // New Filter for Access Control
    const [accessViewLayout, setAccessViewLayout] = useState<'AUTO' | 'TABLE' | 'CARDS'>('AUTO');
    const [employeeViewLayout, setEmployeeViewLayout] = useState<'AUTO' | 'TABLE' | 'CARDS'>('AUTO');
+   const [packingViewLayout, setPackingViewLayout] = useState<'AUTO' | 'TABLE' | 'CARDS'>('AUTO');
+   const [ojolViewLayout, setOjolViewLayout] = useState<'AUTO' | 'TABLE' | 'CARDS'>('AUTO');
+   const [globalSearchViewLayout, setGlobalSearchViewLayout] = useState<'AUTO' | 'TABLE' | 'CARDS'>('AUTO');
+   const [firestoreSearchViewLayout, setFirestoreSearchViewLayout] = useState<'AUTO' | 'TABLE' | 'CARDS'>('AUTO');
 
    // 3b. Global Search State
    const [globalSearchTerm, setGlobalSearchTerm] = useState('');
@@ -1835,6 +2186,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [resetPinTarget, setResetPinTarget] = useState<string | null>(null);
    const [newPinValue, setNewPinValue] = useState('');
    const [successToast, setSuccessToast] = useState<string | null>(null);
+   const showToast = useCallback((msg: string, _type?: string) => {
+      setSuccessToast(msg);
+      setTimeout(() => setSuccessToast(null), 3000);
+   }, []);
 
    // 8. Loading & Error States
    const [isLoadingEmployees, setIsLoadingEmployees] = useState(false);
@@ -3126,6 +3481,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                setShowFsSyncDevMode(newState);
                localStorage.setItem('showFakeReportMenu', String(newState));
                localStorage.setItem('showSecretMenu', String(newState));
+               localStorage.setItem('isDevModeNew', String(newState));
                setSuccessToast(newState ? "⚡ Dev Mode Secret Unlocked! (Tombol Hapus Ekstra & Feature Dev Aktif)" : "Dev Mode Deactivated");
                currentIndex = 0;
             }
@@ -9551,7 +9907,6 @@ if (filterPackingShift !== 'ALL') {
                      <SidebarItem hiddenMenus={hiddenMenus} view="CANCEL_DATA" icon={AlertTriangle} label="Data Cancel" requiredPerm="manage_cancel_data" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="TRACK_RESI" icon={ShieldCheck} label="Tracking Resi" requiredPerm="view_dashboard" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="ADMIN_BATCH_IMPORTS" icon={Database} label="Batch Imports Manager" requiredPerm="" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
-                     <SidebarItem hiddenMenus={hiddenMenus} view="RESI_FORMATTER" icon={Sparkles} label="Format Resi & Strip" requiredPerm="" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      {(() => {
                         const isDevModeNew = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
                         return isDevModeNew ? (
@@ -9589,6 +9944,7 @@ if (filterPackingShift !== 'ALL') {
                            <SidebarItem hiddenMenus={hiddenMenus} view="RUNNING_TEXT_MANAGER" icon={MessageSquare} label="Pengumuman Manager" requiredPerm="manage_database" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                            <SidebarItem hiddenMenus={hiddenMenus} view="FIRESTORE_MANAGER" icon={Database} label="Firestore Manager" requiredPerm="manage_database" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                            <SidebarItem hiddenMenus={hiddenMenus} view="INJECT_EXPIRED_RESI" icon={UploadCloud} label="Inject Resi Kedaluwarsa" requiredPerm="manage_database" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
+                           <SidebarItem hiddenMenus={hiddenMenus} view="RESI_FORMATTER" icon={Sparkles} label="Format Resi & Strip" requiredPerm="manage_database" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                            <SidebarItem hiddenMenus={hiddenMenus} view="SETTINGS" icon={Settings} label="Pengaturan Sistem" requiredPerm="manage_database" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                         </SidebarSection>
                      )}
@@ -10343,13 +10699,102 @@ if (filterPackingShift !== 'ALL') {
                                        )}
 
                                        {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') && (
-                                          <button
-                                             onClick={() => setIsHalfCountMode(!isHalfCountMode)}
-                                             className={`h-11 px-4 flex items-center justify-center gap-2 rounded-xl border transition-all active:scale-95 text-sm font-bold shadow-sm ${isHalfCountMode ? 'bg-red-600 border-red-600 text-white shadow-red-500/30' : 'bg-red-50 border-red-100 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/30'}`}
-                                             title="Toggle 50% View"
-                                          >
-                                             <span>50% Cut</span>
-                                          </button>
+                                          <>
+                                             {/* Layout View Switcher */}
+                                             <div className="flex items-center bg-gray-100 dark:bg-gray-800 p-1 rounded-xl border border-gray-200 dark:border-gray-700 h-11">
+                                                <button
+                                                   type="button"
+                                                   onClick={() => setPackingViewLayout('AUTO')}
+                                                   className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                      packingViewLayout === 'AUTO'
+                                                         ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                                                         : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                                   }`}
+                                                   title="Tampilan Otomatis (Tabel di Desktop, Kartu di Mobile)"
+                                                >
+                                                   <SlidersHorizontal size={13} />
+                                                   <span className="hidden sm:inline">Auto</span>
+                                                </button>
+                                                <button
+                                                   type="button"
+                                                   onClick={() => setPackingViewLayout('TABLE')}
+                                                   className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                      packingViewLayout === 'TABLE'
+                                                         ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                                                         : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                                   }`}
+                                                   title="Paksa Tampilan Tabel"
+                                                >
+                                                   <Layers size={13} />
+                                                   <span className="hidden sm:inline">Tabel</span>
+                                                </button>
+                                                <button
+                                                   type="button"
+                                                   onClick={() => setPackingViewLayout('CARDS')}
+                                                   className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                      packingViewLayout === 'CARDS'
+                                                         ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                                                         : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                                   }`}
+                                                   title="Paksa Tampilan Kartu"
+                                                >
+                                                   <LayoutGrid size={13} />
+                                                   <span className="hidden sm:inline">Kartu</span>
+                                                </button>
+                                             </div>
+
+                                             <button
+                                                onClick={() => setIsHalfCountMode(!isHalfCountMode)}
+                                                className={`h-11 px-4 flex items-center justify-center gap-2 rounded-xl border transition-all active:scale-95 text-sm font-bold shadow-sm ${isHalfCountMode ? 'bg-red-600 border-red-600 text-white shadow-red-500/30' : 'bg-red-50 border-red-100 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/30'}`}
+                                                title="Toggle 50% View"
+                                             >
+                                                <span>50% Cut</span>
+                                             </button>
+                                          </>
+                                       )}
+
+                                       {activeView === 'OJOL_DATA' && (
+                                          <div className="flex items-center bg-gray-100 dark:bg-gray-800 p-1 rounded-xl border border-gray-200 dark:border-gray-700 h-11">
+                                             <button
+                                                type="button"
+                                                onClick={() => setOjolViewLayout('AUTO')}
+                                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                   ojolViewLayout === 'AUTO'
+                                                      ? 'bg-white dark:bg-gray-700 text-cyan-600 dark:text-cyan-400 shadow-sm'
+                                                      : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                                }`}
+                                                title="Tampilan Otomatis (Tabel di Desktop, Kartu di Mobile)"
+                                             >
+                                                <SlidersHorizontal size={13} />
+                                                <span className="hidden sm:inline">Auto</span>
+                                             </button>
+                                             <button
+                                                type="button"
+                                                onClick={() => setOjolViewLayout('TABLE')}
+                                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                   ojolViewLayout === 'TABLE'
+                                                      ? 'bg-white dark:bg-gray-700 text-cyan-600 dark:text-cyan-400 shadow-sm'
+                                                      : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                                }`}
+                                                title="Paksa Tampilan Tabel"
+                                             >
+                                                <Layers size={13} />
+                                                <span className="hidden sm:inline">Tabel</span>
+                                             </button>
+                                             <button
+                                                type="button"
+                                                onClick={() => setOjolViewLayout('CARDS')}
+                                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                   ojolViewLayout === 'CARDS'
+                                                      ? 'bg-white dark:bg-gray-700 text-cyan-600 dark:text-cyan-400 shadow-sm'
+                                                      : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                                }`}
+                                                title="Paksa Tampilan Kartu"
+                                             >
+                                                <LayoutGrid size={13} />
+                                                <span className="hidden sm:inline">Kartu</span>
+                                             </button>
+                                          </div>
                                        )}
 
                                        {/* Buttons for Packing and Gudang */}
@@ -11286,70 +11731,261 @@ if (filterPackingShift !== 'ALL') {
 
                         {/* OJOL DATA VIEW */}
                         {activeView === 'OJOL_DATA' && (
-                           <div className="w-full h-full flex flex-col bg-white dark:bg-gray-800">
-                              {/* Dashboard Stats - Flat Grid */}
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-0 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
-                                 <div className="p-4 border-r border-gray-200 dark:border-gray-700 flex items-center justify-between"><div><p className="text-xs font-bold text-gray-500 uppercase mb-1">Total Scans</p><h3 className="text-2xl font-bold text-gray-900 dark:text-white">{ojolStats.total}</h3></div><div className="text-blue-600"><Bike size={24} /></div></div>
-                                 <div className="p-4 border-r border-gray-200 dark:border-gray-700 flex items-center justify-between"><div><p className="text-xs font-bold text-gray-500 uppercase mb-1">Active Drivers</p><h3 className="text-2xl font-bold text-gray-900 dark:text-white">{ojolStats.activeStaff}</h3></div><div className="text-purple-600"><Users size={24} /></div></div>
-                                 <div className="p-4 flex items-center justify-between"><div><p className="text-xs font-bold text-gray-500 uppercase mb-1">Latest Scan</p><h3 className="text-xl font-bold text-gray-900 dark:text-white">{ojolStats.latest}</h3></div><div className="text-green-600"><Clock size={24} /></div></div>
+                           <div className="w-full h-full flex flex-col bg-white dark:bg-gray-800 overflow-y-auto">
+                              {/* Dashboard Stats - Modern 4 Cards */}
+                              <div className="p-3.5 sm:p-5 border-b border-gray-200/80 dark:border-gray-800 bg-white/80 dark:bg-gray-800/80 backdrop-blur-md shrink-0">
+                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                                    {/* Stat 1: Total Scans */}
+                                    <div className="bg-gradient-to-br from-cyan-50/80 to-blue-50/40 dark:from-cyan-950/20 dark:to-blue-950/10 border border-cyan-100 dark:border-cyan-900/40 rounded-2xl p-3.5 sm:p-4 shadow-sm">
+                                       <div className="flex items-center justify-between">
+                                          <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-cyan-700 dark:text-cyan-300">Total Scans</span>
+                                          <div className="w-8 h-8 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0">
+                                             <Bike size={16} />
+                                          </div>
+                                       </div>
+                                       <h3 className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-gray-900 dark:text-white mt-1.5">
+                                          {ojolStats.total.toLocaleString()}
+                                       </h3>
+                                       <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Total paket di-scan driver</p>
+                                    </div>
+
+                                    {/* Stat 2: Active Drivers */}
+                                    <div className="bg-gradient-to-br from-purple-50/80 to-indigo-50/40 dark:from-purple-950/20 dark:to-indigo-950/10 border border-purple-100 dark:border-purple-900/40 rounded-2xl p-3.5 sm:p-4 shadow-sm">
+                                       <div className="flex items-center justify-between">
+                                          <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300">Active Drivers</span>
+                                          <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+                                             <Users size={16} />
+                                          </div>
+                                       </div>
+                                       <div className="text-2xl sm:text-3xl font-extrabold text-purple-600 dark:text-purple-400 mt-1.5 font-mono">{ojolStats.activeStaff}</div>
+                                       <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Driver bertugas aktif</p>
+                                    </div>
+
+                                    {/* Stat 3: Latest Scan */}
+                                    <div className="bg-gradient-to-br from-emerald-50/80 to-teal-50/40 dark:from-emerald-950/20 dark:to-teal-950/10 border border-emerald-100 dark:border-emerald-900/40 rounded-2xl p-3.5 sm:p-4 shadow-sm">
+                                       <div className="flex items-center justify-between">
+                                          <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Latest Scan</span>
+                                          <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                                             <Clock size={16} />
+                                          </div>
+                                       </div>
+                                       <div className="text-xl sm:text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-1.5 font-mono">{ojolStats.latest}</div>
+                                       <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Waktu scan ojol terbaru</p>
+                                    </div>
+
+                                    {/* Stat 4: Rata-rata / Driver */}
+                                    <div className="bg-gradient-to-br from-amber-50/80 to-orange-50/40 dark:from-amber-950/20 dark:to-orange-950/10 border border-amber-100 dark:border-amber-900/40 rounded-2xl p-3.5 sm:p-4 shadow-sm">
+                                       <div className="flex items-center justify-between">
+                                          <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">Rata-rata / Driver</span>
+                                          <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                                             <Zap size={16} />
+                                          </div>
+                                       </div>
+                                       <div className="text-2xl sm:text-3xl font-extrabold text-amber-600 dark:text-amber-400 mt-1.5 font-mono">
+                                          {ojolStats.activeStaff > 0 ? Math.round(ojolStats.total / ojolStats.activeStaff).toLocaleString() : '0'}
+                                       </div>
+                                       <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Rata-rata paket per driver</p>
+                                    </div>
+                                 </div>
+
+                                 {/* Filter Active Sub-Banner */}
+                                 {(ojolSearch || filterOjolShift !== 'ALL' || filterOjolStaff !== 'ALL') && (
+                                    <div className="flex flex-wrap items-center justify-between gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-800 text-xs">
+                                       <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="text-gray-500 dark:text-gray-400">
+                                             Filter aktif:
+                                          </span>
+                                          {filterDate && (
+                                             <span className="px-2 py-0.5 rounded-md bg-cyan-100 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300 font-semibold text-[11px]">
+                                                {formatDisplayDate(filterDate)}
+                                             </span>
+                                          )}
+                                          {filterOjolShift !== 'ALL' && (
+                                             <span className="px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 font-semibold text-[11px]">
+                                                Shift: {filterOjolShift}
+                                             </span>
+                                          )}
+                                          {filterOjolStaff !== 'ALL' && (
+                                             <span className="px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-semibold text-[11px]">
+                                                Driver: {filterOjolStaff}
+                                             </span>
+                                          )}
+                                          {ojolSearch && (
+                                             <span className="px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-semibold text-[11px]">
+                                                Cari: &ldquo;{ojolSearch}&rdquo;
+                                             </span>
+                                          )}
+                                       </div>
+                                       <button
+                                          onClick={() => {
+                                             setFilterOjolShift('ALL');
+                                             setFilterOjolStaff('ALL');
+                                             setOjolSearch('');
+                                          }}
+                                          className="text-cyan-600 dark:text-cyan-400 hover:underline font-semibold cursor-pointer"
+                                       >
+                                          Reset Filter
+                                       </button>
+                                    </div>
+                                 )}
                               </div>
 
-                              {/* Enhanced Table - Flat */}
+                              {/* Enhanced Table & Mobile View */}
                               <div className="flex-1 w-full flex flex-col relative overflow-hidden">
                                  {isLoadingOjol && (
                                     <div className="absolute inset-0 z-50 bg-white/60 dark:bg-gray-800/60 backdrop-blur-[1px] flex flex-col gap-3 items-center justify-center transition-all duration-300">
-                                       <Loader2 className="animate-spin text-blue-600 dark:text-blue-400" size={32} />
-                                       <p className="text-sm font-medium text-gray-500 dark:text-gray-400 animate-pulse">Updating Data...</p>
+                                       <Loader2 className="animate-spin text-cyan-600 dark:text-cyan-400" size={32} />
+                                       <p className="text-sm font-medium text-gray-500 dark:text-gray-400 animate-pulse">Memuat Data Ojol...</p>
                                     </div>
                                  )}
-                                 {true && (
-                                    <>
-                                       <div className="flex-1 overflow-auto">
-                                          <table className="w-full text-left whitespace-nowrap">
-                                             <thead className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
-                                                <tr>
-                                                   <th className="p-5 text-xs font-bold text-gray-500 uppercase tracking-wider w-16 bg-gray-50 dark:bg-gray-900 min-w-[60px]">No.</th>
-                                                   <th className="p-5 text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-900 min-w-[140px]">Timestamp</th>
-                                                   <th className="p-5 text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-900"><span className="min-w-[180px]">Barcode Data</span></th>
-                                                   <th className="p-5 text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-900">Driver/Staff</th>
-                                                   <th className="p-5 text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-900 min-w-[120px]">Shift</th>
-                                                   <th className="p-5 text-xs font-bold text-gray-500 uppercase tracking-wider text-center bg-gray-50 dark:bg-gray-900">Role</th>
-                                                   <th className="p-5 text-xs font-bold text-gray-500 uppercase tracking-wider text-center bg-gray-50 dark:bg-gray-900">Status</th>
+
+                                 {/* DESKTOP / TABLE VIEW */}
+                                 <div className={`flex-1 overflow-auto ${
+                                    ojolViewLayout === 'TABLE' ? 'block' : ojolViewLayout === 'CARDS' ? 'hidden' : 'hidden md:block'
+                                 }`}>
+                                    <table className="w-full text-left whitespace-nowrap">
+                                       <thead className="bg-gray-50/90 dark:bg-gray-900/90 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
+                                          <tr>
+                                             <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-16 min-w-[60px]">No.</th>
+                                             <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[140px]">Timestamp</th>
+                                             <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[180px]">Barcode Data</th>
+                                             <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[150px]">Driver / Staff</th>
+                                             <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[120px]">Shift</th>
+                                             <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">Role</th>
+                                             <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">Status</th>
+                                          </tr>
+                                       </thead>
+                                       <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                                          {ojolData.length === 0 ? (
+                                             <tr>
+                                                <td colSpan={7} className="p-10 text-center text-gray-400 dark:text-gray-500 text-sm font-medium">
+                                                   Tidak ada data ojol yang cocok dengan filter.
+                                                </td>
+                                             </tr>
+                                          ) : (
+                                             ojolData.map((item, idx) => (
+                                                <tr key={item.id || idx} className="hover:bg-cyan-50/40 dark:hover:bg-cyan-900/10 transition-colors">
+                                                   <td className="px-4 py-3.5 text-xs font-bold text-gray-400 dark:text-gray-500 font-mono">
+                                                      {(page - 1) * rowsPerPage + idx + 1}
+                                                   </td>
+                                                   <td className="px-4 py-3.5 text-xs text-gray-500 dark:text-gray-400 font-mono">
+                                                      <div>{formatDisplayDate(item.timestamp)}</div>
+                                                      <div className="text-[11px] text-gray-400">{new Date(item.timestamp).toLocaleTimeString('id-ID')}</div>
+                                                   </td>
+                                                   <td className="px-4 py-3.5">
+                                                      <span className="font-mono font-bold text-xs sm:text-sm text-gray-900 dark:text-gray-100 tracking-wide select-all bg-gray-100/80 dark:bg-gray-800 px-2.5 py-1 rounded-lg border border-gray-200/70 dark:border-gray-700/70 inline-block shadow-2xs">
+                                                         {item.barcode}
+                                                      </span>
+                                                      {item.destination && (
+                                                         <div className="text-xs text-cyan-600 dark:text-cyan-400 mt-1 flex items-center gap-1">
+                                                            <MapPin size={11} /> {item.destination}
+                                                         </div>
+                                                      )}
+                                                   </td>
+                                                   <td className="px-4 py-3.5 text-xs sm:text-sm font-semibold text-gray-800 dark:text-gray-200">
+                                                      <div className="flex items-center gap-2.5">
+                                                         <div className="w-7 h-7 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                                                            {(item.employee_name || '?').charAt(0).toUpperCase()}
+                                                         </div>
+                                                         <span>{item.employee_name}</span>
+                                                      </div>
+                                                   </td>
+                                                   <td className="px-4 py-3.5">
+                                                      {item.shift ? (
+                                                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide border bg-cyan-50 text-cyan-700 border-cyan-200/80 dark:bg-cyan-950/50 dark:text-cyan-300 dark:border-cyan-800">
+                                                            {item.shift}
+                                                         </span>
+                                                      ) : (
+                                                         <span className="text-gray-400 text-xs italic">- Tanpa Shift -</span>
+                                                      )}
+                                                   </td>
+                                                   <td className="px-4 py-3.5 text-center">
+                                                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase border bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300 border-cyan-200 dark:border-cyan-800">
+                                                         OJOL
+                                                      </span>
+                                                   </td>
+                                                   <td className="px-4 py-3.5 text-center">
+                                                      {item.status === 'OK' || item.status === 'COMPLETED' ? (
+                                                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400 border border-emerald-200/80 dark:border-emerald-800">
+                                                            COMPLETED
+                                                         </span>
+                                                      ) : (
+                                                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-400 border border-red-200/80 dark:border-red-800">
+                                                            {item.status || 'PENDING'}
+                                                         </span>
+                                                      )}
+                                                   </td>
                                                 </tr>
-                                             </thead>
-                                             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                                                {ojolData.length === 0 ? (
-                                                   <tr><td colSpan={7} className="p-8 text-center text-gray-500 italic">No data found for this date/filter.</td></tr>
-                                                ) : (
-                                                   ojolData.map((item, idx) => (
-                                                      <tr key={item.id} className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-colors">
-                                                         <td className="p-5 text-sm font-mono text-gray-400">{(page - 1) * rowsPerPage + idx + 1}</td>
-                                                         <td className="p-5 text-sm font-medium text-gray-600 dark:text-gray-300">
-                                                            <div>{formatDisplayDate(item.timestamp)}</div>
-                                                            <div className="text-xs text-gray-400">{new Date(item.timestamp).toLocaleTimeString('id-ID')}</div>
-                                                         </td>
-                                                         <td className="p-5">
-                                                            <div className="font-mono font-bold text-gray-800 dark:text-gray-200">{item.barcode}</div>
-                                                            {item.destination && <div className="text-xs text-blue-500 mt-1 flex items-center gap-1"><MapPin size={10} /> {item.destination}</div>}
-                                                         </td>
-                                                         <td className="p-5 font-bold text-gray-700 dark:text-gray-200">{item.employee_name}</td>
-                                                         <td className="p-5 text-xs"><span className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-500">{item.shift}</span></td>
-                                                         <td className="p-5 text-center"><span className="px-2 py-1 rounded text-xs font-bold bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800">OJOL</span></td>
-                                                         <td className="p-5 text-center">
-                                                            {item.status === 'OK' ? <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded border border-green-200">OK</span> : <span className="text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded border border-red-200">{item.status}</span>}
-                                                         </td>
-                                                      </tr>
-                                                   ))
-                                                )}
-                                             </tbody>
-                                          </table>
+                                             ))
+                                          )}
+                                       </tbody>
+                                    </table>
+                                 </div>
+
+                                 {/* MOBILE / CARD GRID VIEW */}
+                                 <div className={`flex-1 overflow-auto ${
+                                    ojolViewLayout === 'CARDS' ? 'block' : ojolViewLayout === 'TABLE' ? 'hidden' : 'block md:hidden'
+                                 }`}>
+                                    {ojolData.length === 0 ? (
+                                       <div className="p-10 text-center text-gray-400 dark:text-gray-500 text-sm font-medium">
+                                          Tidak ada data ojol yang cocok dengan filter.
                                        </div>
-                                       <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 flex flex-col sm:flex-row items-center justify-between gap-4 shrink-0">
-                                          <div className="flex items-center gap-2"><span className="text-sm text-gray-500 dark:text-gray-400">Rows per page:</span><select value={rowsPerPage} onChange={(e) => setRowsPerPage(Number(e.target.value))} className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"><option value={100}>100</option><option value={200}>200</option><option value={500}>500</option></select></div>
-                                          <div className="flex items-center gap-4"><span className="text-sm text-gray-500 dark:text-gray-400">Page {page} of {Math.ceil(totalRows / rowsPerPage) || 1} <span className="mx-1 text-gray-300">|</span> Total {totalRows} records</span><div className="flex items-center gap-1"><button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600 dark:text-gray-300"><ChevronLeft size={20} /></button><button onClick={() => setPage(p => (p * rowsPerPage < totalRows ? p + 1 : p))} disabled={page * rowsPerPage >= totalRows} className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600 dark:text-gray-300"><ChevronRight size={20} /></button></div></div>
+                                    ) : (
+                                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 p-3.5 sm:p-4 pb-20">
+                                          {ojolData.map((item, index) => (
+                                             <OjolCard
+                                                key={item.id || index}
+                                                item={item}
+                                                index={index}
+                                                page={page}
+                                                rowsPerPage={rowsPerPage}
+                                                onCopyBarcode={(b) => showToast(`Barcode ${b} disalin!`, 'success')}
+                                             />
+                                          ))}
                                        </div>
-                                    </>
-                                 )}
+                                    )}
+                                 </div>
+
+                                 {/* Pagination Bar */}
+                                 <div className="px-4 py-3 border-t border-gray-200/80 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-900/80 backdrop-blur-md flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+                                    <div className="flex items-center gap-2">
+                                       <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Baris per halaman:</span>
+                                       <select
+                                          value={rowsPerPage}
+                                          onChange={(e) => setRowsPerPage(Number(e.target.value))}
+                                          className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-semibold px-2.5 py-1 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/30 cursor-pointer shadow-2xs"
+                                       >
+                                          <option value={100}>100</option>
+                                          <option value={200}>200</option>
+                                          <option value={500}>500</option>
+                                       </select>
+                                    </div>
+                                    <div className="flex items-center gap-4">
+                                       <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                                          Halaman <strong className="font-bold text-gray-800 dark:text-gray-200">{page}</strong> dari <strong className="font-bold text-gray-800 dark:text-gray-200">{Math.ceil(totalRows / rowsPerPage) || 1}</strong>
+                                          <span className="mx-2 text-gray-300 dark:text-gray-700">•</span>
+                                          Total <strong className="font-bold text-gray-800 dark:text-gray-200">{totalRows.toLocaleString('id-ID')}</strong> data
+                                       </span>
+                                       <div className="flex items-center gap-1">
+                                          <button
+                                             onClick={() => setPage(p => Math.max(1, p - 1))}
+                                             disabled={page === 1}
+                                             className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-700/80 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 disabled:opacity-40 disabled:cursor-not-allowed text-gray-600 dark:text-gray-300 transition-colors shadow-2xs"
+                                             title="Halaman Sebelumnya"
+                                          >
+                                             <ChevronLeft size={18} />
+                                          </button>
+                                          <button
+                                             onClick={() => setPage(p => (p * rowsPerPage < totalRows ? p + 1 : p))}
+                                             disabled={page * rowsPerPage >= totalRows}
+                                             className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-700/80 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 disabled:opacity-40 disabled:cursor-not-allowed text-gray-600 dark:text-gray-300 transition-colors shadow-2xs"
+                                             title="Halaman Selanjutnya"
+                                          >
+                                             <ChevronRight size={18} />
+                                          </button>
+                                       </div>
+                                    </div>
+                                 </div>
                               </div>
                            </div>
                         )}
@@ -11448,79 +12084,129 @@ if (filterPackingShift !== 'ALL') {
 
                         {activeView === 'SEARCH_ALL' && (
                            <div className="w-full h-full min-h-full bg-white dark:bg-gray-800 flex flex-col overflow-y-auto">
-                              <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 shrink-0">
-                                 <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-center text-center sm:text-left max-w-7xl mx-auto w-full">
-                                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-full flex items-center justify-center shrink-0">
-                                       <Search size={22} className="sm:w-6 sm:h-6" />
-                                    </div>
-                                    <div className="flex-1 w-full">
-                                       <div className="flex flex-wrap items-center gap-2 mb-1 justify-center sm:justify-start">
-                                          <h3 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white">Global Search (Multi-Database 4 Server)</h3>
-                                          <span className="inline-flex items-center gap-1 text-[10px] uppercase font-extrabold px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                                             <Globe size={11} />
-                                             AUTO 4 SERVER
-                                          </span>
-                                       </div>
-                                       <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mb-3 sm:mb-4">
-                                          Pencarian otomatis di 4 Database sekaligus: <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Supabase Utama</span>, <span className="text-purple-600 dark:text-purple-400 font-semibold">Supabase Archive</span>, <span className="text-indigo-600 dark:text-indigo-400 font-semibold">Supabase Lama</span>, dan <span className="text-amber-600 dark:text-amber-400 font-semibold">Firestore</span>.
-                                       </p>
-                                       
-                                       <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-3 w-full">
-                                          <div className="relative flex-1 group w-full">
-                                             <Search size={18} className="absolute left-3.5 sm:left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
-                                             <input
-                                                type="text"
-                                                value={globalSearchTerm}
-                                                onChange={(e) => setGlobalSearchTerm(e.target.value)}
-                                                onKeyDown={(e) => e.key === 'Enter' && handleGlobalSearch()}
-                                                placeholder="Ketik no resi / barcode..."
-                                                className="w-full h-11 sm:h-12 pl-10 sm:pl-12 pr-10 sm:pr-12 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-base sm:text-lg font-mono placeholder:font-sans transition-all"
-                                                autoFocus
-                                             />
-                                             {globalSearchTerm && (
-                                                <button
-                                                   onClick={() => {
-                                                      setGlobalSearchTerm('');
-                                                      setGlobalSearchResults([]);
-                                                   }}
-                                                   className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full transition-all"
-                                                   title="Clear Search"
-                                                >
-                                                   <X size={18} />
-                                                </button>
-                                             )}
+                              {/* Hero Search Section */}
+                              <div className="p-4 sm:p-6 border-b border-gray-200/80 dark:border-gray-700/80 bg-gradient-to-b from-indigo-50/50 via-white to-gray-50/30 dark:from-indigo-950/20 dark:via-gray-800 dark:to-gray-900/30 shrink-0">
+                                 <div className="max-w-7xl mx-auto w-full space-y-4">
+                                    {/* Header Title & Badges */}
+                                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                                       <div className="flex items-center gap-3">
+                                          <div className="w-10 h-10 sm:w-12 sm:h-12 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center shrink-0 shadow-sm shadow-indigo-500/20">
+                                             <Search size={22} className="sm:w-6 sm:h-6" />
                                           </div>
+                                          <div>
+                                             <div className="flex flex-wrap items-center gap-2">
+                                                <h3 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white">Global Search (Multi-Database 4 Server)</h3>
+                                                <span className="inline-flex items-center gap-1 text-[10px] uppercase font-extrabold px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                                                   <Globe size={11} />
+                                                   AUTO 4 SERVER
+                                                </span>
+                                             </div>
+                                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                                Pencarian otomatis di 4 Database: <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Supabase Utama</span>, <span className="text-purple-600 dark:text-purple-400 font-semibold">Supabase Archive</span>, <span className="text-blue-600 dark:text-blue-400 font-semibold">Supabase Lama</span>, dan <span className="text-amber-600 dark:text-amber-400 font-semibold">Firestore</span>.
+                                             </p>
+                                          </div>
+                                       </div>
 
-                                          <select
-                                             value={globalSearchServerFilter}
-                                             onChange={(e) => setGlobalSearchServerFilter(e.target.value as any)}
-                                             className="h-11 sm:h-12 px-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-xs sm:text-sm font-bold text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all shrink-0 cursor-pointer"
-                                             title="Filter Sumber Server Database"
-                                          >
-                                             <option value="ALL">Semua Server Database (Otomatis)</option>
-                                             <option value="SUPABASE_PRIMARY">Supabase Utama</option>
-                                             <option value="SUPABASE_ARCHIVE">Supabase Archive</option>
-                                             <option value="SUPABASE_OLD">Supabase Lama</option>
-                                             <option value="FIRESTORE">Firestore</option>
-                                          </select>
-
+                                       {/* Layout Switcher */}
+                                       <div className="flex items-center bg-gray-100 dark:bg-gray-700/60 p-1 rounded-xl border border-gray-200 dark:border-gray-600 self-end sm:self-auto h-10">
                                           <button
-                                             onClick={handleGlobalSearch}
-                                             disabled={isGlobalSearching || !globalSearchTerm.trim()}
-                                             className="h-11 sm:h-12 px-6 sm:px-8 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none flex items-center justify-center gap-2 transition-all active:scale-95 w-full sm:w-auto text-sm sm:text-base shrink-0 cursor-pointer"
+                                             type="button"
+                                             onClick={() => setGlobalSearchViewLayout('AUTO')}
+                                             className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                globalSearchViewLayout === 'AUTO'
+                                                   ? 'bg-white dark:bg-gray-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                             }`}
+                                             title="Tampilan Otomatis"
                                           >
-                                             {isGlobalSearching ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
-                                             Cari Data
+                                             <SlidersHorizontal size={13} />
+                                             <span className="hidden sm:inline">Auto</span>
+                                          </button>
+                                          <button
+                                             type="button"
+                                             onClick={() => setGlobalSearchViewLayout('TABLE')}
+                                             className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                globalSearchViewLayout === 'TABLE'
+                                                   ? 'bg-white dark:bg-gray-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                             }`}
+                                             title="Paksa Tampilan Tabel"
+                                          >
+                                             <Layers size={13} />
+                                             <span className="hidden sm:inline">Tabel</span>
+                                          </button>
+                                          <button
+                                             type="button"
+                                             onClick={() => setGlobalSearchViewLayout('CARDS')}
+                                             className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                globalSearchViewLayout === 'CARDS'
+                                                   ? 'bg-white dark:bg-gray-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                             }`}
+                                             title="Paksa Tampilan Kartu"
+                                          >
+                                             <LayoutGrid size={13} />
+                                             <span className="hidden sm:inline">Kartu</span>
                                           </button>
                                        </div>
+                                    </div>
 
+                                    {/* Search Controls Form */}
+                                    <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-3 w-full">
+                                       <div className="relative flex-1 group w-full">
+                                          <Search size={18} className="absolute left-3.5 sm:left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
+                                          <input
+                                             type="text"
+                                             value={globalSearchTerm}
+                                             onChange={(e) => setGlobalSearchTerm(e.target.value)}
+                                             onKeyDown={(e) => e.key === 'Enter' && handleGlobalSearch()}
+                                             placeholder="Ketik no resi / barcode (tekan Enter untuk mencari)..."
+                                             className="w-full h-11 sm:h-12 pl-10 sm:pl-12 pr-10 sm:pr-12 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm sm:text-base font-mono placeholder:font-sans transition-all shadow-2xs"
+                                             autoFocus
+                                          />
+                                          {globalSearchTerm && (
+                                             <button
+                                                onClick={() => {
+                                                   setGlobalSearchTerm('');
+                                                   setGlobalSearchResults([]);
+                                                }}
+                                                className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full transition-all cursor-pointer"
+                                                title="Clear Search"
+                                             >
+                                                <X size={18} />
+                                             </button>
+                                          )}
+                                       </div>
+
+                                       <select
+                                          value={globalSearchServerFilter}
+                                          onChange={(e) => setGlobalSearchServerFilter(e.target.value as any)}
+                                          className="h-11 sm:h-12 px-3.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-xs sm:text-sm font-bold text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all shrink-0 cursor-pointer shadow-2xs"
+                                          title="Filter Sumber Server Database"
+                                       >
+                                          <option value="ALL">Semua Server Database (Otomatis)</option>
+                                          <option value="SUPABASE_PRIMARY">Supabase Utama</option>
+                                          <option value="SUPABASE_ARCHIVE">Supabase Archive</option>
+                                          <option value="SUPABASE_OLD">Supabase Lama</option>
+                                          <option value="FIRESTORE">Firestore</option>
+                                       </select>
+
+                                       <button
+                                          onClick={handleGlobalSearch}
+                                          disabled={isGlobalSearching || !globalSearchTerm.trim()}
+                                          className="h-11 sm:h-12 px-6 sm:px-8 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none flex items-center justify-center gap-2 transition-all active:scale-95 w-full sm:w-auto text-sm sm:text-base shrink-0 cursor-pointer"
+                                       >
+                                          {isGlobalSearching ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
+                                          Cari Data
+                                       </button>
                                     </div>
                                  </div>
                               </div>
 
-                              <div className="flex-1 overflow-x-auto bg-white dark:bg-gray-800">
+                              {/* Results Section */}
+                              <div className="flex-1 overflow-x-auto bg-white dark:bg-gray-800 flex flex-col">
                                  {isGlobalSearching ? (
-                                    <div className="flex flex-col items-center justify-center p-12 sm:p-20 gap-4 min-h-[250px]">
+                                    <div className="flex flex-col items-center justify-center p-12 sm:p-20 gap-4 min-h-[250px] my-auto">
                                        <Loader2 size={36} className="animate-spin text-indigo-500" />
                                        <p className="text-xs sm:text-sm text-gray-500 font-medium">Mencari data resi di 4 Server Database secara bersamaan...</p>
                                     </div>
@@ -11535,117 +12221,178 @@ if (filterPackingShift !== 'ALL') {
                                        });
 
                                        return (
-                                          <div className="min-w-full inline-block align-middle">
+                                          <div className="flex-1 flex flex-col">
                                              {/* Summary Stats Header Bar */}
-                                             <div className="px-4 py-2.5 bg-indigo-50/80 dark:bg-indigo-950/40 border-b border-indigo-100 dark:border-indigo-900/50 flex flex-wrap items-center justify-between gap-2 text-xs font-bold">
+                                             <div className="px-4 py-3 bg-indigo-50/80 dark:bg-indigo-950/40 border-b border-indigo-100 dark:border-indigo-900/50 flex flex-wrap items-center justify-between gap-2.5 text-xs font-bold shrink-0">
                                                 <div className="text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
                                                    <Search size={14} className="text-indigo-600 dark:text-indigo-400" />
-                                                   <span>Ditemukan <span className="text-indigo-600 dark:text-indigo-400 font-mono text-sm font-black">{filteredList.length}</span> records resi untuk "{globalSearchTerm}"</span>
+                                                   <span>Ditemukan <span className="text-indigo-600 dark:text-indigo-400 font-mono text-sm font-black">{filteredList.length}</span> records resi untuk &ldquo;{globalSearchTerm}&rdquo;</span>
                                                 </div>
                                                 <div className="flex items-center gap-2 text-[11px] flex-wrap">
-                                                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200/80">
-                                                      <Zap size={11} className="text-emerald-600 dark:text-emerald-400 fill-emerald-600/20" />
+                                                   <button
+                                                      type="button"
+                                                      onClick={() => setGlobalSearchServerFilter(globalSearchServerFilter === 'SUPABASE_PRIMARY' ? 'ALL' : 'SUPABASE_PRIMARY')}
+                                                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                                                         globalSearchServerFilter === 'SUPABASE_PRIMARY'
+                                                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                                                            : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200/80 hover:bg-emerald-100'
+                                                      }`}
+                                                   >
+                                                      <Zap size={11} className={globalSearchServerFilter === 'SUPABASE_PRIMARY' ? "text-white" : "text-emerald-600 dark:text-emerald-400"} />
                                                       Utama: {globalSearchResults.filter(r => r.source_db === 'SUPABASE_PRIMARY').length}
-                                                   </span>
-                                                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200/80">
-                                                      <Archive size={11} className="text-purple-600 dark:text-purple-400" />
+                                                   </button>
+                                                   <button
+                                                      type="button"
+                                                      onClick={() => setGlobalSearchServerFilter(globalSearchServerFilter === 'SUPABASE_ARCHIVE' ? 'ALL' : 'SUPABASE_ARCHIVE')}
+                                                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                                                         globalSearchServerFilter === 'SUPABASE_ARCHIVE'
+                                                            ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                                                            : 'bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border-purple-200/80 hover:bg-purple-100'
+                                                      }`}
+                                                   >
+                                                      <Archive size={11} className={globalSearchServerFilter === 'SUPABASE_ARCHIVE' ? "text-white" : "text-purple-600 dark:text-purple-400"} />
                                                       Archive: {globalSearchResults.filter(r => r.source_db === 'SUPABASE_ARCHIVE').length}
-                                                   </span>
-                                                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200/80">
-                                                      <Database size={11} className="text-blue-600 dark:text-blue-400" />
+                                                   </button>
+                                                   <button
+                                                      type="button"
+                                                      onClick={() => setGlobalSearchServerFilter(globalSearchServerFilter === 'SUPABASE_OLD' ? 'ALL' : 'SUPABASE_OLD')}
+                                                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                                                         globalSearchServerFilter === 'SUPABASE_OLD'
+                                                            ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                                                            : 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200/80 hover:bg-blue-100'
+                                                      }`}
+                                                   >
+                                                      <Database size={11} className={globalSearchServerFilter === 'SUPABASE_OLD' ? "text-white" : "text-blue-600 dark:text-blue-400"} />
                                                       Lama: {globalSearchResults.filter(r => r.source_db === 'SUPABASE_OLD').length}
-                                                   </span>
-                                                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200/80">
-                                                      <Flame size={11} className="text-amber-600 dark:text-amber-400 fill-amber-500/30" />
+                                                   </button>
+                                                   <button
+                                                      type="button"
+                                                      onClick={() => setGlobalSearchServerFilter(globalSearchServerFilter === 'FIRESTORE' ? 'ALL' : 'FIRESTORE')}
+                                                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                                                         globalSearchServerFilter === 'FIRESTORE'
+                                                            ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                                                            : 'bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200/80 hover:bg-amber-100'
+                                                      }`}
+                                                   >
+                                                      <Flame size={11} className={globalSearchServerFilter === 'FIRESTORE' ? "text-white" : "text-amber-600 dark:text-amber-400"} />
                                                       Firestore: {globalSearchResults.filter(r => r.source_db === 'FIRESTORE').length}
-                                                   </span>
+                                                   </button>
                                                 </div>
                                              </div>
 
-                                             <table className="w-full text-left whitespace-nowrap">
-                                                <thead className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
-                                                   <tr>
-                                                      <th className="p-3.5 sm:p-4 text-xs font-bold text-gray-500 uppercase bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Barcode / Dest</th>
-                                                      <th className="p-3.5 sm:p-4 text-xs font-bold text-gray-500 uppercase bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 text-center">Sumber Server</th>
-                                                      <th className="p-3.5 sm:p-4 text-xs font-bold text-gray-500 uppercase bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Timestamp</th>
-                                                      <th className="p-3.5 sm:p-4 text-xs font-bold text-gray-500 uppercase bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Staff / Employee</th>
-                                                      <th className="p-3.5 sm:p-4 text-xs font-bold text-gray-500 uppercase text-center bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Role</th>
-                                                      <th className="p-3.5 sm:p-4 text-xs font-bold text-gray-500 uppercase text-center bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Status</th>
-                                                   </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                                                   {filteredList.map((item, idx) => {
-                                                      return (
-                                                         <tr key={item.id || `${item.barcode}_${idx}`} className="hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10">
-                                                            <td className="p-3.5 sm:p-4">
-                                                               <div className="font-mono font-bold text-base sm:text-lg text-gray-800 dark:text-gray-200">{item.barcode}</div>
-                                                               <div className="text-xs text-gray-400 mt-0.5">{item.destination || item.description || '-'}</div>
+                                             {/* DESKTOP / TABLE VIEW */}
+                                             <div className={`flex-1 overflow-auto ${
+                                                globalSearchViewLayout === 'TABLE' ? 'block' : globalSearchViewLayout === 'CARDS' ? 'hidden' : 'hidden md:block'
+                                             }`}>
+                                                <table className="w-full text-left whitespace-nowrap">
+                                                   <thead className="bg-gray-50/90 dark:bg-gray-900/90 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
+                                                      <tr>
+                                                         <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Barcode / Dest</th>
+                                                         <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">Sumber Server</th>
+                                                         <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Timestamp</th>
+                                                         <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Staff / Employee</th>
+                                                         <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">Role</th>
+                                                         <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">Status</th>
+                                                      </tr>
+                                                   </thead>
+                                                   <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                                                      {filteredList.map((item, idx) => (
+                                                         <tr key={item.id || `${item.barcode}_${idx}`} className="hover:bg-indigo-50/40 dark:hover:bg-indigo-900/10 transition-colors">
+                                                            <td className="px-4 py-3.5">
+                                                               <span className="font-mono font-bold text-xs sm:text-sm text-gray-900 dark:text-gray-100 tracking-wide select-all bg-gray-100/80 dark:bg-gray-800 px-2.5 py-1 rounded-lg border border-gray-200/70 dark:border-gray-700/70 inline-block shadow-2xs">
+                                                                  {item.barcode}
+                                                               </span>
+                                                               {(item.destination || item.description) && (
+                                                                  <div className="text-xs text-gray-400 mt-1 flex items-center gap-1">
+                                                                     <MapPin size={11} /> {item.destination || item.description}
+                                                                  </div>
+                                                               )}
                                                             </td>
-                                                            <td className="p-3.5 sm:p-4 text-center">
+                                                            <td className="px-4 py-3.5 text-center">
                                                                {item.source_db === 'SUPABASE_PRIMARY' && (
-                                                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 shadow-xs">
+                                                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 shadow-2xs">
                                                                      <Zap size={13} className="text-emerald-600 dark:text-emerald-400 fill-emerald-600/20" />
                                                                      <span>Supabase Utama</span>
                                                                   </span>
                                                                )}
                                                                {item.source_db === 'SUPABASE_ARCHIVE' && (
-                                                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800 shadow-xs">
+                                                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800 shadow-2xs">
                                                                      <Archive size={13} className="text-purple-600 dark:text-purple-400" />
                                                                      <span>Supabase Archive</span>
                                                                   </span>
                                                                )}
                                                                {item.source_db === 'SUPABASE_OLD' && (
-                                                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shadow-xs">
+                                                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shadow-2xs">
                                                                      <Database size={13} className="text-blue-600 dark:text-blue-400" />
                                                                      <span>Supabase Lama</span>
                                                                   </span>
                                                                )}
                                                                {item.source_db === 'FIRESTORE' && (
-                                                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800 shadow-xs">
+                                                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800 shadow-2xs">
                                                                      <Flame size={13} className="text-amber-600 dark:text-amber-400 fill-amber-500/30" />
                                                                      <span>Firestore</span>
                                                                   </span>
                                                                )}
                                                             </td>
-                                                            <td className="p-3.5 sm:p-4 text-xs sm:text-sm text-gray-500">
-                                                               {item.timestamp ? new Date(item.timestamp).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
-                                                               <div className="text-xs text-gray-400">{item.timestamp ? new Date(item.timestamp).toLocaleTimeString('id-ID') : ''}</div>
+                                                            <td className="px-4 py-3.5 text-xs font-mono text-gray-500 dark:text-gray-400">
+                                                               <div>{item.timestamp ? new Date(item.timestamp).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}</div>
+                                                               <div className="text-[11px] text-gray-400">{item.timestamp ? new Date(item.timestamp).toLocaleTimeString('id-ID') : ''}</div>
                                                             </td>
-                                                            <td className="p-3.5 sm:p-4 text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-200">
-                                                               {item.employee_name || item.staff || item.user_email || '-'}
+                                                            <td className="px-4 py-3.5 text-xs sm:text-sm font-semibold text-gray-800 dark:text-gray-200">
+                                                               <div className="flex items-center gap-2.5">
+                                                                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                                                                     {(item.employee_name || item.staff || item.user_email || '?').charAt(0).toUpperCase()}
+                                                                  </div>
+                                                                  <span>{item.employee_name || item.staff || item.user_email || '-'}</span>
+                                                               </div>
                                                             </td>
-                                                            <td className="p-3.5 sm:p-4 text-center">
-                                                               <span className="text-[10px] font-bold px-2 py-1 rounded border bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                                                            <td className="px-4 py-3.5 text-center">
+                                                               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase border bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border-gray-200 dark:border-gray-700">
                                                                   {item.role || 'UNKNOWN'}
                                                                </span>
                                                             </td>
-                                                            <td className="p-3.5 sm:p-4 text-center">
-                                                               <span className={`text-[10px] font-bold px-2 py-1 rounded border ${item.status === 'COMPLETED' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
+                                                            <td className="px-4 py-3.5 text-center">
+                                                               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase border ${item.status === 'COMPLETED' || item.status === 'OK' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400 border-emerald-200/80 dark:border-emerald-800' : 'bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-400 border-red-200/80 dark:border-red-800'}`}>
                                                                   {item.status || 'COMPLETED'}
                                                                </span>
                                                             </td>
                                                          </tr>
-                                                      );
-                                                   })}
-                                                </tbody>
-                                             </table>
-                                             <div className="p-3.5 sm:p-4 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-100 dark:border-gray-700 text-center text-xs text-gray-400">
-                                                Menampilkan {filteredList.length} hasil untuk "{globalSearchTerm}"
+                                                      ))}
+                                                   </tbody>
+                                                </table>
+                                             </div>
+
+                                             {/* MOBILE / CARD GRID VIEW */}
+                                             <div className={`flex-1 overflow-auto ${
+                                                globalSearchViewLayout === 'CARDS' ? 'block' : globalSearchViewLayout === 'TABLE' ? 'hidden' : 'block md:hidden'
+                                             }`}>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 p-3.5 sm:p-4 pb-20">
+                                                   {filteredList.map((item, index) => (
+                                                      <GlobalSearchCard
+                                                         key={item.id || `${item.barcode}_${index}`}
+                                                         item={item}
+                                                         onCopyBarcode={(b) => showToast(`Barcode ${b} disalin!`, 'success')}
+                                                      />
+                                                   ))}
+                                                </div>
+                                             </div>
+
+                                             <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200 dark:border-gray-700 text-center text-xs text-gray-500 dark:text-gray-400 shrink-0">
+                                                Menampilkan {filteredList.length} hasil untuk &ldquo;{globalSearchTerm}&rdquo;
                                              </div>
                                           </div>
                                        );
                                     })()
                                  ) : (
-                                    <div className="flex flex-col items-center justify-center p-12 sm:p-20 text-gray-400 min-h-[250px]">
-                                       <Search size={40} className="mb-3 opacity-20 sm:w-12 sm:h-12" />
-                                       <p className="text-xs sm:text-sm text-center">Masukkan no resi pada kolom di atas untuk mencari di 4 Database sekaligus.</p>
+                                    <div className="flex flex-col items-center justify-center p-12 sm:p-20 text-gray-400 min-h-[250px] my-auto">
+                                       <Search size={44} className="mb-3 opacity-20 sm:w-12 sm:h-12" />
+                                       <p className="text-xs sm:text-sm text-center">Masukkan nomor resi pada kolom pencarian di atas untuk mencari di 4 Database sekaligus.</p>
                                     </div>
                                  )}
-                                                </div>
-                            </div>
-                         )}
+                              </div>
+                           </div>
+                        )}
 
-                        
                         {activeView === 'SEARCH_ALL_FIRESTORE' && (
                            <div className="w-full h-full min-h-full bg-white dark:bg-gray-800 flex flex-col overflow-y-auto">
                               {/* SECRET DEVMODE SYNC PANEL (SUPABASE ➔ FIRESTORE) */}
@@ -11884,109 +12631,228 @@ if (filterPackingShift !== 'ALL') {
                                  </div>
                               )}
 
-                              <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 shrink-0">
-                                 <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-center text-center sm:text-left max-w-7xl mx-auto w-full">
-                                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 rounded-full flex items-center justify-center shrink-0">
-                                       <Search size={22} className="sm:w-6 sm:h-6" />
-                                    </div>
-                                    <div className="flex-1 w-full">
-                                       <h3 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white">Global Search (Firestore)</h3>
-                                       <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mb-3 sm:mb-4">Cari scan records di database Firestore.</p>
-                                       <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-4 w-full">
-                                          <div className="relative flex-1 group w-full">
-                                             <Search size={18} className="absolute left-3.5 sm:left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-orange-500 transition-colors" />
-                                             <input
-                                                type="text"
-                                                value={globalSearchTermFs}
-                                                onChange={(e) => {
-                                                   const val = e.target.value;
-                                                   setGlobalSearchTermFs(val);
-                                                   if (val.toLowerCase().includes('devmodenew')) {
-                                                      const isCurrentlyOn = showFsSyncDevMode;
-                                                      setShowFsSyncDevMode(!isCurrentlyOn);
-                                                      setSuccessToast(!isCurrentlyOn ? "⚡ Dev Mode Secret Panel Activated!" : "⚡ Dev Mode Secret Panel Deactivated!");
-                                                      setGlobalSearchTermFs(val.replace(/devmodenew/gi, '').trim());
-                                                   }
-                                                }}
-                                                onKeyDown={(e) => e.key === 'Enter' && handleGlobalSearchFs()}
-                                                placeholder="Ketik barcode..."
-                                                className="w-full h-11 sm:h-12 pl-10 sm:pl-12 pr-10 sm:pr-12 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 text-base sm:text-lg font-mono placeholder:font-sans transition-all"
-                                                autoFocus
-                                             />
-                                             {globalSearchTermFs && (
-                                                <button
-                                                   onClick={() => {
-                                                      setGlobalSearchTermFs('');
-                                                      setGlobalSearchResultsFs([]);
-                                                   }}
-                                                   className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full transition-all"
-                                                   title="Clear Search"
-                                                >
-                                                   <X size={18} />
-                                                </button>
-                                             )}
+                              {/* HEADER & SEARCH TOOLBAR */}
+                              <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/50 shrink-0">
+                                 <div className="flex flex-col gap-4 max-w-7xl mx-auto w-full">
+                                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                                       <div className="flex items-center gap-3">
+                                          <div className="w-10 h-10 sm:w-12 sm:h-12 bg-orange-100 dark:bg-orange-950/60 text-orange-600 dark:text-orange-400 rounded-2xl flex items-center justify-center shrink-0 border border-orange-200/60 dark:border-orange-800/60 shadow-sm">
+                                             <Search size={22} className="sm:w-6 sm:h-6" />
                                           </div>
+                                          <div>
+                                             <div className="flex items-center gap-2">
+                                                <h3 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white">Global Search (Firestore Server)</h3>
+                                                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-orange-100 dark:bg-orange-950/70 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800">
+                                                   FIRESTORE DIRECT
+                                                </span>
+                                             </div>
+                                             <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                                                Pencarian data scan langsung dari database Firestore / Firebase.
+                                             </p>
+                                          </div>
+                                       </div>
+
+                                       {/* Layout Switcher */}
+                                       <div className="flex items-center bg-gray-100 dark:bg-gray-700/60 p-1 rounded-xl border border-gray-200 dark:border-gray-600 self-end sm:self-auto h-10">
                                           <button
-                                             onClick={handleGlobalSearchFs}
-                                             disabled={isGlobalSearchingFs || !globalSearchTermFs.trim()}
-                                             className="h-11 sm:h-12 px-6 sm:px-8 bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl shadow-lg shadow-orange-500/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none flex items-center justify-center gap-2 transition-all active:scale-95 w-full sm:w-auto text-sm sm:text-base shrink-0"
+                                             type="button"
+                                             onClick={() => setFirestoreSearchViewLayout('AUTO')}
+                                             className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                firestoreSearchViewLayout === 'AUTO'
+                                                   ? 'bg-white dark:bg-gray-700 text-orange-600 dark:text-orange-400 shadow-sm'
+                                                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                             }`}
+                                             title="Tampilan Otomatis"
                                           >
-                                             {isGlobalSearchingFs ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
-                                             Search
+                                             <SlidersHorizontal size={13} />
+                                             <span className="hidden sm:inline">Auto</span>
+                                          </button>
+                                          <button
+                                             type="button"
+                                             onClick={() => setFirestoreSearchViewLayout('TABLE')}
+                                             className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                firestoreSearchViewLayout === 'TABLE'
+                                                   ? 'bg-white dark:bg-gray-700 text-orange-600 dark:text-orange-400 shadow-sm'
+                                                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                             }`}
+                                             title="Paksa Tampilan Tabel"
+                                          >
+                                             <Layers size={13} />
+                                             <span className="hidden sm:inline">Tabel</span>
+                                          </button>
+                                          <button
+                                             type="button"
+                                             onClick={() => setFirestoreSearchViewLayout('CARDS')}
+                                             className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                                firestoreSearchViewLayout === 'CARDS'
+                                                   ? 'bg-white dark:bg-gray-700 text-orange-600 dark:text-orange-400 shadow-sm'
+                                                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                             }`}
+                                             title="Paksa Tampilan Kartu"
+                                          >
+                                             <LayoutGrid size={13} />
+                                             <span className="hidden sm:inline">Kartu</span>
                                           </button>
                                        </div>
+                                    </div>
+
+                                    {/* Search Controls Form */}
+                                    <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-3 w-full">
+                                       <div className="relative flex-1 group w-full">
+                                          <Search size={18} className="absolute left-3.5 sm:left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-orange-500 transition-colors" />
+                                          <input
+                                             type="text"
+                                             value={globalSearchTermFs}
+                                             onChange={(e) => {
+                                                const val = e.target.value;
+                                                setGlobalSearchTermFs(val);
+                                                if (val.toLowerCase().includes('devmodenew')) {
+                                                   const isCurrentlyOn = showFsSyncDevMode;
+                                                   setShowFsSyncDevMode(!isCurrentlyOn);
+                                                   setSuccessToast(!isCurrentlyOn ? "⚡ Dev Mode Secret Panel Activated!" : "⚡ Dev Mode Secret Panel Deactivated!");
+                                                   setGlobalSearchTermFs(val.replace(/devmodenew/gi, '').trim());
+                                                }
+                                             }}
+                                             onKeyDown={(e) => e.key === 'Enter' && handleGlobalSearchFs()}
+                                             placeholder="Ketik no resi / barcode (tekan Enter untuk mencari)..."
+                                             className="w-full h-11 sm:h-12 pl-10 sm:pl-12 pr-10 sm:pr-12 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm sm:text-base font-mono placeholder:font-sans transition-all shadow-2xs"
+                                             autoFocus
+                                          />
+                                          {globalSearchTermFs && (
+                                             <button
+                                                onClick={() => {
+                                                   setGlobalSearchTermFs('');
+                                                   setGlobalSearchResultsFs([]);
+                                                }}
+                                                className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full transition-all cursor-pointer"
+                                                title="Clear Search"
+                                             >
+                                                <X size={18} />
+                                             </button>
+                                          )}
+                                       </div>
+
+                                       <button
+                                          onClick={handleGlobalSearchFs}
+                                          disabled={isGlobalSearchingFs || !globalSearchTermFs.trim()}
+                                          className="h-11 sm:h-12 px-6 sm:px-8 bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl shadow-lg shadow-orange-500/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none flex items-center justify-center gap-2 transition-all active:scale-95 w-full sm:w-auto text-sm sm:text-base shrink-0 cursor-pointer"
+                                       >
+                                          {isGlobalSearchingFs ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
+                                          Cari Data
+                                       </button>
                                     </div>
                                  </div>
                               </div>
 
-                              <div className="flex-1 overflow-x-auto bg-white dark:bg-gray-800">
+                              <div className="flex-1 overflow-auto bg-white dark:bg-gray-800 flex flex-col">
                                  {isGlobalSearchingFs ? (
-                                    <div className="flex flex-col items-center justify-center p-12 sm:p-20 min-h-[250px]">
+                                    <div className="flex flex-col items-center justify-center p-12 sm:p-20 min-h-[250px] my-auto">
                                        <Loader2 size={36} className="animate-spin text-orange-500" />
-                                       <p className="text-xs sm:text-sm text-gray-500 mt-3">Searching global database...</p>
+                                       <p className="text-xs sm:text-sm text-gray-500 mt-3 font-medium">Mencari di database Firestore...</p>
                                     </div>
                                  ) : globalSearchResultsFs.length > 0 ? (
-                                    <div className="min-w-full inline-block align-middle">
-                                       <table className="w-full text-left whitespace-nowrap">
-                                          <thead className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
-                                             <tr>
-                                                <th className="p-3.5 sm:p-4 text-xs font-bold text-gray-500 uppercase bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Barcode / Dest</th>
-                                                <th className="p-3.5 sm:p-4 text-xs font-bold text-gray-500 uppercase bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Timestamp</th>
-                                                <th className="p-3.5 sm:p-4 text-xs font-bold text-gray-500 uppercase bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Staff</th>
-                                                <th className="p-3.5 sm:p-4 text-xs font-bold text-gray-500 uppercase text-center bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Role</th>
-                                                <th className="p-3.5 sm:p-4 text-xs font-bold text-gray-500 uppercase text-center bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Status</th>
-                                             </tr>
-                                          </thead>
-                                          <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                                             {globalSearchResultsFs
-                                                .filter(item => !hideExpiredResi || !(item.employee_name || '').toUpperCase().includes('RESI KEDALUWARSA'))
-                                                .map((item) => (
-                                                <tr key={item.id} className="hover:bg-orange-50/50 dark:hover:bg-orange-900/10">
-                                                   <td className="p-3.5 sm:p-4">
-                                                      <div className="font-mono font-bold text-base sm:text-lg text-gray-800 dark:text-gray-200">{item.barcode}</div>
-                                                      <div className="text-xs text-gray-400 mt-0.5">{item.destination || '-'}</div>
-                                                   </td>
-                                                   <td className="p-3.5 sm:p-4 text-xs sm:text-sm text-gray-500">
-                                                      {new Date(item.timestamp).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
-                                                      <div className="text-xs text-gray-400">{new Date(item.timestamp).toLocaleTimeString('id-ID')}</div>
-                                                   </td>
-                                                   <td className="p-3.5 sm:p-4 text-xs sm:text-sm font-medium">{item.employee_name}</td>
-                                                   <td className="p-3.5 sm:p-4 text-center"><span className="text-[10px] font-bold px-2 py-1 rounded border bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">{item.role}</span></td>
-                                                   <td className="p-3.5 sm:p-4 text-center">
-                                                      <span className={`text-[10px] font-bold px-2 py-1 rounded border ${item.status === 'COMPLETED' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200'}`}>{item.status}</span>
-                                                   </td>
-                                                </tr>
-                                             ))}
-                                          </tbody>
-                                       </table>
-                                       <div className="p-3.5 sm:p-4 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-100 dark:border-gray-700 text-center text-xs text-gray-400">
-                                          Showing top 100 results for "{globalSearchTermFs}"
-                                       </div>
-                                    </div>
+                                    (() => {
+                                       const filteredList = globalSearchResultsFs.filter(
+                                          item => !hideExpiredResi || !(item.employee_name || '').toUpperCase().includes('RESI KEDALUWARSA')
+                                       );
+
+                                       if (filteredList.length === 0) {
+                                          return (
+                                             <div className="flex flex-col items-center justify-center p-12 sm:p-20 text-gray-400 min-h-[250px] my-auto">
+                                                <Search size={40} className="mb-3 opacity-20" />
+                                                <p className="text-xs sm:text-sm text-center">Tidak ada hasil yang sesuai dengan filter.</p>
+                                             </div>
+                                          );
+                                       }
+
+                                       return (
+                                          <div className="flex-1 flex flex-col">
+                                             {/* DESKTOP TABLE VIEW */}
+                                             <div className={`flex-1 overflow-x-auto ${
+                                                firestoreSearchViewLayout === 'TABLE' ? 'block' : firestoreSearchViewLayout === 'CARDS' ? 'hidden' : 'hidden md:block'
+                                             }`}>
+                                                <table className="w-full text-left whitespace-nowrap">
+                                                   <thead className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
+                                                      <tr>
+                                                         <th className="px-4 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-900">Barcode / Dest</th>
+                                                         <th className="px-4 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-900">Timestamp</th>
+                                                         <th className="px-4 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-900">Staff</th>
+                                                         <th className="px-4 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider text-center bg-gray-50 dark:bg-gray-900">Role</th>
+                                                         <th className="px-4 py-3.5 text-xs font-bold text-gray-500 uppercase tracking-wider text-center bg-gray-50 dark:bg-gray-900">Status</th>
+                                                      </tr>
+                                                   </thead>
+                                                   <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                                                      {filteredList.map((item, idx) => (
+                                                         <tr key={item.id || `${item.barcode}_${idx}`} className="hover:bg-orange-50/50 dark:hover:bg-orange-950/20 transition-colors">
+                                                            <td className="px-4 py-3.5">
+                                                               <div className="font-mono font-bold text-sm sm:text-base text-gray-900 dark:text-gray-100 select-all flex items-center gap-2">
+                                                                  <span>{item.barcode}</span>
+                                                                  <button
+                                                                     onClick={() => {
+                                                                        navigator.clipboard.writeText(item.barcode);
+                                                                        showToast(`Barcode ${item.barcode} disalin!`, 'success');
+                                                                     }}
+                                                                     className="text-gray-400 hover:text-orange-500 transition-colors cursor-pointer"
+                                                                     title="Salin Barcode"
+                                                                  >
+                                                                     <Copy size={13} />
+                                                                  </button>
+                                                               </div>
+                                                               <div className="text-xs text-gray-400 mt-0.5">{item.destination || '-'}</div>
+                                                            </td>
+                                                            <td className="px-4 py-3.5 text-xs font-mono text-gray-500 dark:text-gray-400">
+                                                               <div>{item.timestamp ? new Date(item.timestamp).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}</div>
+                                                               <div className="text-[11px] text-gray-400">{item.timestamp ? new Date(item.timestamp).toLocaleTimeString('id-ID') : ''}</div>
+                                                            </td>
+                                                            <td className="px-4 py-3.5 text-xs sm:text-sm font-semibold text-gray-800 dark:text-gray-200">
+                                                               <div className="flex items-center gap-2.5">
+                                                                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-orange-500 to-amber-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                                                                     {(item.employee_name || item.staff || item.user_email || '?').charAt(0).toUpperCase()}
+                                                                  </div>
+                                                                  <span>{item.employee_name || item.staff || item.user_email || '-'}</span>
+                                                               </div>
+                                                            </td>
+                                                            <td className="px-4 py-3.5 text-center">
+                                                               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase border bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border-gray-200 dark:border-gray-700">
+                                                                  {item.role || 'FIRESTORE'}
+                                                               </span>
+                                                            </td>
+                                                            <td className="px-4 py-3.5 text-center">
+                                                               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase border ${item.status === 'COMPLETED' || item.status === 'OK' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400 border-emerald-200/80 dark:border-emerald-800' : 'bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-400 border-red-200/80 dark:border-red-800'}`}>
+                                                                  {item.status || 'COMPLETED'}
+                                                               </span>
+                                                            </td>
+                                                         </tr>
+                                                      ))}
+                                                   </tbody>
+                                                </table>
+                                             </div>
+
+                                             {/* MOBILE / CARD GRID VIEW */}
+                                             <div className={`flex-1 overflow-auto ${
+                                                firestoreSearchViewLayout === 'CARDS' ? 'block' : firestoreSearchViewLayout === 'TABLE' ? 'hidden' : 'block md:hidden'
+                                             }`}>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 p-3.5 sm:p-4 pb-20">
+                                                   {filteredList.map((item, index) => (
+                                                      <FirestoreSearchCard
+                                                         key={item.id || `${item.barcode}_${index}`}
+                                                         item={item}
+                                                         onCopyBarcode={(b) => showToast(`Barcode ${b} disalin!`, 'success')}
+                                                      />
+                                                   ))}
+                                                </div>
+                                             </div>
+
+                                             <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200 dark:border-gray-700 text-center text-xs text-gray-500 dark:text-gray-400 shrink-0">
+                                                Menampilkan {filteredList.length} hasil untuk &ldquo;{globalSearchTermFs}&rdquo;
+                                             </div>
+                                          </div>
+                                       );
+                                    })()
                                  ) : (
-                                    <div className="flex flex-col items-center justify-center p-12 sm:p-20 text-gray-400 min-h-[250px]">
-                                       <Search size={40} className="mb-3 opacity-20 sm:w-12 sm:h-12" />
-                                       <p className="text-xs sm:text-sm text-center">No results found. Try a different term.</p>
+                                    <div className="flex flex-col items-center justify-center p-12 sm:p-20 text-gray-400 min-h-[250px] my-auto">
+                                       <Search size={44} className="mb-3 opacity-20 sm:w-12 sm:h-12" />
+                                       <p className="text-xs sm:text-sm text-center">Masukkan nomor resi pada kolom pencarian di atas untuk mencari di database Firestore.</p>
                                     </div>
                                  )}
                               </div>
@@ -12687,13 +13553,17 @@ if (filterPackingShift !== 'ALL') {
                                     </div>
                                  )}
                               {/* Dashboard Stats */}
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 p-3.5 sm:p-4 bg-gray-50/70 dark:bg-gray-900/60 border-b border-gray-200/80 dark:border-gray-800 shrink-0">
-                                 <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-gray-800 border border-gray-200/70 dark:border-gray-700/60 shadow-2xs hover:shadow-md transition-all duration-200 flex items-center justify-between group">
-                                    <div>
-                                       <div className="text-[11px] font-extrabold text-blue-600 dark:text-blue-400 uppercase tracking-wider mb-1.5 flex items-center gap-2">
-                                          <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span> Total Scans
+                              <div className="p-3.5 sm:p-5 border-b border-gray-200/80 dark:border-gray-800 bg-white/80 dark:bg-gray-800/80 backdrop-blur-md shrink-0">
+                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                                    {/* Stat 1: Total Scans */}
+                                    <div className="bg-gradient-to-br from-blue-50/80 to-indigo-50/40 dark:from-blue-950/20 dark:to-indigo-950/10 border border-blue-100 dark:border-blue-900/40 rounded-2xl p-3.5 sm:p-4 shadow-sm">
+                                       <div className="flex items-center justify-between">
+                                          <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300">Total Scans</span>
+                                          <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                                             <Package size={16} />
+                                          </div>
                                        </div>
-                                       <div className="flex items-baseline gap-2">
+                                       <div className="flex items-baseline gap-2 mt-1.5">
                                           <h3 className={`text-2xl sm:text-3xl font-black font-mono tracking-tight ${isHalfCountMode && (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') ? 'text-red-600 dark:text-red-500' : 'text-gray-900 dark:text-white'}`}>
                                              {(isHalfCountMode && (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') ? Math.ceil(packingStats.total / 2) : packingStats.total).toLocaleString()}
                                           </h3>
@@ -12701,39 +13571,94 @@ if (filterPackingShift !== 'ALL') {
                                              <span className="text-xs font-bold text-gray-400 line-through decoration-red-500/60">{packingStats.total}</span>
                                           )}
                                        </div>
+                                       <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Total paket ter-scan</p>
                                     </div>
-                                    <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center ring-1 ring-blue-500/20 group-hover:scale-105 transition-transform shrink-0">
-                                       <Package size={22} />
+
+                                    {/* Stat 2: Active Staff */}
+                                    <div className="bg-gradient-to-br from-purple-50/80 to-pink-50/40 dark:from-purple-950/20 dark:to-pink-950/10 border border-purple-100 dark:border-purple-900/40 rounded-2xl p-3.5 sm:p-4 shadow-sm">
+                                       <div className="flex items-center justify-between">
+                                          <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300">Active Staff</span>
+                                          <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+                                             <Users size={16} />
+                                          </div>
+                                       </div>
+                                       <div className="text-2xl sm:text-3xl font-extrabold text-purple-600 dark:text-purple-400 mt-1.5 font-mono">{packingStats.activeStaff}</div>
+                                       <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Staf bertugas aktif</p>
+                                    </div>
+
+                                    {/* Stat 3: Latest Scan */}
+                                    <div className="bg-gradient-to-br from-emerald-50/80 to-teal-50/40 dark:from-emerald-950/20 dark:to-teal-950/10 border border-emerald-100 dark:border-emerald-900/40 rounded-2xl p-3.5 sm:p-4 shadow-sm">
+                                       <div className="flex items-center justify-between">
+                                          <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Latest Scan</span>
+                                          <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                                             <Clock size={16} />
+                                          </div>
+                                       </div>
+                                       <div className="text-xl sm:text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-1.5 font-mono">{packingStats.latest}</div>
+                                       <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Waktu scan terbaru</p>
+                                    </div>
+
+                                    {/* Stat 4: Rata-rata / Staff */}
+                                    <div className="bg-gradient-to-br from-amber-50/80 to-orange-50/40 dark:from-amber-950/20 dark:to-orange-950/10 border border-amber-100 dark:border-amber-900/40 rounded-2xl p-3.5 sm:p-4 shadow-sm">
+                                       <div className="flex items-center justify-between">
+                                          <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">Rata-rata / Staf</span>
+                                          <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                                             <Zap size={16} />
+                                          </div>
+                                       </div>
+                                       <div className="text-2xl sm:text-3xl font-extrabold text-amber-600 dark:text-amber-400 mt-1.5 font-mono">
+                                          {packingStats.activeStaff > 0 ? Math.round(packingStats.total / packingStats.activeStaff).toLocaleString() : '0'}
+                                       </div>
+                                       <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Rata-rata scan per staf</p>
                                     </div>
                                  </div>
 
-                                 <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-gray-800 border border-gray-200/70 dark:border-gray-700/60 shadow-2xs hover:shadow-md transition-all duration-200 flex items-center justify-between group">
-                                    <div>
-                                       <div className="text-[11px] font-extrabold text-purple-600 dark:text-purple-400 uppercase tracking-wider mb-1.5 flex items-center gap-2">
-                                          <span className="w-2 h-2 rounded-full bg-purple-500"></span> Active Staff
+                                 {/* Filter Active Sub-Banner */}
+                                 {(packingSearch || filterPackingShift !== 'ALL' || filterPackingStaff !== 'ALL' || filterCancelOnly || isHalfCountMode) && (
+                                    <div className="flex flex-wrap items-center justify-between gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-800 text-xs">
+                                       <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="text-gray-500 dark:text-gray-400">
+                                             Filter aktif:
+                                          </span>
+                                          {filterDate && (
+                                             <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold text-[11px]">
+                                                {formatDisplayDate(filterDate)}
+                                             </span>
+                                          )}
+                                          {filterPackingShift !== 'ALL' && (
+                                             <span className="px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 font-semibold text-[11px]">
+                                                Shift: {filterPackingShift}
+                                             </span>
+                                          )}
+                                          {filterPackingStaff !== 'ALL' && (
+                                             <span className="px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-semibold text-[11px]">
+                                                Staf: {filterPackingStaff}
+                                             </span>
+                                          )}
+                                          {filterCancelOnly && (
+                                             <span className="px-2 py-0.5 rounded-md bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 font-semibold text-[11px]">
+                                                Cancel Only
+                                             </span>
+                                          )}
+                                          {isHalfCountMode && (
+                                             <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 font-semibold text-[11px]">
+                                                50% Cut
+                                             </span>
+                                          )}
+                                          {packingSearch && (
+                                             <span className="px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-semibold text-[11px]">
+                                                Cari: &ldquo;{packingSearch}&rdquo;
+                                             </span>
+                                          )}
                                        </div>
-                                       <h3 className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-gray-900 dark:text-white">
-                                          {packingStats.activeStaff}
-                                       </h3>
+                                       <button
+                                          onClick={handleResetPackingFilters}
+                                          className="text-blue-600 dark:text-blue-400 hover:underline font-semibold cursor-pointer"
+                                       >
+                                          Reset Filter
+                                       </button>
                                     </div>
-                                    <div className="w-12 h-12 rounded-xl bg-purple-50 dark:bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center ring-1 ring-purple-500/20 group-hover:scale-105 transition-transform shrink-0">
-                                       <Users size={22} />
-                                    </div>
-                                 </div>
-
-                                 <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-gray-800 border border-gray-200/70 dark:border-gray-700/60 shadow-2xs hover:shadow-md transition-all duration-200 flex items-center justify-between group">
-                                    <div>
-                                       <div className="text-[11px] font-extrabold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1.5 flex items-center gap-2">
-                                          <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Latest Scan
-                                       </div>
-                                       <h3 className="text-xl sm:text-2xl font-black font-mono tracking-tight text-gray-900 dark:text-white">
-                                          {packingStats.latest}
-                                       </h3>
-                                    </div>
-                                    <div className="w-12 h-12 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center ring-1 ring-emerald-500/20 group-hover:scale-105 transition-transform shrink-0">
-                                       <Clock size={22} />
-                                    </div>
-                                 </div>
+                                 )}
                               </div>
 
                               {/* Enhanced Table */}
@@ -12860,10 +13785,16 @@ if (filterPackingShift !== 'ALL') {
                                        <p className="text-xs font-bold text-gray-600 dark:text-gray-300 tracking-wide uppercase">Memuat Data...</p>
                                     </div>
                                  )}
+
                                  {/* Table Always Rendered */}
                                  {(activeView !== 'GUDANG_REPORT' || gudangReportTab === 'CURRENT') && (
                                     <>
-                                       <div className="flex-1 overflow-auto">
+                                       {/* DESKTOP / TABLE VIEW */}
+                                       <div className={`flex-1 overflow-auto ${
+                                          (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA')
+                                             ? (packingViewLayout === 'TABLE' ? 'block' : packingViewLayout === 'CARDS' ? 'hidden' : 'hidden md:block')
+                                             : 'block'
+                                       }`}>
                                           <table className="w-full text-left whitespace-nowrap">
                                              <thead className="bg-gray-50/90 dark:bg-gray-900/90 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
                                                 <tr>
@@ -13066,6 +13997,30 @@ if (filterPackingShift !== 'ALL') {
                                              </tbody>
                                           </table>
                                        </div>
+
+                                       {/* MOBILE / CARD GRID VIEW (For Packing Views) */}
+                                       {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') && (
+                                          <div className={`flex-1 overflow-auto ${
+                                             packingViewLayout === 'CARDS' ? 'block' : packingViewLayout === 'TABLE' ? 'hidden' : 'block md:hidden'
+                                          }`}>
+                                             {packingData.length === 0 ? (
+                                                <div className="p-10 text-center text-gray-400 dark:text-gray-500 text-sm font-medium">No data matches your filter</div>
+                                             ) : (
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 p-3.5 sm:p-4 pb-20">
+                                                   {packingData.map((item, index) => (
+                                                      <PackingCard
+                                                         key={item.id || index}
+                                                         item={item}
+                                                         index={index}
+                                                         page={page}
+                                                         rowsPerPage={rowsPerPage}
+                                                         onCopyBarcode={(b) => showToast(`Barcode ${b} disalin!`, 'success')}
+                                                      />
+                                                   ))}
+                                                </div>
+                                             )}
+                                          </div>
+                                       )}
 
                                        <div className="px-4 py-3 border-t border-gray-200/80 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-900/80 backdrop-blur-md flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
                                           <div className="flex items-center gap-2">
