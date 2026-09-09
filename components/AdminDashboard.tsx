@@ -9999,15 +9999,17 @@ if (filterPackingShift !== 'ALL') {
 
                      {/* LOGISTIK HEADER */}
                      {activeView === 'LOGISTIK_DATA' && (
-                        <div className="bg-white dark:bg-gray-800 p-4 border-b border-gray-200 dark:border-gray-700 shrink-0">
-                           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 max-w-7xl mx-auto">
-                              <div className="flex items-center gap-4">
-                                 <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-900/30 rounded-2xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-800 shadow-sm shrink-0">
-                                    <Truck size={24} />
+                        <div className="bg-white dark:bg-gray-800 p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 shrink-0">
+                           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 w-full">
+                              <div className="flex items-center gap-3">
+                                 <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 border border-indigo-200/60 dark:border-indigo-800/60 shadow-sm">
+                                    <Truck className="w-5 h-5 sm:w-6 sm:h-6" />
                                  </div>
                                  <div>
-                                    <h3 className="text-lg font-bold text-gray-900 dark:text-white">Data Logistik</h3>
-                                    <p className="text-xs sm:text-sm text-gray-500 font-medium">Import data resi logistik dengan cepat. Cukup copy-paste no resi / ID pesanan.</p>
+                                    <div className="flex items-center gap-2">
+                                       <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">Data Logistik</h2>
+                                    </div>
+                                    <p className="text-gray-500 dark:text-gray-400 text-xs sm:text-sm mt-0.5">Import data resi logistik dengan cepat. Cukup copy-paste no resi / ID pesanan.</p>
                                  </div>
                               </div>
                               <div className="flex items-center gap-3 w-full sm:w-auto relative">
