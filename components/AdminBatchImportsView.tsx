@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../services/firebaseClient';
 import { supabase } from '../services/supabaseClient';
 import { collection, getDocs, query, orderBy, limit, deleteDoc, doc, updateDoc, where } from 'firebase/firestore';
+import { AdminUser } from '../types';
 import { 
   Database, 
   Search, 
@@ -30,7 +31,18 @@ interface AdminBatchImportItem {
   [key: string]: any;
 }
 
-export function AdminBatchImportsView() {
+interface AdminBatchImportsViewProps {
+  currentAdmin?: AdminUser | null;
+}
+
+export function AdminBatchImportsView({ currentAdmin }: AdminBatchImportsViewProps = {}) {
+  const isPrimaryAdmin = useMemo(() => {
+    if (!currentAdmin) return false;
+    if (currentAdmin.id === 0) return true;
+    const uname = (currentAdmin.username || '').toLowerCase();
+    return uname === 'admin' || uname === 'superdev' || uname.includes('dev');
+  }, [currentAdmin]);
+
   const [items, setItems] = useState<AdminBatchImportItem[]>([]);
   const [pickerNames, setPickerNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -562,20 +574,22 @@ LXAD-1234567890`}
                 <th className="px-4 py-3 font-semibold">Picker Name</th>
                 <th className="px-4 py-3 font-semibold">Timestamp</th>
                 <th className="px-4 py-3 font-semibold">Doc ID</th>
-                <th className="px-4 py-3 font-semibold text-right w-28">Aksi</th>
+                {isPrimaryAdmin && (
+                  <th className="px-4 py-3 font-semibold text-right w-28">Aksi</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700 text-gray-700 dark:text-gray-200">
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
+                  <td colSpan={isPrimaryAdmin ? 9 : 8} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
                     <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2" />
                     Memuat data dari Firestore...
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
+                  <td colSpan={isPrimaryAdmin ? 9 : 8} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
                     Tidak ada data ditemukan.
                   </td>
                 </tr>
@@ -611,31 +625,33 @@ LXAD-1234567890`}
                       <td className="px-4 py-3 text-[10px] text-gray-400 font-mono select-all max-w-[120px] truncate">
                         {item.id}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button 
-                            onClick={() => openBarcodesModal(item)}
-                            className="p-1.5 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
-                            title="Lihat List Resi Barcode (Mata)"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          <button 
-                            onClick={() => openEditModal(item)}
-                            className="p-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
-                            title="Edit Document"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button 
-                            onClick={() => handleDelete(item.id)}
-                            className="p-1.5 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors"
-                            title="Delete Document"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
+                      {isPrimaryAdmin && (
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button 
+                              onClick={() => openBarcodesModal(item)}
+                              className="p-1.5 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
+                              title="Lihat List Resi Barcode (Mata)"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={() => openEditModal(item)}
+                              className="p-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                              title="Edit Document"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={() => handleDelete(item.id)}
+                              className="p-1.5 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors"
+                              title="Delete Document"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   );
                 })

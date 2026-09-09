@@ -227,7 +227,7 @@ const VIEW_PERMISSIONS: Partial<Record<AdminView, string | string[]>> = {
    'SYMBOLS': 'manage_symbols',
    'SUPABASE_CONFIG': 'manage_database',
    'FIRESTORE_MANAGER': 'manage_database',
-   'ADMIN_BATCH_IMPORTS': 'manage_database',
+   'ADMIN_BATCH_IMPORTS': ['manage_database', 'manage_batches', 'view_dashboard'],
     'SUPABASE_MANAGER': 'manage_database',
    'RUNNING_TEXT_MANAGER': 'manage_database',
    'SETTINGS': 'manage_database',
@@ -8799,12 +8799,13 @@ if (filterPackingShift !== 'ALL') {
                )}
 
                {/* TOOLS ADMIN */}
-               {(hasPermission('manage_batches') || hasPermission('view_dashboard') || hasPermission('manage_cancel_data')) && (
+               {(hasPermission('manage_batches') || hasPermission('view_dashboard') || hasPermission('manage_cancel_data') || hasPermission('manage_database')) && (
                   <SidebarSection title="Tools Admin">
                      <SidebarItem hiddenMenus={currentAdmin?.username !== 'Tamu' ? ['BATCH_DATA_2', ...(hiddenMenus || [])] : hiddenMenus} view="BATCH_DATA_2" icon={Database} label="Progress Order" requiredPerm="manage_batches" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={currentAdmin?.username === 'Tamu' ? ['BATCH_DATA_3', ...(hiddenMenus || [])] : hiddenMenus} view="BATCH_DATA_3" icon={Database} label="Batch management" requiredPerm="manage_batches" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="CANCEL_DATA" icon={AlertTriangle} label="Data Cancel" requiredPerm="manage_cancel_data" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="TRACK_RESI" icon={ShieldCheck} label="Tracking Resi" requiredPerm="view_dashboard" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
+                     <SidebarItem hiddenMenus={hiddenMenus} view="ADMIN_BATCH_IMPORTS" icon={Database} label="Batch Imports Manager" requiredPerm="" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="RESI_FORMATTER" icon={Sparkles} label="Format Resi & Strip" requiredPerm="" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      {(() => {
                         const isDevModeNew = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
@@ -8842,7 +8843,6 @@ if (filterPackingShift !== 'ALL') {
                            <SidebarItem hiddenMenus={hiddenMenus} view="SUPABASE_MANAGER" icon={Database} label="Supabase Manager" requiredPerm="manage_database" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                            <SidebarItem hiddenMenus={hiddenMenus} view="RUNNING_TEXT_MANAGER" icon={MessageSquare} label="Pengumuman Manager" requiredPerm="manage_database" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                            <SidebarItem hiddenMenus={hiddenMenus} view="FIRESTORE_MANAGER" icon={Database} label="Firestore Manager" requiredPerm="manage_database" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
-                           <SidebarItem hiddenMenus={hiddenMenus} view="ADMIN_BATCH_IMPORTS" icon={Database} label="Batch Imports Manager" requiredPerm="manage_database" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                            <SidebarItem hiddenMenus={hiddenMenus} view="INJECT_EXPIRED_RESI" icon={UploadCloud} label="Inject Resi Kedaluwarsa" requiredPerm="manage_database" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                            <SidebarItem hiddenMenus={hiddenMenus} view="SETTINGS" icon={Settings} label="Pengaturan Sistem" requiredPerm="manage_database" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                         </SidebarSection>
@@ -16928,7 +16928,7 @@ LXAD-1234567890`}
                         {/* ADMIN BATCH IMPORTS VIEW */}
                         {activeView === 'ADMIN_BATCH_IMPORTS' && (
                            <div className="w-full h-full bg-white dark:bg-gray-800 overflow-y-auto">
-                              <AdminBatchImportsView />
+                              <AdminBatchImportsView currentAdmin={currentAdmin} />
                            </div>
                         )}
 
