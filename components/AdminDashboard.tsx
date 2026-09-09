@@ -184,8 +184,8 @@ const ADMIN_PERMISSIONS_LIST = [
    { id: 'manage_access', label: 'Manage Access Roles' },
    { id: 'manage_employees', label: 'Manage Employees' },
    { id: 'manage_admins', label: 'Manage Admin Users' },
-   { id: 'view_packing', label: 'View Packing Data' },
-   { id: 'view_packing_2', label: 'View Packing 2 Data' },
+   { id: 'view_packing_2', label: 'View Data Packing' },
+   { id: 'view_packing', label: 'View Data Packing Copy' },
    { id: 'view_gudang', label: 'View Gudang Data' },
    { id: 'view_sortir', label: 'View Sortir Data' },
    { id: 'manage_symbols', label: 'Manage Forbidden Symbols' },
@@ -11316,9 +11316,9 @@ if (filterPackingShift !== 'ALL') {
                         )}
 
                         {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING' || activeView === 'SCAN_ALL') && (
-                           <div className={`w-full h-full flex ${activeView === 'PACKING_2_DATA' && filterPackingStaff !== 'ALL' ? 'flex-col lg:flex-row' : 'flex-col'} bg-white dark:bg-gray-800 overflow-hidden`}>
+                           <div className={`w-full ${activeView === 'PACKING_2_DATA' && filterPackingStaff !== 'ALL' ? 'flex flex-col lg:flex-row items-start min-h-full' : 'h-full flex flex-col overflow-hidden'} bg-white dark:bg-gray-800`}>
                               {/* Left / Main Table Area */}
-                              <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
+                              <div className={`w-full ${activeView === 'PACKING_2_DATA' && filterPackingStaff !== 'ALL' ? 'lg:flex-1 min-w-0 flex flex-col' : 'flex-1 min-w-0 flex flex-col h-full overflow-hidden'}`}>
                                  {/* Banner Info Filter Staff Aktif (Khusus PACKING_2_DATA) */}
                                  {activeView === 'PACKING_2_DATA' && filterPackingStaff !== 'ALL' && (
                                     <div className="px-4 py-2.5 bg-gradient-to-r from-blue-600/10 via-indigo-600/10 to-purple-600/10 dark:from-blue-500/15 dark:via-indigo-500/15 dark:to-purple-500/15 border-b border-blue-200/60 dark:border-blue-800/60 flex items-center justify-between shrink-0">
@@ -11751,33 +11751,33 @@ if (filterPackingShift !== 'ALL') {
 
                               {/* Right: Staff Analytics Sidebar Panel (Khusus PACKING_2_DATA saat filter staff aktif) */}
                               {activeView === 'PACKING_2_DATA' && filterPackingStaff !== 'ALL' && packing2StaffAnalytics && (
-                                 <div className="w-full lg:w-[380px] xl:w-[420px] shrink-0 h-full border-t lg:border-t-0 lg:border-l border-gray-200/80 dark:border-gray-700/80 bg-gradient-to-b from-gray-50/95 via-white to-gray-50/95 dark:from-gray-900/95 dark:via-gray-850 dark:to-slate-900/90 backdrop-blur-xl p-4 sm:p-5 overflow-y-auto flex flex-col gap-4 shadow-xl transition-all duration-300">
+                                 <div className="w-full lg:w-[350px] xl:w-[390px] 2xl:w-[420px] shrink-0 border-t lg:border-t-0 lg:border-l border-gray-200/80 dark:border-gray-700/80 bg-gradient-to-b from-gray-50/95 via-white to-gray-50/95 dark:from-gray-900/95 dark:via-gray-850 dark:to-slate-900/90 backdrop-blur-xl p-3.5 sm:p-4 lg:p-4.5 flex flex-col gap-3 shadow-xl lg:sticky lg:top-0 lg:max-h-[calc(100vh-80px)] overflow-y-auto custom-scrollbar transition-all duration-300">
                                     {/* 1. Header Card */}
-                                    <div className="relative overflow-hidden rounded-2xl p-4 bg-gradient-to-br from-blue-600 via-indigo-600 to-slate-900 text-white shadow-lg border border-white/10">
+                                    <div className="relative overflow-hidden rounded-2xl p-3 sm:p-3.5 bg-gradient-to-br from-blue-600 via-indigo-600 to-slate-900 text-white shadow-lg border border-white/10 shrink-0">
                                        <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl -mr-10 -mt-10 pointer-events-none"></div>
-                                       <div className="flex items-start justify-between relative z-10">
-                                          <div className="flex items-center gap-3">
-                                             <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center font-black text-lg tracking-wider text-white shadow-inner">
+                                       <div className="flex items-center justify-between relative z-10 gap-2">
+                                          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                                             <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center font-black text-base sm:text-lg tracking-wider text-white shadow-inner shrink-0">
                                                 {packing2StaffAnalytics.initials}
                                              </div>
-                                             <div>
-                                                <div className="flex items-center gap-1.5 mb-1">
-                                                   <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1">
+                                             <div className="min-w-0">
+                                                <div className="flex items-center gap-1.5 mb-0.5">
+                                                   <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1 shrink-0">
                                                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                                                       PACKING
                                                    </span>
-                                                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/15 text-white/90 border border-white/20">
+                                                   <span className="text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-white/15 text-white/90 border border-white/20 truncate">
                                                       {packing2StaffAnalytics.shift}
                                                    </span>
                                                 </div>
-                                                <h3 className="text-base sm:text-lg font-black tracking-tight text-white leading-tight">
+                                                <h3 className="text-sm sm:text-base font-black tracking-tight text-white leading-tight truncate" title={packing2StaffAnalytics.staffName}>
                                                    {packing2StaffAnalytics.staffName}
                                                 </h3>
                                              </div>
                                           </div>
                                           <button 
                                              onClick={() => setFilterPackingStaff('ALL')}
-                                             className="p-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white/80 hover:text-white transition-all cursor-pointer"
+                                             className="p-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white/80 hover:text-white transition-all cursor-pointer shrink-0"
                                              title="Tutup Panel Analisis"
                                           >
                                              <X size={16} />
@@ -11785,17 +11785,18 @@ if (filterPackingShift !== 'ALL') {
                                        </div>
                                     </div>
 
-                                    {/* 2. Circular Progress Ring Card */}
-                                    <div className="rounded-2xl p-4 bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs backdrop-blur-md flex flex-col items-center justify-center relative overflow-hidden">
-                                       <div className="w-full flex items-center justify-between mb-2 text-xs font-bold text-gray-500 dark:text-gray-400">
+                                    {/* 2. Circular Progress Ring Card (100% Responsive & Non-Clipping) */}
+                                    <div className="rounded-2xl p-3 sm:p-4 bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs backdrop-blur-md flex flex-col items-center justify-center relative shrink-0">
+                                       <div className="w-full flex items-center justify-between mb-1 text-xs font-bold text-gray-500 dark:text-gray-400">
                                           <span className="flex items-center gap-1.5">
-                                             <Award size={14} className="text-amber-500" /> Kontribusi Scan Hari Ini
+                                             <Award size={14} className="text-amber-500 shrink-0" /> 
+                                             <span className="truncate">Kontribusi Scan Hari Ini</span>
                                           </span>
-                                          <span className="font-mono text-blue-600 dark:text-blue-400 font-extrabold">{packing2StaffAnalytics.percentage}%</span>
+                                          <span className="font-mono text-blue-600 dark:text-blue-400 font-extrabold shrink-0">{packing2StaffAnalytics.percentage}%</span>
                                        </div>
 
-                                       <div className="relative flex items-center justify-center my-2">
-                                          <svg className="w-36 h-36 transform -rotate-90" viewBox="0 0 120 120">
+                                       <div className="relative flex items-center justify-center my-1.5 sm:my-2 w-full">
+                                          <svg className="w-28 h-28 sm:w-32 sm:h-32 xl:w-36 xl:h-36 transform -rotate-90 overflow-visible" viewBox="0 0 120 120">
                                              <circle
                                                 cx="60"
                                                 cy="60"
@@ -11825,64 +11826,64 @@ if (filterPackingShift !== 'ALL') {
                                                 </linearGradient>
                                              </defs>
                                           </svg>
-                                          <div className="absolute flex flex-col items-center justify-center text-center">
-                                             <span className="text-3xl font-black font-mono tracking-tight text-gray-900 dark:text-white">
+                                          <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
+                                             <span className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-gray-900 dark:text-white leading-none">
                                                 {packing2StaffAnalytics.percentage}%
                                              </span>
-                                             <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                                             <span className="text-[9px] sm:text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mt-1">
                                                 Share Scan
                                              </span>
                                           </div>
                                        </div>
 
-                                       <div className="w-full mt-2 pt-3 border-t border-gray-100 dark:border-gray-700/60 flex items-center justify-between text-xs">
-                                          <span className="text-gray-500 dark:text-gray-400">Total Scan Staff:</span>
-                                          <span className="font-bold font-mono text-gray-800 dark:text-gray-200">
+                                       <div className="w-full mt-1 pt-2 sm:pt-2.5 border-t border-gray-100 dark:border-gray-700/60 flex items-center justify-between text-xs">
+                                          <span className="text-gray-500 dark:text-gray-400 text-[11px] sm:text-xs">Total Scan Staff:</span>
+                                          <span className="font-bold font-mono text-gray-800 dark:text-gray-200 text-[11px] sm:text-xs">
                                              {packing2StaffAnalytics.staffTotal.toLocaleString()} <span className="text-gray-400 font-normal">/ {packing2StaffAnalytics.overallTotal.toLocaleString()}</span>
                                           </span>
                                        </div>
                                     </div>
 
                                     {/* 3. Performance 2x2 Grid */}
-                                    <div className="grid grid-cols-2 gap-2.5">
-                                       <div className="p-3.5 rounded-2xl bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs">
-                                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-blue-600 dark:text-blue-400 mb-1">
+                                    <div className="grid grid-cols-2 gap-2 sm:gap-2.5 shrink-0">
+                                       <div className="p-2.5 sm:p-3 rounded-2xl bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs">
+                                          <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] font-bold text-blue-600 dark:text-blue-400 mb-0.5">
                                              <Package size={13} /> Total Scan
                                           </div>
-                                          <div className="text-xl font-black font-mono text-gray-900 dark:text-white">
+                                          <div className="text-lg sm:text-xl font-black font-mono text-gray-900 dark:text-white">
                                              {packing2StaffAnalytics.staffTotal.toLocaleString()}
                                           </div>
                                           {isHalfCountMode && (
-                                             <div className="text-[10px] text-red-500 font-semibold mt-0.5">Mode 50% Cut</div>
+                                             <div className="text-[9px] text-red-500 font-semibold mt-0.5">Mode 50% Cut</div>
                                           )}
                                        </div>
 
-                                       <div className="p-3.5 rounded-2xl bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs">
-                                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-600 dark:text-indigo-400 mb-1">
+                                       <div className="p-2.5 sm:p-3 rounded-2xl bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs">
+                                          <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] font-bold text-indigo-600 dark:text-indigo-400 mb-0.5">
                                              <Zap size={13} /> Avg / Jam
                                           </div>
-                                          <div className="text-xl font-black font-mono text-gray-900 dark:text-white">
-                                             {packing2StaffAnalytics.avgPerHour} <span className="text-xs font-normal text-gray-400">/jam</span>
+                                          <div className="text-lg sm:text-xl font-black font-mono text-gray-900 dark:text-white">
+                                             {packing2StaffAnalytics.avgPerHour} <span className="text-[10px] sm:text-xs font-normal text-gray-400">/jam</span>
                                           </div>
-                                          <div className="text-[10px] text-gray-400 font-semibold mt-0.5">{packing2StaffAnalytics.activeHoursCount} jam aktif</div>
+                                          <div className="text-[9px] sm:text-[10px] text-gray-400 font-semibold mt-0.5">{packing2StaffAnalytics.activeHoursCount} jam aktif</div>
                                        </div>
 
-                                       <div className="p-3.5 rounded-2xl bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs">
-                                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-purple-600 dark:text-purple-400 mb-1">
+                                       <div className="p-2.5 sm:p-3 rounded-2xl bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs">
+                                          <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] font-bold text-purple-600 dark:text-purple-400 mb-0.5">
                                              <Clock size={13} /> Jam Aktif
                                           </div>
-                                          <div className="text-xl font-black font-mono text-gray-900 dark:text-white">
-                                             {packing2StaffAnalytics.activeHoursCount} <span className="text-xs font-normal text-gray-400">Jam</span>
+                                          <div className="text-lg sm:text-xl font-black font-mono text-gray-900 dark:text-white">
+                                             {packing2StaffAnalytics.activeHoursCount} <span className="text-[10px] sm:text-xs font-normal text-gray-400">Jam</span>
                                           </div>
-                                          <div className="text-[10px] text-gray-400 font-semibold mt-0.5">Hari ini</div>
+                                          <div className="text-[9px] sm:text-[10px] text-gray-400 font-semibold mt-0.5">Hari ini</div>
                                        </div>
 
-                                       <div className="p-3.5 rounded-2xl bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs flex flex-col justify-between">
-                                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 mb-1">
+                                       <div className="p-2.5 sm:p-3 rounded-2xl bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs">
+                                          <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] font-bold text-emerald-600 dark:text-emerald-400 mb-0.5">
                                              <Activity size={13} /> Performa
                                           </div>
                                           <div className="mt-1">
-                                             <span className={`text-[10px] font-bold px-2 py-1 rounded-md border inline-block ${packing2StaffAnalytics.speedTag.color}`}>
+                                             <span className={`text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-md border inline-block ${packing2StaffAnalytics.speedTag.color}`}>
                                                 {packing2StaffAnalytics.speedTag.label}
                                              </span>
                                           </div>
@@ -11890,7 +11891,7 @@ if (filterPackingShift !== 'ALL') {
                                     </div>
 
                                     {/* 4. Hourly Activity Bar Chart */}
-                                    <div className="rounded-2xl p-4 bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs flex flex-col gap-3">
+                                    <div className="rounded-2xl p-3 sm:p-4 bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs flex flex-col gap-2 sm:gap-3 shrink-0">
                                        <div className="flex items-center justify-between">
                                           <div className="text-xs font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
                                              <BarChart3 size={14} className="text-blue-600 dark:text-blue-400" />
@@ -11902,7 +11903,7 @@ if (filterPackingShift !== 'ALL') {
                                        </div>
 
                                        {/* Bars Container */}
-                                       <div className="h-28 flex items-end gap-1.5 pt-5 pb-1 px-2 bg-gray-50/80 dark:bg-gray-900/50 rounded-xl border border-gray-100 dark:border-gray-800/80 overflow-x-auto">
+                                       <div className="h-24 sm:h-28 flex items-end gap-1 sm:gap-1.5 pt-4 pb-1 px-2 bg-gray-50/80 dark:bg-gray-900/50 rounded-xl border border-gray-100 dark:border-gray-800/80 overflow-x-auto custom-scrollbar">
                                           {packing2StaffAnalytics.hourlyChartData.map((item, idx) => {
                                              const heightPercent = packing2StaffAnalytics.maxCountInHour > 0 
                                                 ? Math.max(8, Math.round((item.count / packing2StaffAnalytics.maxCountInHour) * 100))
@@ -11910,7 +11911,7 @@ if (filterPackingShift !== 'ALL') {
                                              const isPeak = item.count === packing2StaffAnalytics.maxCountInHour && item.count > 0;
 
                                              return (
-                                                <div key={idx} className="flex-1 min-w-[20px] flex flex-col items-center h-full justify-end group relative">
+                                                <div key={idx} className="flex-1 min-w-[16px] sm:min-w-[20px] flex flex-col items-center h-full justify-end group relative">
                                                    {/* Hover Tooltip */}
                                                    <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-6 bg-gray-900 text-white text-[9px] font-mono font-bold py-0.5 px-1.5 rounded shadow-md pointer-events-none z-20 whitespace-nowrap">
                                                       {item.hour}: {item.count}
@@ -11927,7 +11928,7 @@ if (filterPackingShift !== 'ALL') {
                                                       }`}
                                                       style={{ height: item.count > 0 ? `${heightPercent}%` : '5px' }}
                                                    />
-                                                   <span className="text-[9px] font-mono text-gray-400 dark:text-gray-500 mt-1 scale-90">
+                                                   <span className="text-[8px] sm:text-[9px] font-mono text-gray-400 dark:text-gray-500 mt-1 scale-90">
                                                       {item.rawHour}
                                                    </span>
                                                 </div>
@@ -11937,18 +11938,18 @@ if (filterPackingShift !== 'ALL') {
                                     </div>
 
                                     {/* 5. Latest Scan Live Card */}
-                                    <div className="rounded-2xl p-3.5 bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs flex flex-col gap-2">
+                                    <div className="rounded-2xl p-2.5 sm:p-3 bg-white dark:bg-gray-800/90 border border-gray-200/80 dark:border-gray-700/80 shadow-2xs flex flex-col gap-1.5 sm:gap-2 shrink-0">
                                        <div className="flex items-center justify-between text-xs font-bold text-gray-600 dark:text-gray-300">
                                           <span className="flex items-center gap-1.5">
                                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
                                              Scan Terakhir
                                           </span>
-                                          <span className="font-mono text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">
+                                          <span className="font-mono text-[10px] sm:text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">
                                              {packing2StaffAnalytics.latestTimeStr}
                                           </span>
                                        </div>
                                        {packing2StaffAnalytics.latestItem ? (
-                                          <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/60 border border-gray-100 dark:border-gray-800 flex items-center justify-between gap-2">
+                                          <div className="p-2 sm:p-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/60 border border-gray-100 dark:border-gray-800 flex items-center justify-between gap-2">
                                              <div className="truncate">
                                                 <div className="font-mono font-bold text-xs text-gray-900 dark:text-white truncate">
                                                    {packing2StaffAnalytics.latestItem.barcode}
@@ -11969,12 +11970,12 @@ if (filterPackingShift !== 'ALL') {
                                              </button>
                                           </div>
                                        ) : (
-                                          <div className="text-xs text-gray-400 text-center py-2">Belum ada scan terbaru</div>
+                                          <div className="text-xs text-gray-400 text-center py-1.5">Belum ada scan terbaru</div>
                                        )}
                                     </div>
 
                                     {/* 6. Action Buttons */}
-                                    <div className="flex flex-col gap-2 pt-1">
+                                    <div className="flex flex-col gap-2 pt-1 shrink-0">
                                        <button
                                           onClick={() => {
                                              const barcodes = packingData.map(d => d.barcode).filter(Boolean).join('\n');
@@ -11985,7 +11986,7 @@ if (filterPackingShift !== 'ALL') {
                                                 showToast('Tidak ada barcode untuk disalin', 'error');
                                              }
                                           }}
-                                          className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 hover:scale-[1.01] transition-all cursor-pointer"
+                                          className="w-full py-2 sm:py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 hover:scale-[1.01] transition-all cursor-pointer"
                                        >
                                           <Copy size={14} /> Salin Semua Barcode Staff ({packingData.length})
                                        </button>
