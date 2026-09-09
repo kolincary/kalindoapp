@@ -315,58 +315,6 @@ const copyToClipboard = async (text: string): Promise<boolean> => {
 };
 
 // --- SUB-COMPONENTS (Memoized) ---
-// ... (Keeping existing sub-components would be redundant to paste, assume they are there in real file)
-
-const EmployeeRow = React.memo(({
-   emp,
-   isSelected,
-   onSelect,
-   onEdit,
-   onDelete
-}: {
-   emp: Employee,
-   isSelected: boolean,
-   onSelect: (id: number) => void,
-   onEdit: (emp: Employee) => void,
-   onDelete: (id: number) => void
-}) => {
-   return (
-      <tr className={isSelected ? 'bg-blue-50 dark:bg-blue-900/10' : ''}>
-         <td className="p-4">
-            <button onClick={() => onSelect(emp.id)} className={`w-5 h-5 rounded border flex items-center justify-center ${isSelected ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-300'}`}>
-               {isSelected && <Check size={14} />}
-            </button>
-         </td>
-         <td className="p-4 font-medium">{emp.name}</td>
-         <td className="p-4">
-            {emp.shift ? (
-               <span className="text-xs px-2 py-1 rounded-full font-medium border bg-gray-50 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700">
-                  {emp.shift}
-               </span>
-            ) : <span className="text-xs text-gray-400 italic">No Shift</span>}
-         </td>
-         <td className="p-4 text-xs font-mono">
-            {emp.daily_target ? (
-               <span className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-gray-600 dark:text-gray-300 font-bold border border-gray-200 dark:border-gray-700">
-                  {emp.daily_target}
-               </span>
-            ) : <span className="text-gray-400">0</span>}
-         </td>
-         <td className="p-4 text-xs text-gray-500">
-            {(emp.allowed_roles === undefined || emp.allowed_roles === null)
-               ? 'All (Default)'
-               : emp.allowed_roles.length === 0
-                  ? 'None'
-                  : emp.allowed_roles.join(', ')
-            }
-         </td>
-         <td className="p-4 text-right">
-            <button onClick={() => onEdit(emp)} className="mr-2 text-blue-600"><Pencil size={16} /></button>
-            <button onClick={() => onDelete(emp.id)} className="text-red-600"><Trash2 size={16} /></button>
-         </td>
-      </tr>
-   );
-});
 
 const ROLE_BADGE_STYLES: Record<string, { bg: string; text: string; border: string; activeBg: string; activeText: string; activeBorder: string; dot: string }> = {
    PICKER: {
@@ -460,6 +408,264 @@ const ROLE_BADGE_STYLES: Record<string, { bg: string; text: string; border: stri
       dot: 'bg-rose-500',
    },
 };
+
+const EmployeeRow = React.memo(({
+   emp,
+   isSelected,
+   onSelect,
+   onEdit,
+   onDelete
+}: {
+   emp: Employee,
+   isSelected: boolean,
+   onSelect: (id: number) => void,
+   onEdit: (emp: Employee) => void,
+   onDelete: (id: number) => void
+}) => {
+   const empInitial = (emp.name || 'K').charAt(0).toUpperCase();
+   const hasAllowedRoles = emp.allowed_roles !== undefined && emp.allowed_roles !== null;
+   const rolesList = hasAllowedRoles ? emp.allowed_roles : [];
+
+   return (
+      <tr className={`group transition-colors ${
+         isSelected 
+            ? 'bg-blue-50/80 dark:bg-blue-900/20' 
+            : 'hover:bg-slate-50/80 dark:hover:bg-gray-800/60'
+      }`}>
+         {/* Checkbox */}
+         <td className="p-3.5 pl-4 sm:pl-6 w-12 sticky left-0 z-10 bg-white dark:bg-gray-800 group-hover:bg-slate-50 dark:group-hover:bg-gray-800 border-b border-gray-100 dark:border-gray-700">
+            <button 
+               onClick={() => onSelect(emp.id)} 
+               className={`w-5 h-5 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${
+                  isSelected 
+                     ? 'bg-blue-600 border-blue-600 text-white shadow-sm shadow-blue-500/30' 
+                     : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-blue-400'
+               }`}
+               title={isSelected ? "Deselect" : "Select employee"}
+            >
+               {isSelected && <Check size={13} strokeWidth={3} />}
+            </button>
+         </td>
+
+         {/* Nama Karyawan & Avatar */}
+         <td className="p-3.5 font-medium text-sm sticky left-12 z-10 bg-white dark:bg-gray-800 group-hover:bg-slate-50 dark:group-hover:bg-gray-800 border-b border-gray-100 dark:border-gray-700 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)] min-w-[200px]">
+            <div className="flex items-center gap-3">
+               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-sm shadow-blue-500/20">
+                  {empInitial}
+               </div>
+               <div className="min-w-0 flex-1">
+                  <span className="font-semibold text-gray-900 dark:text-gray-100 text-sm block truncate">{emp.name}</span>
+                  <span className="text-[11px] text-gray-400 font-mono">ID: #{emp.id}</span>
+               </div>
+            </div>
+         </td>
+
+         {/* Shift */}
+         <td className="p-3.5 text-sm border-b border-gray-100 dark:border-gray-700 min-w-[130px]">
+            {emp.shift ? (
+               <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-xl font-bold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60 shadow-sm">
+                  <Clock size={12} className="text-blue-500" />
+                  {emp.shift}
+               </span>
+            ) : (
+               <span className="text-xs px-2.5 py-1 rounded-xl text-gray-400 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 italic">
+                  Tanpa Shift
+               </span>
+            )}
+         </td>
+
+         {/* Target */}
+         <td className="p-3.5 text-sm border-b border-gray-100 dark:border-gray-700 min-w-[100px]">
+            {emp.daily_target && emp.daily_target > 0 ? (
+               <span className="inline-flex items-center gap-1 text-xs font-mono font-bold px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 shadow-sm">
+                  <Target size={12} className="text-indigo-500" />
+                  {emp.daily_target.toLocaleString()}
+               </span>
+            ) : (
+               <span className="text-xs text-gray-400 px-2 py-1 font-mono">-</span>
+            )}
+         </td>
+
+         {/* Roles */}
+         <td className="p-3.5 border-b border-gray-100 dark:border-gray-700">
+            <div className="flex flex-wrap gap-1.5 max-w-[400px]">
+               {!hasAllowedRoles ? (
+                  <span className="text-xs px-2.5 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 font-bold border border-emerald-200 dark:border-emerald-800/60">
+                     Semua Role (Default)
+                  </span>
+               ) : rolesList.length === 0 ? (
+                  <span className="text-xs px-2 py-0.5 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-400 font-medium italic border border-gray-200 dark:border-gray-700">
+                     Tanpa Role
+                  </span>
+               ) : (
+                  rolesList.map(role => {
+                     const style = ROLE_BADGE_STYLES[role] || {
+                        bg: 'bg-gray-50 dark:bg-gray-800',
+                        text: 'text-gray-700 dark:text-gray-300',
+                        border: 'border-gray-200 dark:border-gray-700',
+                     };
+                     return (
+                        <span 
+                           key={role} 
+                           className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border ${style.bg} ${style.text} ${style.border}`}
+                        >
+                           {role}
+                        </span>
+                     );
+                  })
+               )}
+            </div>
+         </td>
+
+         {/* Actions */}
+         <td className="p-3.5 pr-4 sm:pr-6 text-right min-w-[100px] border-b border-gray-100 dark:border-gray-700">
+            <div className="flex justify-end items-center gap-1">
+               <button 
+                  onClick={() => onEdit(emp)} 
+                  className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded-xl transition-all cursor-pointer"
+                  title="Edit Karyawan"
+               >
+                  <Pencil size={15} />
+               </button>
+               <button 
+                  onClick={() => onDelete(emp.id)} 
+                  className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl transition-all cursor-pointer"
+                  title="Hapus Karyawan"
+               >
+                  <Trash2 size={15} />
+               </button>
+            </div>
+         </td>
+      </tr>
+   );
+});
+
+const EmployeeCard = React.memo(({
+   emp,
+   isSelected,
+   onSelect,
+   onEdit,
+   onDelete
+}: {
+   emp: Employee,
+   isSelected: boolean,
+   onSelect: (id: number) => void,
+   onEdit: (emp: Employee) => void,
+   onDelete: (id: number) => void
+}) => {
+   const empInitial = (emp.name || 'K').charAt(0).toUpperCase();
+   const hasAllowedRoles = emp.allowed_roles !== undefined && emp.allowed_roles !== null;
+   const rolesList = hasAllowedRoles ? emp.allowed_roles : [];
+
+   return (
+      <div className={`p-4 rounded-2xl border transition-all duration-200 flex flex-col gap-3.5 ${
+         isSelected
+            ? 'bg-blue-50/90 dark:bg-blue-900/25 border-blue-400 dark:border-blue-600 shadow-md shadow-blue-500/10 ring-2 ring-blue-500/20'
+            : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600'
+      }`}>
+         {/* Top Row: Checkbox + Avatar + Name + ID + Edit/Delete */}
+         <div className="flex items-start justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+               <button
+                  onClick={() => onSelect(emp.id)}
+                  className={`w-5 h-5 rounded-lg border flex items-center justify-center transition-all shrink-0 cursor-pointer ${
+                     isSelected
+                        ? 'bg-blue-600 border-blue-600 text-white shadow-sm shadow-blue-500/30'
+                        : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-blue-400'
+                  }`}
+               >
+                  {isSelected && <Check size={13} strokeWidth={3} />}
+               </button>
+
+               <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-sm shadow-blue-500/20">
+                  {empInitial}
+               </div>
+
+               <div className="min-w-0 flex-1">
+                  <p className="font-bold text-xs sm:text-sm text-gray-900 dark:text-white truncate" title={emp.name}>{emp.name}</p>
+                  <p className="text-[11px] text-gray-400 font-mono">ID: #{emp.id}</p>
+               </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center gap-1 shrink-0">
+               <button
+                  onClick={() => onEdit(emp)}
+                  className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded-xl transition-colors cursor-pointer"
+                  title="Edit Karyawan"
+               >
+                  <Pencil size={15} />
+               </button>
+               <button
+                  onClick={() => onDelete(emp.id)}
+                  className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl transition-colors cursor-pointer"
+                  title="Hapus Karyawan"
+               >
+                  <Trash2 size={15} />
+               </button>
+            </div>
+         </div>
+
+         {/* Middle Row: Shift & Daily Target */}
+         <div className="grid grid-cols-2 gap-2 p-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-800">
+            <div>
+               <span className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Shift</span>
+               {emp.shift ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-bold text-blue-700 dark:text-blue-300">
+                     <Clock size={12} className="text-blue-500 shrink-0" />
+                     <span className="truncate">{emp.shift}</span>
+                  </span>
+               ) : (
+                  <span className="text-xs text-gray-400 italic">Tanpa Shift</span>
+               )}
+            </div>
+            <div>
+               <span className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Target Harian</span>
+               {emp.daily_target && emp.daily_target > 0 ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-mono font-bold text-indigo-700 dark:text-indigo-300">
+                     <Target size={12} className="text-indigo-500 shrink-0" />
+                     <span>{emp.daily_target.toLocaleString()}</span>
+                  </span>
+               ) : (
+                  <span className="text-xs text-gray-400 font-mono">-</span>
+               )}
+            </div>
+         </div>
+
+         {/* Bottom Row: Allowed Roles */}
+         <div className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Perizinan Role</span>
+            <div className="flex flex-wrap gap-1.5">
+               {!hasAllowedRoles ? (
+                  <span className="text-[11px] px-2.5 py-1 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 font-bold border border-emerald-200 dark:border-emerald-800/60">
+                     Semua Role (Default)
+                  </span>
+               ) : rolesList.length === 0 ? (
+                  <span className="text-[11px] px-2.5 py-1 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-400 font-medium italic border border-gray-200 dark:border-gray-700">
+                     Tanpa Role
+                  </span>
+               ) : (
+                  rolesList.map(role => {
+                     const style = ROLE_BADGE_STYLES[role] || {
+                        bg: 'bg-gray-50 dark:bg-gray-800',
+                        text: 'text-gray-700 dark:text-gray-300',
+                        border: 'border-gray-200 dark:border-gray-700',
+                     };
+                     return (
+                        <span 
+                           key={role} 
+                           className={`text-[11px] font-bold px-2.5 py-1 rounded-xl border ${style.bg} ${style.text} ${style.border}`}
+                        >
+                           {role}
+                        </span>
+                     );
+                  })
+               )}
+            </div>
+         </div>
+      </div>
+   );
+});
 
 const AccessRow = React.memo(({
    email,
@@ -1101,6 +1307,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [packingSearch, setPackingSearch] = useState('');
    const [filterAccessRole, setFilterAccessRole] = useState<string>('ALL'); // New Filter for Access Control
    const [accessViewLayout, setAccessViewLayout] = useState<'AUTO' | 'TABLE' | 'CARDS'>('AUTO');
+   const [employeeViewLayout, setEmployeeViewLayout] = useState<'AUTO' | 'TABLE' | 'CARDS'>('AUTO');
 
    // 3b. Global Search State
    const [globalSearchTerm, setGlobalSearchTerm] = useState('');
@@ -3844,6 +4051,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          return matchesSearch && matchesShift && matchesRole;
       }),
       [employees, employeeSearch, filterShift, filterRole]);
+
+   const employeeStats = useMemo(() => {
+      const total = employees.length;
+      let withShift = 0;
+      let withRoles = 0;
+      let withTarget = 0;
+
+      employees.forEach(emp => {
+         if (emp.shift && emp.shift.trim() !== '') withShift++;
+         if (emp.allowed_roles && emp.allowed_roles.length > 0) withRoles++;
+         if (emp.daily_target && emp.daily_target > 0) withTarget++;
+      });
+
+      return { total, withShift, withRoles, withTarget, filteredCount: filteredEmployees.length };
+   }, [employees, filteredEmployees.length]);
 
    const filteredAdmins = useMemo(() =>
       adminUsers.filter(admin => admin.username.toLowerCase().includes(adminSearch.toLowerCase())),
@@ -10199,36 +10421,156 @@ if (filterPackingShift !== 'ALL') {
                      {/* TOOLBAR 2: Other Views (Employees, Access, Failed Scans, etc) */}
                      {(activeView !== 'PACKING_DATA' && activeView !== 'PACKING_2_DATA' && activeView !== 'SORTIR_DATA' && (activeView !== 'PICKER_DATA' && activeView !== 'CHECKER_DATA') && activeView !== 'LEADER_2_DATA' && activeView !== 'SCAN_ALL' && activeView !== 'SYMBOLS' && activeView !== 'OJOL_DATA' && activeView !== 'GUDANG_PENDING' && activeView !== 'GUDANG_REPORT' && activeView !== 'GUDANG_BUNDLING') && (
                         <div className="px-6 py-4 flex flex-col xl:flex-row gap-4 justify-between items-start xl:items-center">
-                           {activeView === 'EMPLOYEES' ? (
-                              <div className="flex flex-wrap gap-2 items-center w-full xl:w-auto">
-                                 <div className="relative flex-grow sm:flex-grow-0 sm:w-64 w-full"><SearchInput value={employeeSearch} onChange={setEmployeeSearch} placeholder="Search employees..." /></div>
-                                 <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                                    <div className="relative flex-grow sm:flex-grow-0"><Filter size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /><select value={filterShift} onChange={(e) => setFilterShift(e.target.value)} className="pl-9 pr-8 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer min-w-[120px] h-11 w-full"><option value="ALL">All Shifts</option><option value="NONE">No Shift</option>{availableShifts.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
-                                    <button onClick={() => openQuickAdd('SHIFT')} className="p-2 bg-gray-200 dark:bg-gray-700 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 h-11 w-11 flex items-center justify-center flex-shrink-0"><Plus size={16} /></button>
-                                    <div className="relative flex-grow sm:flex-grow-0"><Briefcase size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /><select value={filterRole} onChange={(e) => setFilterRole(e.target.value)} className="pl-9 pr-8 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer min-w-[120px] h-11 w-full"><option value="ALL">All Roles</option><option value="NONE">None (No Role)</option>{availableRoles.map(r => <option key={r} value={r}>{r}</option>)}</select></div>
-                                    <button onClick={() => openQuickAdd('ROLE')} className="p-2 bg-gray-200 dark:bg-gray-700 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 h-11 w-11 flex items-center justify-center flex-shrink-0"><Plus size={16} /></button>
-                                 </div>
-                              </div>
-                           ) : (
-                              <div className="flex flex-col sm:flex-row gap-2 w-full xl:w-auto items-stretch sm:items-center">
-                                 <div className="relative flex-grow sm:flex-grow-0 sm:w-64">
-                                    {['DASHBOARD', 'PINS', 'ACCESS'].includes(activeView) && (<SearchInput value={accessSearch} onChange={setAccessSearch} placeholder="Search user accounts..." className="w-full" />)}
-                                    {activeView === 'ADMIN_MANAGEMENT' && (<SearchInput value={adminSearch} onChange={setAdminSearch} placeholder="Search admin users..." className="w-full" />)}
-                                 </div>
-                                 {activeView === 'ACCESS' && (
-                                    <div className="relative w-full sm:w-44">
-                                       <Filter size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                                       <select value={filterAccessRole} onChange={(e) => setFilterAccessRole(e.target.value)} className="w-full pl-9 pr-8 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer h-11 font-medium text-gray-700 dark:text-gray-200">
-                                          <option value="ALL">Semua Role</option><option value="NONE">Tanpa Akses</option>{accessTableVisibleRoles.map(r => <option key={r} value={r}>{r}</option>)}
-                                       </select>
-                                       <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                                    </div>
-                                 )}
-                              </div>
-                           )}
+                            {activeView === 'EMPLOYEES' ? (
+                               <div className="flex flex-wrap gap-2.5 items-center w-full xl:w-auto">
+                                  <div className="relative flex-grow sm:flex-grow-0 sm:w-60 w-full">
+                                     <SearchInput value={employeeSearch} onChange={setEmployeeSearch} placeholder="Cari karyawan..." className="w-full" />
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                                     <div className="relative flex-grow sm:flex-grow-0 min-w-[140px]">
+                                        <Filter size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                                        <select 
+                                           value={filterShift} 
+                                           onChange={(e) => setFilterShift(e.target.value)} 
+                                           className="w-full pl-9 pr-8 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer h-11 font-medium text-gray-700 dark:text-gray-200 shadow-sm"
+                                        >
+                                           <option value="ALL">Semua Shift</option>
+                                           <option value="NONE">Tanpa Shift</option>
+                                           {availableShifts.map(s => <option key={s} value={s}>{s}</option>)}
+                                        </select>
+                                        <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                                     </div>
+                                     <button 
+                                        type="button"
+                                        onClick={() => openQuickAdd('SHIFT')} 
+                                        className="h-11 w-11 flex items-center justify-center bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-600 dark:text-gray-300 transition-all cursor-pointer shrink-0 shadow-sm"
+                                        title="Tambah Shift Baru"
+                                     >
+                                        <Plus size={16} />
+                                     </button>
 
-                           <div className={`flex flex-wrap gap-2 w-full xl:w-auto justify-start sm:justify-end ${activeView === 'EMPLOYEES' ? 'items-center mt-2 xl:mt-0' : ''}`}>
-                              {activeView === 'EMPLOYEES' && (<><input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleFileInputChange} /><div className="flex flex-wrap gap-2 w-full sm:w-auto"><button onClick={() => setIsImportModalOpen(true)} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl font-bold text-xs sm:text-sm bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-200 h-11"><Upload size={14} /> Import</button><button onClick={handleExportCSV} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl font-bold text-xs sm:text-sm bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-200 h-11"><Download size={14} /> Export</button>{selectedEmployeeIds.length > 0 && (<><button onClick={() => setIsBulkDeleteModalOpen(true)} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl font-bold text-xs sm:text-sm bg-red-500 text-white shadow-md hover:bg-red-600 h-11"><Trash2 size={14} /> Delete</button><button onClick={handleOpenBulkTargetModal} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl font-bold text-xs sm:text-sm bg-indigo-600 text-white shadow-md hover:bg-indigo-700 h-11"><Target size={14} /> Target</button><button onClick={handleOpenBulkEditModal} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl font-bold text-xs sm:text-sm bg-purple-600 text-white shadow-md hover:bg-purple-700 h-11"><CheckSquare size={14} /> Edit</button></>)}<button onClick={() => handleOpenEmployeeModal()} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-4 py-2 rounded-xl font-bold text-xs sm:text-sm bg-blue-600 text-white shadow-md hover:bg-blue-700 h-11"><Plus size={16} /> Tambah</button></div></>)}
+                                     <div className="relative flex-grow sm:flex-grow-0 min-w-[140px]">
+                                        <Briefcase size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                                        <select 
+                                           value={filterRole} 
+                                           onChange={(e) => setFilterRole(e.target.value)} 
+                                           className="w-full pl-9 pr-8 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer h-11 font-medium text-gray-700 dark:text-gray-200 shadow-sm"
+                                        >
+                                           <option value="ALL">Semua Role</option>
+                                           <option value="NONE">Tanpa Role</option>
+                                           {availableRoles.map(r => <option key={r} value={r}>{r}</option>)}
+                                        </select>
+                                        <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                                     </div>
+                                     <button 
+                                        type="button"
+                                        onClick={() => openQuickAdd('ROLE')} 
+                                        className="h-11 w-11 flex items-center justify-center bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-600 dark:text-gray-300 transition-all cursor-pointer shrink-0 shadow-sm"
+                                        title="Tambah Role Baru"
+                                     >
+                                        <Plus size={16} />
+                                     </button>
+                                  </div>
+                               </div>
+                            ) : (
+                               <div className="flex flex-col sm:flex-row gap-2 w-full xl:w-auto items-stretch sm:items-center">
+                                  <div className="relative flex-grow sm:flex-grow-0 sm:w-64">
+                                     {['DASHBOARD', 'PINS', 'ACCESS'].includes(activeView) && (<SearchInput value={accessSearch} onChange={setAccessSearch} placeholder="Search user accounts..." className="w-full" />)}
+                                     {activeView === 'ADMIN_MANAGEMENT' && (<SearchInput value={adminSearch} onChange={setAdminSearch} placeholder="Search admin users..." className="w-full" />)}
+                                  </div>
+                                  {activeView === 'ACCESS' && (
+                                     <div className="relative w-full sm:w-44">
+                                        <Filter size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                        <select value={filterAccessRole} onChange={(e) => setFilterAccessRole(e.target.value)} className="w-full pl-9 pr-8 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer h-11 font-medium text-gray-700 dark:text-gray-200">
+                                           <option value="ALL">Semua Role</option><option value="NONE">Tanpa Akses</option>{accessTableVisibleRoles.map(r => <option key={r} value={r}>{r}</option>)}
+                                        </select>
+                                        <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                                     </div>
+                                  )}
+                               </div>
+                            )}
+
+                            <div className={`flex flex-wrap gap-2 w-full xl:w-auto justify-start sm:justify-end ${activeView === 'EMPLOYEES' ? 'items-center mt-2 xl:mt-0' : ''}`}>
+                               {activeView === 'EMPLOYEES' && (
+                                  <>
+                                     <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleFileInputChange} />
+                                     
+                                     {/* Layout View Switcher */}
+                                     <div className="flex items-center bg-gray-100 dark:bg-gray-800 p-1 rounded-xl border border-gray-200 dark:border-gray-700 h-11">
+                                        <button
+                                           type="button"
+                                           onClick={() => setEmployeeViewLayout('AUTO')}
+                                           className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                              employeeViewLayout === 'AUTO'
+                                                 ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                                                 : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                           }`}
+                                           title="Tampilan Otomatis (Tabel di Desktop, Kartu di Mobile)"
+                                        >
+                                           <SlidersHorizontal size={13} />
+                                           <span className="hidden sm:inline">Auto</span>
+                                        </button>
+                                        <button
+                                           type="button"
+                                           onClick={() => setEmployeeViewLayout('TABLE')}
+                                           className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                              employeeViewLayout === 'TABLE'
+                                                 ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                                                 : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                           }`}
+                                           title="Paksa Tampilan Tabel"
+                                        >
+                                           <Layers size={13} />
+                                           <span className="hidden sm:inline">Tabel</span>
+                                        </button>
+                                        <button
+                                           type="button"
+                                           onClick={() => setEmployeeViewLayout('CARDS')}
+                                           className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                              employeeViewLayout === 'CARDS'
+                                                 ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                                                 : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                           }`}
+                                           title="Paksa Tampilan Kartu"
+                                        >
+                                           <LayoutGrid size={13} />
+                                           <span className="hidden sm:inline">Kartu</span>
+                                        </button>
+                                     </div>
+
+                                     <button onClick={() => setIsImportModalOpen(true)} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl font-bold text-xs sm:text-sm bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700 shadow-sm hover:bg-gray-200 dark:hover:bg-gray-700 h-11 transition-all cursor-pointer">
+                                        <Upload size={14} /> 
+                                        <span>Import</span>
+                                     </button>
+
+                                     <button onClick={handleExportCSV} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl font-bold text-xs sm:text-sm bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700 shadow-sm hover:bg-gray-200 dark:hover:bg-gray-700 h-11 transition-all cursor-pointer">
+                                        <Download size={14} /> 
+                                        <span>Export</span>
+                                     </button>
+
+                                     {selectedEmployeeIds.length > 0 && (
+                                        <>
+                                           <button onClick={() => setIsBulkDeleteModalOpen(true)} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl font-bold text-xs sm:text-sm bg-rose-600 text-white shadow-md hover:bg-rose-700 h-11 transition-all cursor-pointer">
+                                              <Trash2 size={14} /> 
+                                              <span>Hapus ({selectedEmployeeIds.length})</span>
+                                           </button>
+                                           <button onClick={handleOpenBulkTargetModal} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl font-bold text-xs sm:text-sm bg-indigo-600 text-white shadow-md hover:bg-indigo-700 h-11 transition-all cursor-pointer">
+                                              <Target size={14} /> 
+                                              <span>Target</span>
+                                           </button>
+                                           <button onClick={handleOpenBulkEditModal} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl font-bold text-xs sm:text-sm bg-purple-600 text-white shadow-md hover:bg-purple-700 h-11 transition-all cursor-pointer">
+                                              <CheckSquare size={14} /> 
+                                              <span>Edit Role</span>
+                                           </button>
+                                        </>
+                                     )}
+
+                                     <button onClick={() => handleOpenEmployeeModal()} className="flex-grow sm:flex-grow-0 flex items-center justify-center gap-2 px-4 py-2 rounded-xl font-bold text-xs sm:text-sm bg-blue-600 text-white shadow-md hover:bg-blue-700 h-11 transition-all cursor-pointer shadow-blue-500/20">
+                                        <Plus size={16} /> 
+                                        <span>Tambah Karyawan</span>
+                                     </button>
+                                  </>
+                               )}
                               {activeView === 'ACCESS' && (
                                  <>
                                     {/* Layout View Switcher */}
@@ -10315,27 +10657,268 @@ if (filterPackingShift !== 'ALL') {
                      <div className="w-full flex-1 min-h-0 flex flex-col">
                         {/* EMPLOYEES VIEW */}
                         {activeView === 'EMPLOYEES' && (
-                           <div className="w-full h-full bg-white dark:bg-gray-800 flex flex-col">
-                              {isLoadingEmployees ? <div className="p-10 text-center flex-1 flex items-center justify-center"><Loader2 className="animate-spin mx-auto mb-2" /> Loading...</div> : (
-                                 <div className="flex-1 overflow-auto">
-                                    <table className="w-full text-left whitespace-nowrap">
-                                       <thead className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
-                                          <tr>
-                                             <th className="p-4 w-12 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700"><button onClick={() => selectedEmployeeIds.length !== filteredEmployees.length ? setSelectedEmployeeIds(filteredEmployees.map(e => e.id)) : setSelectedEmployeeIds([])} className={`w-5 h-5 rounded border flex items-center justify-center ${selectedEmployeeIds.length > 0 ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-300'}`}>{selectedEmployeeIds.length > 0 && <Check size={14} />}</button></th>
-                                             <th className="p-4 text-xs font-bold text-gray-500 uppercase bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Nama</th>
-                                             <th className="p-4 text-xs font-bold text-gray-500 uppercase bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Shift</th>
-                                             <th className="p-4 text-xs font-bold text-gray-500 uppercase bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Target</th>
-                                             <th className="p-4 text-xs font-bold text-gray-500 uppercase bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Roles</th>
-                                             <th className="p-4 text-right bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Actions</th>
-                                          </tr>
-                                       </thead>
-                                       <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                                          {filteredEmployees.map(emp => (
-                                             <EmployeeRow key={emp.id} emp={emp} isSelected={selectedEmployeeIds.includes(emp.id)} onSelect={(id) => setSelectedEmployeeIds(prev => prev.includes(id) ? prev.filter(pid => pid !== id) : [...prev, id])} onEdit={handleOpenEmployeeModal} onDelete={handleDeleteEmployee} />
-                                          ))}
-                                       </tbody>
-                                    </table>
+                           <div className="w-full h-full bg-slate-50/60 dark:bg-gray-900 flex flex-col overflow-hidden relative">
+                              {isLoadingEmployees ? (
+                                 <div className="p-10 text-center flex-1 flex flex-col items-center justify-center">
+                                    <Loader2 className="animate-spin text-blue-600 mb-3" size={32} />
+                                    <p className="text-sm font-semibold text-gray-500 dark:text-gray-400">Memuat data karyawan...</p>
                                  </div>
+                              ) : (
+                                 <>
+                                    {/* 1. TOP METRIC STATS BANNER */}
+                                    <div className="p-4 sm:p-5 border-b border-gray-200/80 dark:border-gray-800 bg-white/80 dark:bg-gray-800/80 backdrop-blur-md shrink-0">
+                                       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                                          {/* Stat 1: Total Karyawan */}
+                                          <div className="bg-gradient-to-br from-blue-50/80 to-indigo-50/40 dark:from-blue-950/20 dark:to-indigo-950/10 border border-blue-100 dark:border-blue-900/40 rounded-2xl p-3.5 sm:p-4 shadow-sm">
+                                             <div className="flex items-center justify-between">
+                                                <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300">Total Karyawan</span>
+                                                <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                                                   <Users size={16} />
+                                                </div>
+                                             </div>
+                                             <div className="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-white mt-1.5">{employeeStats.total}</div>
+                                             <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Karyawan terdaftar</p>
+                                          </div>
+
+                                          {/* Stat 2: Memiliki Shift */}
+                                          <div className="bg-gradient-to-br from-emerald-50/80 to-teal-50/40 dark:from-emerald-950/20 dark:to-teal-950/10 border border-emerald-100 dark:border-emerald-900/40 rounded-2xl p-3.5 sm:p-4 shadow-sm">
+                                             <div className="flex items-center justify-between">
+                                                <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Memiliki Shift</span>
+                                                <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                                                   <Clock size={16} />
+                                                </div>
+                                             </div>
+                                             <div className="text-2xl sm:text-3xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-1.5">{employeeStats.withShift}</div>
+                                             <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Shift kerja terpasang</p>
+                                          </div>
+
+                                          {/* Stat 3: Target Harian */}
+                                          <div className="bg-gradient-to-br from-indigo-50/80 to-purple-50/40 dark:from-indigo-950/20 dark:to-purple-950/10 border border-indigo-100 dark:border-indigo-900/40 rounded-2xl p-3.5 sm:p-4 shadow-sm">
+                                             <div className="flex items-center justify-between">
+                                                <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">Target Harian</span>
+                                                <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                                                   <Target size={16} />
+                                                </div>
+                                             </div>
+                                             <div className="text-2xl sm:text-3xl font-extrabold text-indigo-600 dark:text-indigo-400 mt-1.5">{employeeStats.withTarget}</div>
+                                             <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Karyawan punya target</p>
+                                          </div>
+
+                                          {/* Stat 4: Memiliki Role */}
+                                          <div className="bg-gradient-to-br from-purple-50/80 to-pink-50/40 dark:from-purple-950/20 dark:to-pink-950/10 border border-purple-100 dark:border-purple-900/40 rounded-2xl p-3.5 sm:p-4 shadow-sm">
+                                             <div className="flex items-center justify-between">
+                                                <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300">Perizinan Role</span>
+                                                <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+                                                   <Briefcase size={16} />
+                                                </div>
+                                             </div>
+                                             <div className="text-2xl sm:text-3xl font-extrabold text-purple-600 dark:text-purple-400 mt-1.5">{employeeStats.withRoles}</div>
+                                             <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Role khusus terpasang</p>
+                                          </div>
+                                       </div>
+
+                                       {/* Filter & Selection Sub-banner */}
+                                       {(employeeSearch || filterShift !== 'ALL' || filterRole !== 'ALL' || selectedEmployeeIds.length > 0) && (
+                                          <div className="flex flex-wrap items-center justify-between gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-800 text-xs">
+                                             <div className="flex items-center gap-2 flex-wrap">
+                                                <span className="text-gray-500 dark:text-gray-400">
+                                                   Menampilkan <strong className="text-gray-900 dark:text-white font-bold">{filteredEmployees.length}</strong> dari {employeeStats.total} karyawan
+                                                </span>
+                                                {filterShift !== 'ALL' && (
+                                                   <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold text-[11px]">
+                                                      Shift: {filterShift === 'NONE' ? 'Tanpa Shift' : filterShift}
+                                                   </span>
+                                                )}
+                                                {filterRole !== 'ALL' && (
+                                                   <span className="px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-semibold text-[11px]">
+                                                      Role: {filterRole === 'NONE' ? 'Tanpa Role' : filterRole}
+                                                   </span>
+                                                )}
+                                                {employeeSearch && (
+                                                   <span className="px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-semibold text-[11px]">
+                                                      Cari: &ldquo;{employeeSearch}&rdquo;
+                                                   </span>
+                                                )}
+                                             </div>
+                                             {(employeeSearch || filterShift !== 'ALL' || filterRole !== 'ALL') && (
+                                                <button
+                                                   onClick={() => { setEmployeeSearch(''); setFilterShift('ALL'); setFilterRole('ALL'); }}
+                                                   className="text-blue-600 dark:text-blue-400 hover:underline font-semibold cursor-pointer"
+                                                >
+                                                   Reset Filter
+                                                </button>
+                                             )}
+                                          </div>
+                                       )}
+                                    </div>
+
+                                    {/* 2. MAIN CONTENT AREA (TABLE OR CARDS) */}
+                                    <div className="flex-1 overflow-auto p-3 sm:p-5">
+                                       {filteredEmployees.length === 0 ? (
+                                          <div className="h-full min-h-[300px] flex flex-col items-center justify-center text-center p-8 bg-white dark:bg-gray-800 rounded-3xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm">
+                                             <div className="w-16 h-16 rounded-2xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-4">
+                                                <Users size={32} />
+                                             </div>
+                                             <h3 className="text-lg font-bold text-gray-900 dark:text-white">Tidak ada karyawan yang ditemukan</h3>
+                                             <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mt-1 mb-5">
+                                                {employeeSearch || filterShift !== 'ALL' || filterRole !== 'ALL'
+                                                   ? 'Coba ubah kata kunci pencarian atau sesuaikan filter shift & role untuk melihat karyawan lainnya.'
+                                                   : 'Belum ada data karyawan yang terdaftar. Anda dapat menambah karyawan baru atau import file CSV.'}
+                                             </p>
+                                             <div className="flex items-center gap-3">
+                                                {(employeeSearch || filterShift !== 'ALL' || filterRole !== 'ALL') && (
+                                                   <button
+                                                      onClick={() => { setEmployeeSearch(''); setFilterShift('ALL'); setFilterRole('ALL'); }}
+                                                      className="px-4 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-bold text-sm hover:bg-gray-200 cursor-pointer"
+                                                   >
+                                                      Reset Filter
+                                                   </button>
+                                                )}
+                                                <button
+                                                   onClick={() => handleOpenEmployeeModal()}
+                                                   className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold text-sm shadow-md hover:bg-blue-700 cursor-pointer flex items-center gap-2"
+                                                >
+                                                   <Plus size={16} /> Tambah Karyawan
+                                                </button>
+                                             </div>
+                                          </div>
+                                       ) : (
+                                          <>
+                                             {/* DESKTOP / TABLE VIEW */}
+                                             <div className={`${
+                                                employeeViewLayout === 'TABLE' 
+                                                   ? 'block' 
+                                                   : employeeViewLayout === 'CARDS' 
+                                                   ? 'hidden' 
+                                                   : 'hidden md:block'
+                                             }`}>
+                                                <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm overflow-hidden">
+                                                   <div className="overflow-x-auto">
+                                                      <table className="w-full text-left whitespace-nowrap">
+                                                         <thead className="bg-slate-50 dark:bg-gray-900/90 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-20 backdrop-blur-sm">
+                                                            <tr>
+                                                               <th className="p-3.5 pl-4 sm:pl-6 w-12 sticky left-0 z-30 bg-slate-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                                                                  <button 
+                                                                     onClick={() => selectedEmployeeIds.length !== filteredEmployees.length ? setSelectedEmployeeIds(filteredEmployees.map(e => e.id)) : setSelectedEmployeeIds([])} 
+                                                                     className={`w-5 h-5 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${
+                                                                        selectedEmployeeIds.length > 0 && selectedEmployeeIds.length === filteredEmployees.length
+                                                                           ? 'bg-blue-600 border-blue-600 text-white shadow-sm shadow-blue-500/30'
+                                                                           : selectedEmployeeIds.length > 0
+                                                                           ? 'bg-blue-600 border-blue-600 text-white'
+                                                                           : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-blue-400'
+                                                                     }`}
+                                                                     title={selectedEmployeeIds.length > 0 ? "Batal pilih semua" : "Pilih semua karyawan"}
+                                                                  >
+                                                                     {selectedEmployeeIds.length > 0 && (
+                                                                        selectedEmployeeIds.length === filteredEmployees.length
+                                                                           ? <Check size={13} strokeWidth={3} />
+                                                                           : <Minus size={13} strokeWidth={3} />
+                                                                     )}
+                                                                  </button>
+                                                               </th>
+                                                               <th className="p-3.5 text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider sticky left-12 z-20 bg-slate-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)] min-w-[200px]">
+                                                                  Nama Karyawan ({filteredEmployees.length})
+                                                               </th>
+                                                               <th className="p-3.5 text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider min-w-[130px] border-b border-gray-200 dark:border-gray-700">
+                                                                  Shift
+                                                               </th>
+                                                               <th className="p-3.5 text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider min-w-[100px] border-b border-gray-200 dark:border-gray-700">
+                                                                  Target Harian
+                                                               </th>
+                                                               <th className="p-3.5 text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider border-b border-gray-200 dark:border-gray-700">
+                                                                  Perizinan Role
+                                                               </th>
+                                                               <th className="p-3.5 pr-4 sm:pr-6 text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider text-right min-w-[100px] border-b border-gray-200 dark:border-gray-700">
+                                                                  Aksi
+                                                               </th>
+                                                            </tr>
+                                                         </thead>
+                                                         <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                                                            {filteredEmployees.map(emp => (
+                                                               <EmployeeRow 
+                                                                  key={emp.id} 
+                                                                  emp={emp} 
+                                                                  isSelected={selectedEmployeeIds.includes(emp.id)} 
+                                                                  onSelect={(id) => setSelectedEmployeeIds(prev => prev.includes(id) ? prev.filter(pid => pid !== id) : [...prev, id])} 
+                                                                  onEdit={handleOpenEmployeeModal} 
+                                                                  onDelete={handleDeleteEmployee} 
+                                                               />
+                                                            ))}
+                                                         </tbody>
+                                                      </table>
+                                                   </div>
+                                                </div>
+                                             </div>
+
+                                             {/* MOBILE / CARD GRID VIEW */}
+                                             <div className={`${
+                                                employeeViewLayout === 'CARDS' 
+                                                   ? 'block' 
+                                                   : employeeViewLayout === 'TABLE' 
+                                                   ? 'hidden' 
+                                                   : 'block md:hidden'
+                                             }`}>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 pb-16">
+                                                   {filteredEmployees.map(emp => (
+                                                      <EmployeeCard
+                                                         key={emp.id}
+                                                         emp={emp}
+                                                         isSelected={selectedEmployeeIds.includes(emp.id)}
+                                                         onSelect={(id) => setSelectedEmployeeIds(prev => prev.includes(id) ? prev.filter(pid => pid !== id) : [...prev, id])}
+                                                         onEdit={handleOpenEmployeeModal}
+                                                         onDelete={handleDeleteEmployee}
+                                                      />
+                                                   ))}
+                                                </div>
+                                             </div>
+                                          </>
+                                       )}
+                                    </div>
+
+                                    {/* 3. FLOATING BULK SELECTION ACTION BAR */}
+                                    {selectedEmployeeIds.length > 0 && (
+                                       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 w-[92%] max-w-xl animate-in fade-in slide-in-from-bottom-4 duration-200">
+                                          <div className="bg-gray-900/95 dark:bg-slate-800/95 text-white p-3 sm:p-4 rounded-2xl shadow-2xl backdrop-blur-md border border-gray-700/60 flex items-center justify-between gap-3">
+                                             <div className="flex items-center gap-2.5">
+                                                <div className="w-8 h-8 rounded-xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center font-bold text-blue-400 text-xs">
+                                                   {selectedEmployeeIds.length}
+                                                </div>
+                                                <div>
+                                                   <p className="text-xs sm:text-sm font-bold">{selectedEmployeeIds.length} Karyawan Terpilih</p>
+                                                   <p className="text-[11px] text-gray-400 hidden sm:block">Aksi massal karyawan terpilih</p>
+                                                </div>
+                                             </div>
+                                             <div className="flex items-center gap-2">
+                                                <button
+                                                   onClick={handleOpenBulkTargetModal}
+                                                   className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                                                >
+                                                   <Target size={13} /> Target
+                                                </button>
+                                                <button
+                                                   onClick={handleOpenBulkEditModal}
+                                                   className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                                                >
+                                                   <CheckSquare size={13} /> Edit Role
+                                                </button>
+                                                <button
+                                                   onClick={() => setIsBulkDeleteModalOpen(true)}
+                                                   className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                                                >
+                                                   <Trash2 size={13} /> Hapus
+                                                </button>
+                                                <button
+                                                   onClick={() => setSelectedEmployeeIds([])}
+                                                   className="p-1.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-all cursor-pointer"
+                                                   title="Batalkan pilihan"
+                                                >
+                                                   <X size={15} />
+                                                </button>
+                                             </div>
+                                          </div>
+                                       </div>
+                                    )}
+                                 </>
                               )}
                            </div>
                         )}
