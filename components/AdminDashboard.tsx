@@ -3526,6 +3526,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return username === 'admin' || username === 'superdev' || username.includes('dev');
    }, [currentAdmin]);
 
+   // Determine if date filter is unrestricted (No 2-3 day restriction for SuperAdmin, view_gudang permission, or admin3)
+   const isDateFilterUnrestricted = useMemo(() => {
+      if (!currentAdmin) return false;
+      if (isSuperAdmin) return true;
+      if (hasPermission('view_gudang')) return true;
+      const username = (currentAdmin.username || '').toLowerCase().trim();
+      return username === 'admin3';
+   }, [currentAdmin, isSuperAdmin, hasPermission]);
+
    // Toast Timer
    useEffect(() => {
       if (successToast) {
@@ -10218,9 +10227,19 @@ if (filterPackingShift !== 'ALL') {
                                                    id="main-date-filter"
                                                    type="date"
                                                    value={filterDate}
-                                                   min={(!isSuperAdmin && !hasPermission('view_gudang')) ? new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] : undefined}
-                                                   max={(!isSuperAdmin && !hasPermission('view_gudang')) ? new Date().toISOString().split('T')[0] : undefined}
-                                                   onChange={(e) => setFilterDate(e.target.value)}
+                                                   min={!isDateFilterUnrestricted ? new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] : undefined}
+                                                   max={!isDateFilterUnrestricted ? new Date().toISOString().split('T')[0] : undefined}
+                                                   onChange={(e) => {
+                                                      const selected = e.target.value;
+                                                      if (!isDateFilterUnrestricted) {
+                                                         const minDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                                                         if (selected && selected < minDate) {
+                                                            alert("Restricted: You can only view data from the last 2 days.");
+                                                            return;
+                                                         }
+                                                      }
+                                                      setFilterDate(selected);
+                                                   }}
                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
                                                 />
                                              ) : null}
@@ -10428,12 +10447,12 @@ if (filterPackingShift !== 'ALL') {
                                           <input
                                              type="date"
                                              value={filterDate}
-                                             min={(!isSuperAdmin && !hasPermission('view_gudang')) ? new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] : undefined}
-                                             max={(!isSuperAdmin && !hasPermission('view_gudang')) ? new Date().toISOString().split('T')[0] : undefined}
+                                             min={!isDateFilterUnrestricted ? new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] : undefined}
+                                             max={!isDateFilterUnrestricted ? new Date().toISOString().split('T')[0] : undefined}
                                              onClick={(e) => { try { if (typeof e.currentTarget.showPicker === 'function') e.currentTarget.showPicker(); } catch (error) { } }}
                                              onChange={(e) => {
                                                 const selected = e.target.value;
-                                                if (!isSuperAdmin && !hasPermission('view_gudang')) {
+                                                if (!isDateFilterUnrestricted) {
                                                    const minDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
                                                    const maxDate = new Date().toISOString().split('T')[0];
                                                    if (selected < minDate) {
