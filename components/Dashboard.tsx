@@ -29,7 +29,7 @@ interface DashboardProps {
 }
 
 // Expanded Views to support History per section AND Failed History
-type DashboardView = 'SCAN' | 'SCAN_HISTORY' | 'SCAN_2' | 'SCAN_2_HISTORY' | 'PENDING' | 'PENDING_HISTORY' | 'READY' | 'READY_HISTORY' | 'CANCEL' | 'CANCEL_HISTORY' | 'REPORT' | 'REPORT_HISTORY' | 'HISTORY' | 'FAILED_HISTORY' | 'BUNDLING' | 'BUNDLING_HISTORY' | 'LEADER_DASHBOARD' | 'LEADER_GLOBAL' | 'LEADER_ORDERS' | 'LEADER_SUMMARY' | 'SPECIAL_SCAN';
+type DashboardView = 'SCAN' | 'SCAN_HISTORY' | 'SCAN_2' | 'SCAN_2_HISTORY' | 'PENDING' | 'PENDING_HISTORY' | 'READY' | 'READY_HISTORY' | 'CANCEL' | 'CANCEL_HISTORY' | 'REPORT' | 'REPORT_HISTORY' | 'HISTORY' | 'FAILED_HISTORY' | 'BUNDLING' | 'BUNDLING_HISTORY' | 'LEADER_DASHBOARD' | 'LEADER_GLOBAL' | 'LEADER_ORDERS' | 'LEADER_SUMMARY' | 'LEADER_PENDING' | 'LEADER_PENDING_HISTORY' | 'SPECIAL_SCAN';
 
 // Leader Profile Constants
 const LEADER_PROFILES = ['RICKY', 'AKMAL'] as const;
@@ -1033,7 +1033,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }
    }, [role, userEmail, employeeName, currentView]);
 
-    // --- REALTIME: scanned_items changes (from other devices) ---
+    // --- REALTIME: scanned_items & leader_pending_scans changes (from other devices) ---
     useEffect(() => {
        if (currentView === 'LEADER_DASHBOARD' || currentView === 'LEADER_GLOBAL' || currentView === 'LEADER_ORDERS') return;
 
@@ -1047,6 +1047,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
              (payload) => {
                 const row = (payload.new || payload.old) as any;
                 if (row && (row.role === role || row.employee_name === employeeName)) {
+                   if (debounceTimer) clearTimeout(debounceTimer);
+                   debounceTimer = setTimeout(() => {
+                      fetchData();
+                   }, 500);
+                }
+             }
+          )
+          .on(
+             'postgres_changes',
+             { event: '*', schema: 'public', table: 'leader_pending_scans' },
+             () => {
+                if (role === UserRole.LEADER) {
                    if (debounceTimer) clearTimeout(debounceTimer);
                    debounceTimer = setTimeout(() => {
                       fetchData();
@@ -1077,14 +1089,53 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const startOfPeriod = new Date();
       if (isHistory) {
          startOfPeriod.setDate(startOfPeriod.getDate() - 30); // Expanded to 30 days
-      } else if (role === 'GUDANG') {
-         // GUDANG Active View: Reset at 00:00 Today
+      } else if (role === 'GUDANG' || (role === UserRole.LEADER && currentView === 'LEADER_PENDING')) {
+         // GUDANG & LEADER PENDING Active View: Reset at 00:00 Today
          startOfPeriod.setHours(0, 0, 0, 0);
       } else {
          startOfPeriod.setDate(startOfPeriod.getDate() - 1); // Other Roles: 24 Hour Buffer
       }
 
       const startTimestamp = startOfPeriod.getTime();
+
+      // SPECIAL FETCH FOR LEADER PENDING SCANS (Dedicated Table: leader_pending_scans)
+      if (role === UserRole.LEADER && (currentView === 'LEADER_PENDING' || currentView === 'LEADER_PENDING_HISTORY')) {
+         try {
+            let lpQuery = supabase
+               .from('leader_pending_scans')
+               .select('*')
+               .gte('timestamp', startTimestamp);
+
+            if (selectedLeaderProfile) {
+               lpQuery = lpQuery.eq('leader_profile', selectedLeaderProfile);
+            }
+
+            const { data: lpData, error: lpErr } = await lpQuery.order('timestamp', { ascending: false }).limit(5000);
+
+            if (lpData) {
+               const lpItems = lpData.map((row: any) => ({
+                  id: row.id,
+                  timestamp: isNaN(Number(row.timestamp)) ? new Date(row.timestamp).getTime() : Number(row.timestamp),
+                  barcode: row.barcode,
+                  role: UserRole.LEADER,
+                  destination: row.leader_profile || 'LEADER',
+                  description: row.description || `[PENDING LEADER] ${row.scan_type || ''}`,
+                  priority: 'NORMAL',
+                  status: 'PENDING',
+                  employee_name: row.leader_name || employeeName,
+                  syncStatus: 'SYNCED',
+                  menu_context: 'LEADER_PENDING',
+                  scan_mode: row.scan_type as any
+               }));
+               setItems(lpItems as ScannedItem[]);
+               return;
+            }
+            if (lpErr) console.error("Leader pending fetch error:", lpErr);
+         } catch (err) {
+            console.error("Leader pending fetch exception:", err);
+         }
+         return;
+      }
 
       try {
          // DYNAMIC SUPABASE CLIENT
@@ -1704,6 +1755,123 @@ export const Dashboard: React.FC<DashboardProps> = ({
          setAssignmentTeam([]);
 
          if (isContinuousScan) updateContinuousStatus('success', 'Wait Assign');
+         return; // Intercept: don't save to scanned_items
+      }
+
+      // -- LEADER PENDING SCAN INTERCEPT (Dedicated Table: leader_pending_scans) --
+      if (role === UserRole.LEADER && currentView === 'LEADER_PENDING') {
+         if (!navigator.onLine) {
+            playError();
+            setCriticalNetworkError("Koneksi Internet Terputus!\nData TIDAK bisa disimpan.");
+            if (isContinuousScan) updateContinuousStatus('error', 'Offline');
+            return;
+         }
+
+         const startOfDay = new Date();
+         startOfDay.setHours(0, 0, 0, 0);
+
+         // 1. Local duplicate check
+         const localDuplicate = items.find(i => 
+            i.menu_context === 'LEADER_PENDING' && 
+            i.barcode === result.barcode &&
+            i.timestamp >= startOfDay.getTime()
+         );
+
+         if (localDuplicate) {
+            playError();
+            const msg = `⚠️ BARCODE SUDAH DISCAN!\n${result.barcode}\nsudah ada di pending scan leader.`;
+            setErrorToast(msg);
+            setTimeout(() => setErrorToast(null), 4000);
+            if (isContinuousScan) updateContinuousStatus('error', 'Duplicate');
+            triggerCameraToast(`Duplicate: ${result.barcode}`, 'error');
+            return;
+         }
+
+         // 2. Database duplicate check
+         try {
+            const { data: dbDuplicate } = await supabase
+               .from('leader_pending_scans')
+               .select('leader_name, leader_profile')
+               .eq('barcode', result.barcode)
+               .gte('timestamp', startOfDay.getTime())
+               .limit(1)
+               .maybeSingle();
+
+            if (dbDuplicate) {
+               playError();
+               const msg = `⚠️ BARCODE SUDAH DISCAN!\n${result.barcode}\nsudah discan oleh ${dbDuplicate.leader_name || dbDuplicate.leader_profile || 'Leader'}.`;
+               setErrorToast(msg);
+               setTimeout(() => setErrorToast(null), 4000);
+               if (isContinuousScan) updateContinuousStatus('error', `By: ${dbDuplicate.leader_name || 'Leader'}`);
+               triggerCameraToast(`Duplicate: ${result.barcode}`, 'error');
+               return;
+            }
+         } catch (dupErr) {
+            console.warn('Duplicate check error in leader_pending_scans:', dupErr);
+         }
+
+         const uniqueId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+         const payload = {
+            id: uniqueId,
+            timestamp: Date.now(),
+            barcode: result.barcode,
+            leader_name: employeeName,
+            leader_profile: selectedLeaderProfile || employeeName,
+            status: 'PENDING',
+            scan_type: 'PENDING',
+            description: `[PENDING LEADER] ${result.description || ''}`,
+            date: new Date().toLocaleDateString('id-ID')
+         };
+
+         try {
+            const { error: insertErr } = await supabase
+               .from('leader_pending_scans')
+               .insert([payload]);
+
+            // Dual Backup to supabaseNew
+            try {
+               await supabaseNew
+                  .from('leader_pending_scans')
+                  .insert([payload]);
+            } catch (backupErr) {
+               console.error('Backup insert error (non-blocking):', backupErr);
+            }
+
+            if (insertErr) {
+               playError();
+               triggerCameraToast("Gagal menyimpan pending scan leader", 'error');
+               console.error("Leader pending insert error:", insertErr);
+            } else {
+               playSuccess();
+               triggerCameraToast("Pending scan leader tersimpan!", 'success');
+
+               const newItem: ScannedItem = {
+                  id: uniqueId,
+                  timestamp: Date.now(),
+                  barcode: result.barcode,
+                  role: role,
+                  status: 'PENDING',
+                  description: `[PENDING LEADER] ${result.description || ''}`,
+                  destination: selectedLeaderProfile || 'LEADER',
+                  priority: 'NORMAL',
+                  employee_name: employeeName,
+                  syncStatus: 'SYNCED',
+                  menu_context: 'LEADER_PENDING'
+               };
+
+               setItems(prev => [newItem, ...prev]);
+
+               if (isContinuousScan) {
+                  setRecentScans(prev => prev.map(s =>
+                     s.code === result.barcode ? { ...s, status: 'success', message: 'Pending Saved' } : s
+                  ));
+               }
+            }
+         } catch (err) {
+            console.error(err);
+            playError();
+            triggerCameraToast("Error saat menyimpan pending scan leader", 'error');
+         }
          return; // Intercept: don't save to scanned_items
       }
 
@@ -2938,8 +3106,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
          if (currentView === 'SCAN_2' || currentView === 'SCAN_2_HISTORY') {
             return items.filter(i => i.menu_context === 'SCAN_2' && i.employee_name === employeeName);
          }
+         if (currentView === 'LEADER_PENDING' || currentView === 'LEADER_PENDING_HISTORY') {
+            return items.filter(i => i.menu_context === 'LEADER_PENDING');
+         }
          if (currentView === 'SCAN' || currentView === 'HISTORY') {
-            return items.filter(i => i.menu_context !== 'SCAN_2');
+            return items.filter(i => i.menu_context !== 'SCAN_2' && i.menu_context !== 'LEADER_PENDING');
          }
       }
 
@@ -2973,11 +3144,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
          return items.filter(i => i.menu_context === 'CANCEL' || i.description?.includes('[CANCEL]'));
       }
       return items;
-   }, [items, currentView, isGudang]);
+   }, [items, currentView, isGudang, isLeader, employeeName]);
 
    const isHistoryView = currentView.endsWith('_HISTORY') || currentView === 'HISTORY';
    const isFailedView = currentView === 'FAILED_HISTORY';
-   const isMainView = ['SCAN', 'SCAN_2', 'PENDING', 'READY', 'REPORT', 'BUNDLING', 'CANCEL', 'LEADER_GLOBAL', 'LEADER_ORDERS', 'LEADER_DASHBOARD', 'LEADER_SUMMARY', 'SPECIAL_SCAN'].includes(currentView);
+   const isMainView = ['SCAN', 'SCAN_2', 'PENDING', 'READY', 'REPORT', 'BUNDLING', 'CANCEL', 'LEADER_GLOBAL', 'LEADER_ORDERS', 'LEADER_DASHBOARD', 'LEADER_SUMMARY', 'LEADER_PENDING', 'SPECIAL_SCAN'].includes(currentView);
 
    const todayItems = useMemo(() => {
       const startOfDay = new Date();
@@ -3214,6 +3385,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         >
                            <ScanLine size={20} />
                            <span className="font-medium">Scan Leader</span>
+                        </button>
+                        <button
+                           onClick={() => { setCurrentView('LEADER_PENDING'); setIsSidebarOpen(false); }}
+                           className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${currentView === 'LEADER_PENDING' || currentView === 'LEADER_PENDING_HISTORY'
+                              ? 'bg-purple-50 text-purple-600 dark:bg-purple-900/40 dark:text-purple-400 font-bold'
+                              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-900'
+                              }`}
+                        >
+                           <Clock size={20} />
+                           <span className="font-medium">Pending Scan (LT3)</span>
                         </button>
                         <button
                            onClick={() => { setCurrentView('LEADER_GLOBAL'); setIsSidebarOpen(false); }}
@@ -4149,6 +4330,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
    const getHistoryTitle = () => {
       if (currentView === 'SCAN_HISTORY') return 'History: Potong Stok';
       if (currentView === 'PENDING_HISTORY') return 'History: Pending Scans (LT3)';
+      if (currentView === 'LEADER_PENDING_HISTORY') return 'History: Pending Scan Leader (LT3)';
       if (currentView === 'READY_HISTORY') return 'History: Resi Ready (LT3)';
       if (currentView === 'CANCEL_HISTORY') return 'History: Scan Cancel (LT3)';
       if (currentView === 'REPORT_HISTORY') return 'History: Gudang Report';
@@ -4164,6 +4346,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
          else setCurrentView('HISTORY');
       }
       if (currentView === 'SCAN_2') setCurrentView('SCAN_2_HISTORY');
+      if (currentView === 'LEADER_PENDING') setCurrentView('LEADER_PENDING_HISTORY');
       if (currentView === 'PENDING') setCurrentView('PENDING_HISTORY');
       if (currentView === 'READY') setCurrentView('READY_HISTORY');
       if (currentView === 'CANCEL') setCurrentView('CANCEL_HISTORY');
@@ -4174,6 +4357,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
    const handleHistoryBack = () => {
       if (currentView === 'SCAN_HISTORY') setCurrentView('SCAN');
       if (currentView === 'PENDING_HISTORY') setCurrentView('PENDING');
+      if (currentView === 'LEADER_PENDING_HISTORY') setCurrentView('LEADER_PENDING');
       if (currentView === 'READY_HISTORY') setCurrentView('READY');
       if (currentView === 'CANCEL_HISTORY') setCurrentView('CANCEL');
       if (currentView === 'REPORT_HISTORY') setCurrentView('REPORT');
@@ -4441,6 +4625,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <h1 className="text-3xl font-bold text-white leading-tight">
                      {currentView === 'SCAN' ? (role === UserRole.GUDANG ? 'Potong Stok' : role) : ''}
                      {currentView === 'SCAN_2' && 'Scan Leader'}
+                     {currentView === 'LEADER_PENDING' && 'Pending Scan Leader (LT3)'}
                      {currentView === 'PENDING' && 'Pending Scans (LT3)'}
                      {currentView === 'READY' && 'Resi Ready (LT3)'}
                      {currentView === 'REPORT' && 'Gudang Report'}
@@ -4562,17 +4747,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-3 flex flex-col justify-between h-20">
                      <div className="text-white/90 text-xs font-bold uppercase tracking-wide">Completed</div>
                      <div className="text-2xl font-bold text-white flex items-baseline gap-1">
-                        {todayCount} <span className="text-xs font-normal opacity-60">label</span>
+                        {isLeader && currentView === 'LEADER_PENDING' ? todayItems.length : todayCount} <span className="text-xs font-normal opacity-60">label</span>
                      </div>
                   </div>
 
                   {/* CARD 2: FAILED/PENDING */}
-                  {isGudang ? (
-                     // GUDANG: PENDING STATS
+                  {(isGudang || (isLeader && currentView === 'LEADER_PENDING')) ? (
+                     // GUDANG & LEADER PENDING STATS
                      <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-3 flex flex-col justify-between h-20">
                         <div className="text-white/90 text-xs font-bold uppercase tracking-wide">Pending</div>
                         <div className="text-2xl font-bold text-white flex items-center gap-2">
-                           {pendingCount}
+                           {isLeader && currentView === 'LEADER_PENDING' ? todayItems.length : pendingCount}
                            <span className="text-xs font-normal opacity-60">items</span>
                         </div>
                      </div>
@@ -5019,7 +5204,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                </div>
             </div>
          )}
-         {currentView !== 'LEADER_DASHBOARD' && currentView !== 'LEADER_GLOBAL' && currentView !== 'LEADER_ORDERS' && currentView !== 'LEADER_SUMMARY' && (isFailedView ? renderFailedList() : renderItemList("No items found", isHistoryView ? getHistoryTitle() : (currentView === 'SPECIAL_SCAN' ? "Special Scan" : (role === UserRole.GUDANG ? (currentView === 'SCAN' ? "Potong Stok List" : currentView === 'PENDING' ? "Pending Scans" : currentView === 'READY' ? "Resi Ready" : currentView === 'CANCEL' ? "Scan Cancel List" : currentView === 'BUNDLING' ? "Scan Bundling" : currentView === 'REPORT' ? "Gudang Report" : "Scan List") : "Scan List"))))}
+         {currentView !== 'LEADER_DASHBOARD' && currentView !== 'LEADER_GLOBAL' && currentView !== 'LEADER_ORDERS' && currentView !== 'LEADER_SUMMARY' && (isFailedView ? renderFailedList() : renderItemList("No items found", isHistoryView ? getHistoryTitle() : (currentView === 'SPECIAL_SCAN' ? "Special Scan" : (role === UserRole.GUDANG ? (currentView === 'SCAN' ? "Potong Stok List" : currentView === 'PENDING' ? "Pending Scans" : currentView === 'READY' ? "Resi Ready" : currentView === 'CANCEL' ? "Scan Cancel List" : currentView === 'BUNDLING' ? "Scan Bundling" : currentView === 'REPORT' ? "Gudang Report" : "Scan List") : (role === UserRole.LEADER && currentView === 'LEADER_PENDING' ? "Pending Scan Leader List" : "Scan List")))))}
 
          {isMainView && currentView !== 'LEADER_GLOBAL' && currentView !== 'LEADER_ORDERS' && currentView !== 'LEADER_DASHBOARD' && currentView !== 'LEADER_SUMMARY' && (
             <div className="fixed bottom-0 left-0 right-0 p-5 z-50 bg-gradient-to-t from-white via-white/90 to-transparent dark:from-gray-950 dark:via-gray-950/90 pt-10 transition-all flex justify-center pointer-events-none">

@@ -176,6 +176,36 @@ CREATE INDEX IF NOT EXISTS idx_leader_scan_2_ts ON public.leader_scan_2 (timesta
 CREATE INDEX IF NOT EXISTS idx_leader_scan_2_barcode ON public.leader_scan_2 (barcode);
 
 -- ==============================================================================
+-- 7B. TABLE: leader_pending_scans (Pending Scan Leader LT3)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.leader_pending_scans (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    timestamp BIGINT NOT NULL DEFAULT (extract(epoch from now()) * 1000)::bigint,
+    barcode TEXT NOT NULL,
+    leader_name TEXT DEFAULT '',
+    leader_profile TEXT DEFAULT '',
+    status TEXT DEFAULT 'PENDING',
+    scan_type TEXT DEFAULT 'PRETELAN',
+    description TEXT DEFAULT '[PENDING LEADER]',
+    date TEXT DEFAULT '',
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE public.leader_pending_scans ADD COLUMN IF NOT EXISTS timestamp BIGINT DEFAULT (extract(epoch from now()) * 1000)::bigint;
+ALTER TABLE public.leader_pending_scans ADD COLUMN IF NOT EXISTS barcode TEXT;
+ALTER TABLE public.leader_pending_scans ADD COLUMN IF NOT EXISTS leader_name TEXT DEFAULT '';
+ALTER TABLE public.leader_pending_scans ADD COLUMN IF NOT EXISTS leader_profile TEXT DEFAULT '';
+ALTER TABLE public.leader_pending_scans ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'PENDING';
+ALTER TABLE public.leader_pending_scans ADD COLUMN IF NOT EXISTS scan_type TEXT DEFAULT 'PRETELAN';
+ALTER TABLE public.leader_pending_scans ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '[PENDING LEADER]';
+ALTER TABLE public.leader_pending_scans ADD COLUMN IF NOT EXISTS date TEXT DEFAULT '';
+ALTER TABLE public.leader_pending_scans ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+
+CREATE INDEX IF NOT EXISTS idx_leader_pending_scans_ts ON public.leader_pending_scans (timestamp);
+CREATE INDEX IF NOT EXISTS idx_leader_pending_scans_barcode ON public.leader_pending_scans (barcode);
+CREATE INDEX IF NOT EXISTS idx_leader_pending_scans_profile ON public.leader_pending_scans (leader_profile);
+
+-- ==============================================================================
 -- 8. TABLE: failed_scans (Riwayat Gagal Scan)
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.failed_scans (
@@ -457,6 +487,7 @@ ALTER TABLE public.cancelled_orders DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.batches DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.batch_items DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.leader_scan_2 DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.leader_pending_scans DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.failed_scans DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.admin_shift_notes DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.employees DISABLE ROW LEVEL SECURITY;
