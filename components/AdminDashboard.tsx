@@ -129,6 +129,7 @@ const SIDEBAR_MENUS_LIST = [
   { id: 'PICKER_DATA', label: 'Data Picker' },
   { id: 'CHECKER_DATA', label: 'Data Checker' },
   { id: 'LEADER_2_DATA', label: 'Rekap Leader' },
+  { id: 'LEADER_PENDING_ADMIN', label: 'Pending Scan Leader (LT3)' },
   { id: 'OJOL_DATA', label: 'Data Ojol' },
   { id: 'SCAN_ALL', label: 'Pindah Data' },
   { id: 'BATCH_DATA', label: 'Batch Management Old' },
@@ -227,6 +228,7 @@ const VIEW_PERMISSIONS: Partial<Record<AdminView, string | string[]>> = {
    'PICKER_DATA': 'view_picker',
    'CHECKER_DATA': 'view_checker',
    'LEADER_2_DATA': 'view_leader_2',
+  'LEADER_PENDING_ADMIN': 'view_leader_2',
    'OJOL_DATA': 'view_ojol',
    'LOGISTIK_DATA': 'view_logistik',
    'SCAN_ALL': 'view_scan_all',
@@ -1615,6 +1617,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (activeView === 'MENU_VISIBILITY') return 'Menu Visibility';
       if (activeView === 'TRACK_RESI') return 'Tracking Resi';
       if (activeView === 'LEADER_2_DATA') return 'Rekap Leader';
+      if (activeView === 'LEADER_PENDING_ADMIN') return 'Pending Scan Leader (LT3)';
       if (activeView === 'PACKING_DATA') return 'Data Packing Copy';
       if (activeView === 'PACKING_2_DATA') return 'Data Packing';
       if (activeView === 'SORTIR_DATA') return 'Data Sortir';
@@ -1930,60 +1933,87 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
    };
    
-     const handleGlobalSearchFs = async () => {
-        const term = globalSearchTermFs.trim();
-        if (!term || term.length < 3) {
-           alert("Masukkan minimal 3 karakter.");
-           return;
-        }
-  
-        setIsGlobalSearchingFs(true);
-        const upper = term.toUpperCase();
-        console.log(`[SYS] Deep Hunt Barcode (Firestore): ${upper}`);
-  
+   const handleGlobalSearchFs = async () => {
+      const term = globalSearchTermFs.trim();
+      if (!term || term.length < 3) {
+         alert("Masukkan minimal 3 karakter.");
+         return;
+      }
+
+      setIsGlobalSearchingFs(true);
+      const upper = term.toUpperCase();
+      console.log(`[SYS] Deep Hunt Barcode (Firestore): ${upper}`);
+
+      try {
+         const { db } = await import('../services/firebaseClient');
+         const { collection, getDocs, query, where } = await import('firebase/firestore');
+         let allData: any[] = [];
+
+         const variations = Array.from(new Set([term, upper, term.toLowerCase()]));
+         
+         // Query 1: Search in barcode (scanned_items)
          try {
-            const { db } = await import('../services/firebaseClient');
-            const { collection, getDocs, query, where, orderBy } = await import('firebase/firestore');
-            let allData: any[] = [];
-   
-            const variations = Array.from(new Set([term, upper, term.toLowerCase()]));
-            
-            // Query 1: Search in barcode
             const q1 = query(collection(db, 'scanned_items'), where('barcode', 'in', variations));
             const snap1 = await getDocs(q1);
             snap1.forEach(doc => {
-              allData.push({ ...doc.data(), id: doc.id, source: 'FIRESTORE' });
+               allData.push({ ...doc.data(), id: doc.id, source: 'FIRESTORE' });
             });
+         } catch (e) {}
 
-            // Query 2: Search in destination
+         // Query 2: Search in destination (scanned_items)
+         try {
             const q2 = query(collection(db, 'scanned_items'), where('destination', 'in', variations));
             const snap2 = await getDocs(q2);
             snap2.forEach(doc => {
-              if (!allData.find(d => d.id === doc.id)) {
-                 allData.push({ ...doc.data(), id: doc.id, source: 'FIRESTORE' });
-              }
+               if (!allData.find(d => d.id === doc.id)) {
+                  allData.push({ ...doc.data(), id: doc.id, source: 'FIRESTORE' });
+               }
             });
+         } catch (e) {}
 
-            // Query 3: Search in description
+         // Query 3: Search in description (scanned_items)
+         try {
             const q3 = query(collection(db, 'scanned_items'), where('description', 'in', variations));
             const snap3 = await getDocs(q3);
             snap3.forEach(doc => {
-              if (!allData.find(d => d.id === doc.id)) {
-                 allData.push({ ...doc.data(), id: doc.id, source: 'FIRESTORE' });
-              }
+               if (!allData.find(d => d.id === doc.id)) {
+                  allData.push({ ...doc.data(), id: doc.id, source: 'FIRESTORE' });
+               }
             });
-           
-           // Sort by timestamp desc locally since we only queried barcode
-           allData.sort((a, b) => b.timestamp - a.timestamp);
-           
-           setGlobalSearchResultsFs(allData);
-        } catch (err: any) {
-           console.error("Error global search firestore:", err);
-           alert("Gagal mencari data di Firestore: " + err.message);
-        } finally {
-           setIsGlobalSearchingFs(false);
-        }
-     };
+         } catch (e) {}
+
+         // Query 4: Search in leader_pending_scans
+         try {
+            const q4 = query(collection(db, 'leader_pending_scans'), where('barcode', 'in', variations));
+            const snap4 = await getDocs(q4);
+            snap4.forEach(doc => {
+               const d = doc.data() as any;
+               if (!allData.find(dItem => dItem.id === doc.id)) {
+                  allData.push({
+                     ...d,
+                     id: doc.id,
+                     source: 'FIRESTORE',
+                     role: 'LEADER_PENDING',
+                     employee_name: d.leader_name || d.leader_profile || 'LEADER'
+                  });
+               }
+            });
+         } catch (e) {}
+        
+         // Sort by timestamp desc locally
+         allData.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+         
+         setGlobalSearchResultsFs(allData);
+         if (allData.length === 0) {
+            alert(`Tidak ditemukan data resi "${term}" di Firestore.`);
+         }
+      } catch (err: any) {
+         console.error("Error global search firestore:", err);
+         alert("Gagal mencari data di Firestore: " + err.message);
+      } finally {
+         setIsGlobalSearchingFs(false);
+      }
+   };
 
    const handleGlobalSearch = async () => {
       const term = globalSearchTerm.trim();
@@ -2002,20 +2032,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          const { db } = await import('../services/firebaseClient');
          const { collection, getDocs, query, where } = await import('firebase/firestore');
 
-         const fetchSb = async (client: any, sourceDb: string, label: string) => {
+         const fetchSb = async (client: any, sourceDb: string, label: string, table: string = 'scanned_items', defaultRole?: string) => {
             try {
+               if (!client) return [];
                const isLikelyBarcode = term.length >= 8 && !term.includes(' ');
-               const orQuery = isLikelyBarcode
-                  ? `barcode.eq.${upper}`
-                  : `barcode.eq.${upper},barcode.ilike.%${term}%,destination.ilike.%${term}%`;
+
+               let orQuery = `barcode.eq.${upper}`;
+               if (!isLikelyBarcode) {
+                  if (table === 'leader_pending_scans' || table === 'leader_scan_2') {
+                     orQuery = `barcode.eq.${upper},barcode.ilike.%${term}%,leader_name.ilike.%${term}%,leader_profile.ilike.%${term}%`;
+                  } else {
+                     orQuery = `barcode.eq.${upper},barcode.ilike.%${term}%,destination.ilike.%${term}%`;
+                  }
+               }
 
                const { data, error } = await client
-                  .from('scanned_items')
+                  .from(table)
                   .select('*')
                   .or(orQuery)
                   .limit(100);
                if (error || !data) return [];
-               return data.map((item: any) => ({ ...item, source_db: sourceDb, source_label: label }));
+               return data.map((item: any) => ({
+                  ...item,
+                  employee_name: item.employee_name || item.leader_name || item.leader_profile || 'LEADER',
+                  role: item.role || defaultRole || (table === 'leader_pending_scans' ? 'LEADER_PENDING' : (table === 'leader_scan_2' ? 'LEADER_2' : 'UNKNOWN')),
+                  source_db: sourceDb,
+                  source_label: label + (table === 'leader_pending_scans' ? ' (Pending Leader)' : (table === 'leader_scan_2' ? ' (Rekap Leader)' : ''))
+               }));
             } catch (e) {
                return [];
             }
@@ -2024,33 +2067,82 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          const fetchFs = async () => {
             try {
                let fsItems: any[] = [];
-               const q1 = query(collection(db, 'scanned_items'), where('barcode', 'in', variations));
-               const snap1 = await getDocs(q1);
-               snap1.forEach(doc => {
-                  fsItems.push({ ...doc.data(), id: doc.id, source_db: 'FIRESTORE', source_label: 'Firestore' });
-               });
 
-               const q2 = query(collection(db, 'scanned_items'), where('destination', 'in', variations));
-               const snap2 = await getDocs(q2);
-               snap2.forEach(doc => {
-                  if (!fsItems.find(d => d.id === doc.id)) {
+               // 1. scanned_items by barcode
+               try {
+                  const q1 = query(collection(db, 'scanned_items'), where('barcode', 'in', variations));
+                  const snap1 = await getDocs(q1);
+                  snap1.forEach(doc => {
                      fsItems.push({ ...doc.data(), id: doc.id, source_db: 'FIRESTORE', source_label: 'Firestore' });
-                  }
-               });
+                  });
+               } catch (e) {}
+
+               // 2. scanned_items by destination
+               try {
+                  const q2 = query(collection(db, 'scanned_items'), where('destination', 'in', variations));
+                  const snap2 = await getDocs(q2);
+                  snap2.forEach(doc => {
+                     if (!fsItems.find(d => d.id === doc.id)) {
+                        fsItems.push({ ...doc.data(), id: doc.id, source_db: 'FIRESTORE', source_label: 'Firestore' });
+                     }
+                  });
+               } catch (e) {}
+
+               // 3. leader_pending_scans in Firestore
+               try {
+                  const qL = query(collection(db, 'leader_pending_scans'), where('barcode', 'in', variations));
+                  const snapL = await getDocs(qL);
+                  snapL.forEach(doc => {
+                     const d = doc.data() as any;
+                     if (!fsItems.find(item => item.id === doc.id)) {
+                        fsItems.push({
+                           ...d,
+                           id: doc.id,
+                           employee_name: d.leader_name || d.leader_profile || 'LEADER',
+                           role: 'LEADER_PENDING',
+                           source_db: 'FIRESTORE',
+                           source_label: 'Firestore (Pending Leader)'
+                        });
+                     }
+                  });
+               } catch (e) {}
+
                return fsItems;
             } catch (e) {
                return [];
             }
          };
 
-         const [primaryData, archiveData, oldData, fsData] = await Promise.all([
-            fetchSb(supabase, 'SUPABASE_PRIMARY', 'Supabase Utama'),
-            fetchSb(supabaseNew, 'SUPABASE_ARCHIVE', 'Supabase Archive'),
-            fetchSb(supabaseSpecialOld, 'SUPABASE_OLD', 'Supabase Lama'),
+         const [
+            primaryScans,
+            archiveScans,
+            oldScans,
+            primaryLeaderPending,
+            archiveLeaderPending,
+            primaryLeader2,
+            archiveLeader2,
+            fsData
+         ] = await Promise.all([
+            fetchSb(supabase, 'SUPABASE_PRIMARY', 'Supabase Utama', 'scanned_items'),
+            fetchSb(supabaseNew, 'SUPABASE_ARCHIVE', 'Supabase Archive', 'scanned_items'),
+            fetchSb(supabaseSpecialOld, 'SUPABASE_OLD', 'Supabase Lama', 'scanned_items'),
+            fetchSb(supabase, 'SUPABASE_PRIMARY', 'Supabase Utama', 'leader_pending_scans', 'LEADER_PENDING'),
+            fetchSb(supabaseNew, 'SUPABASE_ARCHIVE', 'Supabase Archive', 'leader_pending_scans', 'LEADER_PENDING'),
+            fetchSb(supabase, 'SUPABASE_PRIMARY', 'Supabase Utama', 'leader_scan_2', 'LEADER_2'),
+            fetchSb(supabaseNew, 'SUPABASE_ARCHIVE', 'Supabase Archive', 'leader_scan_2', 'LEADER_2'),
             fetchFs()
          ]);
 
-         let allMerged = [...primaryData, ...archiveData, ...oldData, ...fsData];
+         let allMerged = [
+            ...primaryScans,
+            ...archiveScans,
+            ...oldScans,
+            ...primaryLeaderPending,
+            ...archiveLeaderPending,
+            ...primaryLeader2,
+            ...archiveLeader2,
+            ...fsData
+         ];
 
          const uniqueMap = new Map();
          allMerged.forEach(item => {
@@ -2076,7 +2168,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          setIsGlobalSearching(false);
       }
    };
-
    const handleSaveSupabaseConfig = async () => {
       setIsSavingConfig(true);
       try {
@@ -3987,7 +4078,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
 
       // Data Refresh on View Switch
-      if (['EMPLOYEES', 'PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_REPORT', 'SCAN_ALL'].includes(activeView)) fetchEmployees();
+      if (['EMPLOYEES', 'PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'LEADER_PENDING_ADMIN', 'GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_REPORT', 'SCAN_ALL'].includes(activeView)) fetchEmployees();
       if (activeView === 'ADMIN_MANAGEMENT') fetchAdmins();
       if (activeView === 'ACCESS') fetchBlockedStatus();
       if (activeView === 'ACCESS') fetchBlockedStatus();
@@ -4234,7 +4325,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
    // 4. Data Fetching for Packing/Sortir
    useEffect(() => {
-      if (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'SCAN_ALL') {
+      if (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'LEADER_PENDING_ADMIN' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'SCAN_ALL') {
          fetchPackingData(page);
       }
    }, [page, rowsPerPage, filterPackingStaff, filterPackingShift, packingSearch, filterDate, filterPackingRole, activeView, filterCancelOnly, filterPickerType]);
@@ -4267,7 +4358,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    // 5. Dynamic Staff List Logic (Data Driven + Shift Filter)
    // FIXED: Loop fetch to get ALL distinct staff names for the day to ensure dropdown is complete.
    useEffect(() => {
-      if (activeView !== 'PACKING_DATA' && activeView !== 'PACKING_2_DATA' && activeView !== 'SORTIR_DATA' && (activeView !== 'PICKER_DATA' && activeView !== 'CHECKER_DATA') && activeView !== 'LEADER_2_DATA' && activeView !== 'GUDANG_PENDING' && activeView !== 'GUDANG_READY' && activeView !== 'GUDANG_CANCEL' && activeView !== 'GUDANG_REPORT' && activeView !== 'SCAN_ALL') return;
+      if (activeView !== 'PACKING_DATA' && activeView !== 'PACKING_2_DATA' && activeView !== 'SORTIR_DATA' && (activeView !== 'PICKER_DATA' && activeView !== 'CHECKER_DATA') && activeView !== 'LEADER_2_DATA' && activeView !== 'LEADER_PENDING_ADMIN' && activeView !== 'GUDANG_PENDING' && activeView !== 'GUDANG_READY' && activeView !== 'GUDANG_CANCEL' && activeView !== 'GUDANG_REPORT' && activeView !== 'SCAN_ALL') return;
 
       let isMounted = true;
 
@@ -4761,7 +4852,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       let effectiveTable = 'scanned_items';
       let isLeader2 = targetView === 'LEADER_2_DATA';
+      let isLeaderPending = targetView === 'LEADER_PENDING_ADMIN';
       if (isLeader2) effectiveTable = 'leader_scan_2';
+      else if (isLeaderPending) effectiveTable = 'leader_pending_scans';
 
       let query = activeClient.from(effectiveTable).select('*', countType ? { count: countType } : undefined);
 
@@ -4777,6 +4870,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       else if (targetView === 'LOGISTIK_DATA') effectiveRole = 'LOGISTIK';
       else if (targetView === 'CHECKER_DATA') effectiveRole = 'CHECKER';
       else if (targetView === 'LEADER_2_DATA') effectiveRole = 'LEADER_2';
+      else if (targetView === 'LEADER_PENDING_ADMIN') effectiveRole = 'LEADER_PENDING';
 
       // If exporting specific type, we force role
       if (options?.overrideView) {
@@ -4787,13 +4881,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          if (targetView === 'PACKING_DATA') effectiveRole = 'PACKING';
       }
 
-      if (effectiveRole !== 'ALL' && !isLeader2) query = query.eq('role', effectiveRole);
+      if (effectiveRole !== 'ALL' && !isLeader2 && !isLeaderPending) query = query.eq('role', effectiveRole);
 
       // Keep existing UI filters only if NOT exporting (or if we want exports to respect UI filters? User Request implies "All in one... rentang tanggal... di masing2 menu". 
       // It implies exporting ALL data for that range. So we should probably Ignore UI search/staff filters for the bulk export, OR make it optional. 
       // Standard practice: Bulk export usually exports ALL matches for date range.
       if (packingSearch) {
-         if (isLeader2) query = query.or(`barcode.ilike.%${packingSearch}%,leader_name.ilike.%${packingSearch}%`);
+         if (isLeaderPending) query = query.or(`barcode.ilike.%${packingSearch}%,leader_name.ilike.%${packingSearch}%,leader_profile.ilike.%${packingSearch}%`);
+         else if (isLeader2) query = query.or(`barcode.ilike.%${packingSearch}%,leader_name.ilike.%${packingSearch}%`);
          else query = query.or(`barcode.ilike.%${packingSearch}%,employee_name.ilike.%${packingSearch}%`);
       }
       if (options?.leaderBarcodes) {
@@ -4801,7 +4896,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
 
       if (filterPackingStaff !== 'ALL') {
-         if (isLeader2) query = query.eq('leader_name', filterPackingStaff);
+         if (isLeaderPending) query = query.or(`leader_name.eq.${filterPackingStaff},leader_profile.eq.${filterPackingStaff}`);
+         else if (isLeader2) query = query.eq('leader_name', filterPackingStaff);
          else if (targetView !== 'PICKER_DATA') query = query.eq('employee_name', filterPackingStaff);
       }
 
@@ -4892,6 +4988,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if ((activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') && !hasPermission('view_picker')) return;
       if (activeView === 'LOGISTIK_DATA' && !hasPermission('view_logistik')) return;
       if (activeView === 'LEADER_2_DATA' && !hasPermission('view_leader_2')) return;
+      if (activeView === 'LEADER_PENDING_ADMIN' && !hasPermission('view_leader_2')) return;
       if (activeView === 'SCAN_ALL' && !hasPermission('view_scan_all')) return;
 
       setIsLoadingPacking(true);
@@ -4967,6 +5064,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   shift: shiftMap.get(item.leader_name) || 'Unknown'
                };
             }
+            if (activeView === 'LEADER_PENDING_ADMIN') {
+               const staffName = item.leader_name || item.leader_profile || item.employee_name || 'LEADER';
+               return {
+                  ...item,
+                  barcode: rawBarcode,
+                  employee_name: staffName,
+                  leader_name: item.leader_name || staffName,
+                  leader_profile: item.leader_profile || staffName,
+                  role: 'LEADER_PENDING',
+                  status: item.status || 'PENDING',
+                  description: item.description || `[PENDING LEADER] ${item.leader_profile || ''}`,
+                  destination: item.leader_profile || '',
+                  shift: shiftMap.get(staffName) || '-'
+               };
+            }
             return {
                ...item,
                barcode: rawBarcode,
@@ -5033,6 +5145,62 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                }
             } catch (fsErr) {
                console.error("Error fetching fallback packing data from Firestore:", fsErr);
+            }
+         }
+
+         // FALLBACK / SINKRONISASI FIRESTORE KHUSUS MENU LEADER_PENDING_ADMIN
+         if (activeView === 'LEADER_PENDING_ADMIN') {
+            try {
+               const targetDateStr = canManageDate ? filterDate : getTodayString();
+               const startMs = new Date(`${targetDateStr}T00:00:00`).getTime();
+               const endMs = new Date(`${targetDateStr}T23:59:59.999`).getTime();
+
+               const activeFsQuery = fsQuery(
+                  collection(db, 'leader_pending_scans'),
+                  where('timestamp', '>=', startMs),
+                  where('timestamp', '<=', endMs)
+               );
+
+               const fsSnap = await getDocs(activeFsQuery);
+               let fsItems: any[] = [];
+               fsSnap.docs.forEach(docSnap => {
+                  const d = docSnap.data() as Record<string, any>;
+                  fsItems.push({
+                     id: docSnap.id,
+                     ...d,
+                     barcode: (d.barcode || '').toString().trim(),
+                     employee_name: d.leader_name || d.leader_profile || 'LEADER',
+                     shift: shiftMap.get(d.leader_name) || 'Unknown',
+                     role: 'LEADER_PENDING',
+                     is_from_firestore: true
+                  });
+               });
+
+               if ((count || 0) === 0 && fsItems.length > 0) {
+                  if (filterPackingStaff && filterPackingStaff !== 'ALL') {
+                     fsItems = fsItems.filter(item => item.leader_name === filterPackingStaff || item.leader_profile === filterPackingStaff || item.employee_name === filterPackingStaff);
+                  }
+                  if (packingSearch) {
+                     const term = packingSearch.toLowerCase();
+                     fsItems = fsItems.filter(item =>
+                        (item.barcode && item.barcode.toLowerCase().includes(term)) ||
+                        (item.leader_name && item.leader_name.toLowerCase().includes(term)) ||
+                        (item.leader_profile && item.leader_profile.toLowerCase().includes(term))
+                     );
+                  }
+
+                  fsItems.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+                  const totalFsCount = fsItems.length;
+                  const pageItems = fsItems.slice(from, to + 1);
+
+                  setPackingData(pageItems);
+                  setTotalRows(totalFsCount);
+                  setIsLoadingPacking(false);
+                  return;
+               }
+            } catch (fsErr) {
+               console.error("Error fetching fallback leader pending data from Firestore:", fsErr);
             }
          }
 
@@ -9937,14 +10105,22 @@ if (filterPackingShift !== 'ALL') {
                      <SidebarItem hiddenMenus={hiddenMenus} view="PICKER_DATA" icon={ScanLine} label="Data Picker" requiredPerm="view_picker" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                        <SidebarItem hiddenMenus={hiddenMenus} view="LOGISTIK_DATA" icon={Truck} label="Data Logistik" requiredPerm="view_logistik" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="CHECKER_DATA" icon={CheckSquare} label="Data Checker" requiredPerm="view_checker" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
-                     <SidebarItem hiddenMenus={hiddenMenus} view="LEADER_2_DATA" icon={Users} label="Rekap Leader" requiredPerm="view_leader_2" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="OJOL_DATA" icon={Bike} label="Data Ojol" requiredPerm="view_ojol" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      {/* Pindah Data - Dedicated Permission */}
                      <SidebarItem hiddenMenus={hiddenMenus} view="SCAN_ALL" icon={FileDown} label="Pindah Data" requiredPerm="view_scan_all" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                   </SidebarSection>
                )}
 
-               {/* TOOLS ADMIN */}
+               
+                {/* DATA LEADER */}
+                {hasPermission('view_leader_2') && (
+                   <SidebarSection title="Data Leader">
+                      <SidebarItem hiddenMenus={hiddenMenus} view="LEADER_2_DATA" icon={Users} label="Rekap Leader" requiredPerm="view_leader_2" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
+                      <SidebarItem hiddenMenus={hiddenMenus} view="LEADER_PENDING_ADMIN" icon={Clock} label="Pending Leader (LT3)" requiredPerm="view_leader_2" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
+                   </SidebarSection>
+                )}
+
+                {/* TOOLS ADMIN */}
                {(hasPermission('manage_batches') || hasPermission('view_dashboard') || hasPermission('manage_cancel_data') || hasPermission('manage_database')) && (
                   <SidebarSection title="Tools Admin">
                      <SidebarItem hiddenMenus={currentAdmin?.username !== 'Tamu' ? ['BATCH_DATA_2', ...(hiddenMenus || [])] : hiddenMenus} view="BATCH_DATA_2" icon={Database} label="Progress Order" requiredPerm="manage_batches" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
@@ -10236,11 +10412,11 @@ if (filterPackingShift !== 'ALL') {
                      )}
 
                      {/* TOOLBAR 1: Packing, Sortir, Scan All, Ojol, Failed Scans, Gudang, Logistik */}
-                     {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING' || activeView === 'SCAN_ALL' || activeView === 'OJOL_DATA' || activeView === 'FAILED_SCANS') && (
+                     {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'LEADER_PENDING_ADMIN' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING' || activeView === 'SCAN_ALL' || activeView === 'OJOL_DATA' || activeView === 'FAILED_SCANS') && (
                         <div className="p-3 sm:p-4 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200/80 dark:border-gray-800 shrink-0 w-full max-w-[100vw] shadow-2xs">
 
                            {/* REFACTORED TOOLBAR FOR PACKING, SORTIR, PICKER, OJOL, SCAN_ALL, GUDANG, LOGISTIK (UNIFIED GRID) */}
-                           {(['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA', 'SCAN_ALL', 'GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_REPORT', 'GUDANG_BUNDLING', 'LOGISTIK_DATA'].includes(activeView)) ? (
+                           {(['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'LEADER_PENDING_ADMIN', 'OJOL_DATA', 'SCAN_ALL', 'GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_REPORT', 'GUDANG_BUNDLING', 'LOGISTIK_DATA'].includes(activeView)) ? (
                               <div className="flex flex-col gap-2.5 w-full">
                                  {/* ROW 1: Date, Cancel, Search, Role, Shift */}
                                  <div className="grid grid-cols-12 gap-2.5 items-center">
@@ -10288,7 +10464,7 @@ if (filterPackingShift !== 'ALL') {
                                     </div>
 
                                     {/* Cancel Filter (2 cols) - PACKING, SORTIR, PICKER, CHECKER, OJOL, LOGISTIK */}
-                                    {['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA', 'LOGISTIK_DATA'].includes(activeView) && (
+                                    {['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'LEADER_PENDING_ADMIN', 'OJOL_DATA', 'LOGISTIK_DATA'].includes(activeView) && (
                                        <div className="col-span-12 sm:col-span-6 md:col-span-3 lg:col-span-2 h-10">
                                           <div
                                              className={`flex items-center gap-2.5 h-full px-3 rounded-xl border shadow-2xs cursor-pointer select-none transition-all w-full ${filterCancelOnly ? 'bg-red-50/90 border-red-200/90 text-red-700 dark:bg-red-950/40 dark:border-red-800/80 dark:text-red-300' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700/80 hover:bg-gray-50 dark:hover:bg-gray-750 text-gray-600 dark:text-gray-300'}`}
@@ -10327,13 +10503,13 @@ if (filterPackingShift !== 'ALL') {
                                        <SearchInput
                                           value={activeView === 'OJOL_DATA' ? ojolSearch : packingSearch}
                                           onChange={activeView === 'OJOL_DATA' ? setOjolSearch : setPackingSearch}
-                                          placeholder={`Search ${activeView === 'OJOL_DATA' ? 'Ojol' : (activeView === 'SORTIR_DATA' ? 'Sortir' : (activeView === 'LOGISTIK_DATA' ? 'Logistik' : (activeView === 'GUDANG_PENDING' ? 'Pending Scans' : (activeView === 'GUDANG_READY' ? 'Resi Ready' : (activeView === 'GUDANG_REPORT' ? 'Gudang Report' : (activeView === 'GUDANG_BUNDLING' ? 'Bundling' : (activeView === 'SCAN_ALL' ? 'All Data' : ((activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') ? 'Picker' : (activeView === 'LEADER_2_DATA' ? 'Rekap Detail Leader' : 'Packing')))))))))}...`}
+                                          placeholder={`Search ${activeView === 'OJOL_DATA' ? 'Ojol' : (activeView === 'SORTIR_DATA' ? 'Sortir' : (activeView === 'LOGISTIK_DATA' ? 'Logistik' : (activeView === 'GUDANG_PENDING' ? 'Pending Scans' : (activeView === 'GUDANG_READY' ? 'Resi Ready' : (activeView === 'GUDANG_REPORT' ? 'Gudang Report' : (activeView === 'GUDANG_BUNDLING' ? 'Bundling' : (activeView === 'SCAN_ALL' ? 'All Data' : ((activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') ? 'Picker' : (activeView === 'LEADER_2_DATA' ? 'Rekap Detail Leader' : (activeView === 'LEADER_PENDING_ADMIN' ? 'Pending Leader' : 'Packing'))))))))))}...`}
                                           className="w-full h-full"
                                        />
                                     </div>
 
                                     {/* Shift Filter (2 cols) - PACKING, SORTIR, PICKER, OJOL, LOGISTIK (NOT SCAN_ALL HERE) */}
-                                    {['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA', 'LOGISTIK_DATA'].includes(activeView) && (
+                                    {['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'LEADER_PENDING_ADMIN', 'OJOL_DATA', 'LOGISTIK_DATA'].includes(activeView) && (
                                        <div className="col-span-12 sm:col-span-6 md:col-span-3 lg:col-span-2 relative h-10">
                                           <Filter size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                                           <select
@@ -10374,7 +10550,7 @@ if (filterPackingShift !== 'ALL') {
                                     )}
 
                                     {/* Staff Filter (2 or 3 cols) - PACKING, SORTIR, PICKER, CHECKER, OJOL, SCAN_ALL, GUDANG_REPORT, LOGISTIK */}
-                                    {['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'OJOL_DATA', 'SCAN_ALL', 'GUDANG_REPORT', 'LOGISTIK_DATA'].includes(activeView) && (
+                                    {['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'LEADER_PENDING_ADMIN', 'OJOL_DATA', 'SCAN_ALL', 'GUDANG_REPORT', 'LOGISTIK_DATA'].includes(activeView) && (
                                        <div className={`col-span-6 sm:col-span-4 md:col-span-3 ${activeView === 'SCAN_ALL' ? 'lg:col-span-3' : 'lg:col-span-2'} relative h-10`}>
                                           <Users size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                                           <select
@@ -10418,7 +10594,7 @@ if (filterPackingShift !== 'ALL') {
                                     )}
 
                                     {/* Copy Options / Salin Barcode */}
-                                    {['PACKING_DATA', 'PACKING_2_DATA', 'GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_BUNDLING'].includes(activeView) && currentAdmin?.username !== 'logistik' && (
+                                    {['PACKING_DATA', 'PACKING_2_DATA', 'LEADER_PENDING_ADMIN', 'GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_BUNDLING'].includes(activeView) && currentAdmin?.username !== 'logistik' && (
                                        <div className={`col-span-6 sm:col-span-4 md:col-span-3 ${activeView.startsWith('GUDANG_') ? 'lg:col-span-3' : 'lg:col-span-2'} h-10 w-full`}>
                                           <button
                                              onClick={() => handleCopyAllBarcodes(false, ['GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_REPORT', 'GUDANG_BUNDLING'].includes(activeView))}
@@ -10855,7 +11031,7 @@ if (filterPackingShift !== 'ALL') {
                                        )}
 
                                        {/* Buttons for Packing and Gudang */}
-                                       {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING') && currentAdmin?.username !== 'logistik' && (
+                                       {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'LEADER_PENDING_ADMIN' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING') && currentAdmin?.username !== 'logistik' && (
                                           <>
                                              {/* Check Invoice - PACKING ONLY */}
                                              {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') && (
@@ -10921,7 +11097,7 @@ if (filterPackingShift !== 'ALL') {
                      )}
 
                      {/* TOOLBAR 2: Other Views (Employees, Access, Failed Scans, etc) */}
-                     {(activeView !== 'PACKING_DATA' && activeView !== 'PACKING_2_DATA' && activeView !== 'SORTIR_DATA' && (activeView !== 'PICKER_DATA' && activeView !== 'CHECKER_DATA') && activeView !== 'LEADER_2_DATA' && activeView !== 'SCAN_ALL' && activeView !== 'SYMBOLS' && activeView !== 'OJOL_DATA' && activeView !== 'GUDANG_PENDING' && activeView !== 'GUDANG_REPORT' && activeView !== 'GUDANG_BUNDLING') && (
+                     {(activeView !== 'PACKING_DATA' && activeView !== 'PACKING_2_DATA' && activeView !== 'SORTIR_DATA' && (activeView !== 'PICKER_DATA' && activeView !== 'CHECKER_DATA') && activeView !== 'LEADER_2_DATA' && activeView !== 'LEADER_PENDING_ADMIN' && activeView !== 'SCAN_ALL' && activeView !== 'SYMBOLS' && activeView !== 'OJOL_DATA' && activeView !== 'GUDANG_PENDING' && activeView !== 'GUDANG_REPORT' && activeView !== 'GUDANG_BUNDLING') && (
                         <div className="px-6 py-4 flex flex-col xl:flex-row gap-4 justify-between items-start xl:items-center">
                             {activeView === 'EMPLOYEES' ? (
                                <div className="flex flex-wrap gap-2.5 items-center w-full xl:w-auto">
@@ -12089,6 +12265,7 @@ if (filterPackingShift !== 'ALL') {
                                     { id: 'PICKER_DATA', label: 'Data Picker', icon: ScanLine, color: 'cyan' },
                                     { id: 'CHECKER_DATA', label: 'Data Checker', icon: CheckSquare, color: 'pink' },
                                     { id: 'LEADER_2_DATA', label: 'Rekap Detail Leader', icon: Users, color: 'orange' },
+                                     { id: 'LEADER_PENDING_ADMIN', label: 'Pending Scan Leader (LT3)', icon: Clock, color: 'amber' },
                                     { id: 'OJOL_DATA', label: 'Data Ojol', icon: Bike, color: 'green' },
                                     { id: 'GUDANG_PENDING', label: 'Gudang Pending (LT3)', icon: Clipboard, color: 'orange' },
                                     { id: 'GUDANG_CANCEL', label: 'Scan Cancel (LT3)', icon: XCircle, color: 'rose' },
@@ -13210,6 +13387,7 @@ if (filterPackingShift !== 'ALL') {
                                        { view: 'LOGISTIK_DATA', label: 'Data Logistik' },
                                        { view: 'CHECKER_DATA', label: 'Data Checker' },
                                        { view: 'LEADER_2_DATA', label: 'Rekap Leader' },
+                                        { view: 'LEADER_PENDING_ADMIN', label: 'Pending Scan Leader (LT3)' },
                                        { view: 'OJOL_DATA', label: 'Data Ojol' },
                                        { view: 'SCAN_ALL', label: 'Pindah Data' },
                                        { view: 'BATCH_DATA_2', label: 'Progress Order' },
@@ -13587,7 +13765,7 @@ if (filterPackingShift !== 'ALL') {
                            </div>
                         )}
 
-                        {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING' || activeView === 'SCAN_ALL') && (
+                        {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'LEADER_PENDING_ADMIN' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING' || activeView === 'SCAN_ALL') && (
                            <div className={`w-full ${activeView === 'PACKING_2_DATA' && filterPackingStaff !== 'ALL' ? 'flex flex-col lg:flex-row items-start min-h-full' : 'h-full flex flex-col overflow-hidden'} bg-white dark:bg-gray-800`}>
                               {/* Left / Main Table Area */}
                               <div className={`w-full ${activeView === 'PACKING_2_DATA' && filterPackingStaff !== 'ALL' ? 'lg:flex-1 min-w-0 flex flex-col' : 'flex-1 min-w-0 flex flex-col h-full overflow-hidden'}`}>
@@ -13931,20 +14109,24 @@ if (filterPackingShift !== 'ALL') {
                                                          <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[80px]">Qty</th>
                                                       </>
                                                    )}
-                                                   {activeView !== 'LEADER_2_DATA' && activeView !== 'GUDANG_REPORT' && (
+                                                   {activeView === 'LEADER_PENDING_ADMIN' ? (
+                                                      <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[150px]">Leader / Profil</th>
+                                                   ) : activeView !== 'LEADER_2_DATA' && activeView !== 'GUDANG_REPORT' && (
                                                       <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[150px]">Staff</th>
                                                    )}
                                                    {(activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') && (
                                                       <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[150px]">LEADER</th>
                                                    )}
 
-                                                   {activeView !== 'GUDANG_PENDING' && activeView !== 'GUDANG_READY' && activeView !== 'GUDANG_CANCEL' && activeView !== 'GUDANG_REPORT' && activeView !== 'LEADER_2_DATA' && (
+                                                   {activeView !== 'GUDANG_PENDING' && activeView !== 'GUDANG_READY' && activeView !== 'GUDANG_CANCEL' && activeView !== 'GUDANG_REPORT' && activeView !== 'LEADER_2_DATA' && activeView !== 'LEADER_PENDING_ADMIN' && (
                                                       <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[120px]">Shift</th>
                                                    )}
                                                    {(activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL') && (
                                                       <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[150px]">Context</th>
                                                    )}
-                                                   {activeView === 'LEADER_2_DATA' ? (
+                                                   {activeView === 'LEADER_PENDING_ADMIN' ? (
+                                                      <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">Status</th>
+                                                   ) : activeView === 'LEADER_2_DATA' ? (
                                                       <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">Type</th>
                                                    ) : activeView !== 'GUDANG_REPORT' ? (
                                                       <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">Role</th>
@@ -13952,7 +14134,7 @@ if (filterPackingShift !== 'ALL') {
                                                    {activeView === 'LEADER_2_DATA' && (
                                                       <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[160px]">STAFF</th>
                                                    )}
-                                                   {!['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'OJOL_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'GUDANG_REPORT'].includes(activeView) && (
+                                                   {!['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'OJOL_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'LEADER_PENDING_ADMIN', 'GUDANG_REPORT'].includes(activeView) && (
                                                       <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">Status</th>
                                                    )}
                                                 </tr>
@@ -13993,7 +14175,21 @@ if (filterPackingShift !== 'ALL') {
                                                                <td className="px-4 py-3.5 text-xs font-mono text-gray-600 dark:text-gray-300">{item.report_qty || 1}</td>
                                                             </>
                                                          )}
-                                                         {activeView !== 'LEADER_2_DATA' && activeView !== 'GUDANG_REPORT' && (
+                                                         {activeView === 'LEADER_PENDING_ADMIN' ? (
+                                                            <td className="px-4 py-3.5 text-xs sm:text-sm font-semibold text-gray-800 dark:text-gray-200">
+                                                               <div className="flex items-center gap-2.5">
+                                                                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                                                                     {(item.leader_name || item.leader_profile || item.employee_name || 'L').charAt(0).toUpperCase()}
+                                                                  </div>
+                                                                  <div>
+                                                                     <span className="font-bold text-gray-900 dark:text-gray-100">{item.leader_name || item.leader_profile || item.employee_name || 'Leader'}</span>
+                                                                     {item.leader_profile && item.leader_profile !== item.leader_name && (
+                                                                        <div className="text-[10px] text-gray-400 font-normal">Profil: {item.leader_profile}</div>
+                                                                     )}
+                                                                  </div>
+                                                               </div>
+                                                            </td>
+                                                         ) : activeView !== 'LEADER_2_DATA' && activeView !== 'GUDANG_REPORT' && (
                                                             <td className="px-4 py-3.5 text-xs sm:text-sm font-semibold text-gray-800 dark:text-gray-200">
                                                                <div className="flex items-center gap-2.5">
                                                                   <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
@@ -14006,7 +14202,7 @@ if (filterPackingShift !== 'ALL') {
                                                          {(activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') && (
                                                             <td className="px-4 py-3.5 text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300">{item.leader_profile || '-'}</td>
                                                          )}
-                                                         {activeView !== 'GUDANG_PENDING' && activeView !== 'GUDANG_READY' && activeView !== 'GUDANG_CANCEL' && activeView !== 'GUDANG_REPORT' && activeView !== 'LEADER_2_DATA' && (
+                                                         {activeView !== 'GUDANG_PENDING' && activeView !== 'GUDANG_READY' && activeView !== 'GUDANG_CANCEL' && activeView !== 'GUDANG_REPORT' && activeView !== 'LEADER_2_DATA' && activeView !== 'LEADER_PENDING_ADMIN' && (
                                                             <td className="px-4 py-3.5">
                                                                {item.shift ? (
                                                                   <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide border ${item.shift.includes('Suhel') ? 'bg-indigo-50 text-indigo-700 border-indigo-200/80 dark:bg-indigo-950/50 dark:text-indigo-300 dark:border-indigo-800' : 'bg-purple-50 text-purple-700 border-purple-200/80 dark:bg-purple-950/50 dark:text-purple-300 dark:border-purple-800'}`}>
@@ -14018,7 +14214,13 @@ if (filterPackingShift !== 'ALL') {
                                                          {(activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_BUNDLING') && (
                                                             <td className="px-4 py-3.5 text-xs font-mono text-gray-500 dark:text-gray-400">{item.menu_context || '-'}</td>
                                                          )}
-                                                         {activeView === 'LEADER_2_DATA' ? (
+                                                         {activeView === 'LEADER_PENDING_ADMIN' ? (
+                                                            <td className="px-4 py-3.5 text-center">
+                                                               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-950/50 dark:text-amber-400 dark:border-amber-800">
+                                                                  PENDING LEADER
+                                                               </span>
+                                                            </td>
+                                                         ) : activeView === 'LEADER_2_DATA' ? (
                                                             <td className="px-4 py-3.5 text-center">
                                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase border ${item.scan_type === 'SATUAN' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : item.scan_type === 'PRETELAN' ? 'bg-pink-100 text-pink-700 border-pink-200' : 'bg-gray-100 text-gray-700'}`}>
                                                                   {item.scan_type || 'UNKNOWN'}
@@ -14041,7 +14243,7 @@ if (filterPackingShift !== 'ALL') {
                                                                }
                                                             </td>
                                                          )}
-                                                         {!['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'OJOL_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'GUDANG_REPORT'].includes(activeView) && (
+                                                         {!['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'OJOL_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'LEADER_PENDING_ADMIN', 'GUDANG_REPORT'].includes(activeView) && (
                                                             <td className="px-4 py-3.5 text-center">
                                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400 border border-emerald-200/80 dark:border-emerald-800">
                                                                   COMPLETED
@@ -20432,7 +20634,16 @@ LXAD-1234567890`}
 
                         setIsDeletingGudang(true);
                         try {
-                           const { error } = await supabase.from('scanned_items').delete().in('id', selectedScanIds);
+                           const targetTable = activeView === 'LEADER_2_DATA' ? 'leader_scan_2' : (activeView === 'LEADER_PENDING_ADMIN' ? 'leader_pending_scans' : 'scanned_items');
+                            const { error } = await supabase.from(targetTable).delete().in('id', selectedScanIds);
+                            if (activeView === 'LEADER_PENDING_ADMIN') {
+                               try { await supabaseNew.from('leader_pending_scans').delete().in('id', selectedScanIds); } catch(e) {}
+                               try {
+                                  const { doc: fsDoc, deleteDoc: fsDelDoc } = await import('firebase/firestore');
+                                  const { db: fsDb } = await import('../services/firebaseClient');
+                                  selectedScanIds.forEach(sId => fsDelDoc(fsDoc(fsDb, 'leader_pending_scans', sId)).catch(() => {}));
+                               } catch(e) {}
+                            }
                            if (error) throw error;
 
                            setSuccessToast(`Berhasil menghapus ${selectedScanIds.length} data Logistik.`);
