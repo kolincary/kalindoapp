@@ -4638,11 +4638,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
                      {currentView === 'SPECIAL_SCAN' && 'Special Scan'}
                   </h1>
                   <p className="text-white/80 text-sm font-medium">{theme.title}</p>
-                  <div className="flex items-center gap-2 text-white opacity-90 mt-1">
-                     <User size={14} className="text-white" />
-                     <span className="text-sm font-medium text-white">{employeeName}</span>
+                  <div className="flex items-center gap-2 text-white opacity-90 mt-1 flex-wrap">
+                     <div className="flex items-center gap-1.5">
+                        <User size={14} className="text-white" />
+                        <span className="text-sm font-medium text-white">{employeeName}</span>
+                     </div>
+                     {userEmail && (
+                        <span className="text-[11px] font-mono font-medium bg-black/25 text-white/90 px-2 py-0.5 rounded-full border border-white/10" title="Akun Email Login">
+                           {userEmail}
+                        </span>
+                     )}
                      {isLeader && selectedLeaderProfile && (
-                        <span className="ml-2 text-[10px] font-black bg-white/20 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                        <span className="text-[10px] font-black bg-white/20 px-2 py-0.5 rounded-full uppercase tracking-wider">
                            Profil: {selectedLeaderProfile}
                         </span>
                      )}

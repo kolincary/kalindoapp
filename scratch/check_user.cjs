@@ -9,7 +9,10 @@ const env = fs.readFileSync(envPath, 'utf8').split('\n').reduce((acc, line) => {
 
 import('@supabase/supabase-js').then(async ({ createClient }) => {
   const supabase = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY);
-  const { data, error } = await supabase.from('app_users').select('*').ilike('email', '%jgilbeth%');
-  console.log('Result:', JSON.stringify(data, null, 2));
-  if (error) console.error(error);
+  const { data, error } = await supabase.from('app_users').select('email, allow_manual_input, is_blocked, pin');
+  console.log('Total users in app_users:', data ? data.length : 0);
+  const allowed = data ? data.filter(u => u.allow_manual_input === true) : [];
+  console.log('Users with allow_manual_input === true:', allowed);
+  const jgilbeth = data ? data.filter(u => u.email.toLowerCase().includes('jgilbeth') || u.email.toLowerCase().includes('developer')) : [];
+  console.log('jgilbeth / developer users:', jgilbeth);
 });
