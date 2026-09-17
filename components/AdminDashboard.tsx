@@ -10191,7 +10191,7 @@ if (filterPackingShift !== 'ALL') {
                {/* 2. DATA LOGISTIK */}
                {(hasPermission('view_packing') || hasPermission('view_packing_2') || hasPermission('view_sortir') || hasPermission('view_picker') || hasPermission('view_checker') || hasPermission('view_ojol') || hasPermission('view_scan_all') || hasPermission('view_logistik')) && (
                   <SidebarSection title="Data Logistik">
-                     <SidebarItem hiddenMenus={hiddenMenus} view="PACKING_DATA" icon={Package} label="Data Packing Copy" requiredPerm="view_packing" activeView={activeView === 'CHECK_INVOICE' ? 'PACKING_DATA' : activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
+                     <SidebarItem hiddenMenus={hiddenMenus} view="PACKING_DATA" icon={Package} label="Data Packing Copy" requiredPerm="view_packing" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="PACKING_2_DATA" icon={Package} label="Data Packing" requiredPerm="view_packing_2" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="SORTIR_DATA" icon={Shuffle} label="Data Sortir" requiredPerm="view_sortir" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="PICKER_DATA" icon={ScanLine} label="Data Picker" requiredPerm="view_picker" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
@@ -10213,12 +10213,13 @@ if (filterPackingShift !== 'ALL') {
                 )}
 
                 {/* TOOLS ADMIN */}
-               {(hasPermission('manage_batches') || hasPermission('view_dashboard') || hasPermission('manage_cancel_data') || hasPermission('manage_database')) && (
+               {(hasPermission('manage_batches') || hasPermission('view_dashboard') || hasPermission('manage_cancel_data') || hasPermission('manage_database') || hasPermission('view_check_invoice')) && (
                   <SidebarSection title="Tools Admin">
                      <SidebarItem hiddenMenus={currentAdmin?.username !== 'Tamu' ? ['BATCH_DATA_2', ...(hiddenMenus || [])] : hiddenMenus} view="BATCH_DATA_2" icon={Database} label="Progress Order" requiredPerm="manage_batches" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={currentAdmin?.username === 'Tamu' ? ['BATCH_DATA_3', ...(hiddenMenus || [])] : hiddenMenus} view="BATCH_DATA_3" icon={Database} label="Batch management" requiredPerm="manage_batches" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="CANCEL_DATA" icon={AlertTriangle} label="Data Cancel" requiredPerm="manage_cancel_data" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="TRACK_RESI" icon={ShieldCheck} label="Tracking Resi" requiredPerm="view_dashboard" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
+                     <SidebarItem hiddenMenus={hiddenMenus} view="CHECK_INVOICE" icon={FileText} label="Cek Invoice" requiredPerm="view_check_invoice" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="ADMIN_BATCH_IMPORTS" icon={Database} label="Batch Imports Manager" requiredPerm="" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      {(() => {
                         const isDevModeNew = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
@@ -10265,12 +10266,10 @@ if (filterPackingShift !== 'ALL') {
                )}
 
                {/* 5. VALIDASI & SYSTEM */}
-               {(hasPermission('view_failed_scans') || hasPermission('manage_symbols') || hasPermission('view_check_invoice') || hasPermission('view_compare_logistik') || hasPermission('view_compare_packing') || hasPermission('view_dashboard') || (showFakeReportMenu && hasPermission('view_fake_report'))) && (
+               {(hasPermission('view_failed_scans') || hasPermission('manage_symbols') || hasPermission('view_compare_logistik') || hasPermission('view_compare_packing') || hasPermission('view_dashboard') || (showFakeReportMenu && hasPermission('view_fake_report'))) && (
                   <SidebarSection title="Validasi & System">
                      <SidebarItem hiddenMenus={hiddenMenus} view="FAILED_SCANS" icon={AlertTriangle} label="Scans Gagal" requiredPerm="view_failed_scans" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="SYMBOLS" icon={Ban} label="Simbol Terlarang" requiredPerm="manage_symbols" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
-                     {/* New Check Invoice Menu */}
-                     <SidebarItem hiddenMenus={hiddenMenus} view="CHECK_INVOICE" icon={FileText} label="Cek Invoice" requiredPerm="view_check_invoice" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="COMPARE_LOGISTIK" icon={GitCompare} label="Compare Logistik" requiredPerm="view_compare_logistik" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="COMPARE_PACKING_PICKER" icon={ShieldAlert} label="Cek Resi Gaib" requiredPerm="view_compare_packing" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="EXPORT_DATA" icon={FileSpreadsheet} label="Export Data" requiredPerm="view_dashboard" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
