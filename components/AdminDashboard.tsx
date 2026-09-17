@@ -1647,6 +1647,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [localManualInput, setLocalManualInput] = useState<UserManualInputAccess>(manualInputAccess);
    const [blockedUsers, setBlockedUsers] = useState<Record<string, boolean>>({});
 
+   // Sync state when props change
+   useEffect(() => {
+      if (manualInputAccess && Object.keys(manualInputAccess).length > 0) {
+         setLocalManualInput(prev => ({ ...prev, ...manualInputAccess }));
+      }
+   }, [manualInputAccess]);
+
+   useEffect(() => {
+      if (permissions && Object.keys(permissions).length > 0) {
+         setLocalPermissions(prev => ({ ...prev, ...permissions }));
+      }
+   }, [permissions]);
+
    // 3. Independent Search & Filter States
    const [employeeSearch, setEmployeeSearch] = useState('');
    const [accessSearch, setAccessSearch] = useState('');
@@ -3709,15 +3722,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
    const fetchBlockedStatus = async () => {
       try {
-         const { data, error } = await supabase.from('app_users').select('email, is_blocked');
+         const { data, error } = await supabase.from('app_users').select('email, is_blocked, allow_manual_input, roles, pin');
          if (error) throw error;
          const blockedMap: Record<string, boolean> = {};
+         const manualMap: Record<string, boolean> = {};
+         const permsMap: Record<string, (UserRole | string)[]> = {};
          data?.forEach((u: any) => {
-            if (u.email) blockedMap[u.email] = u.is_blocked || false;
+            if (u.email) {
+               const rawEmail = u.email;
+               const lowerEmail = rawEmail.toLowerCase().trim();
+               const isBlocked = u.is_blocked === true;
+               const allowManual = u.allow_manual_input === true;
+               blockedMap[rawEmail] = isBlocked;
+               blockedMap[lowerEmail] = isBlocked;
+               manualMap[rawEmail] = allowManual;
+               manualMap[lowerEmail] = allowManual;
+               if (u.roles) {
+                  permsMap[rawEmail] = u.roles;
+                  permsMap[lowerEmail] = u.roles;
+               }
+            }
          });
          setBlockedUsers(blockedMap);
+         setLocalManualInput(prev => ({ ...prev, ...manualMap }));
+         if (Object.keys(permsMap).length > 0) {
+            setLocalPermissions(prev => ({ ...prev, ...permsMap }));
+         }
       } catch (err: any) {
-         console.error("Error fetching blocked status:", err);
+         console.error("Error fetching access data:", err);
       }
    };
 
@@ -9334,14 +9366,18 @@ if (filterPackingShift !== 'ALL') {
    const triggerSelectAllAccess = () => selectedAccessEmails.length !== filteredUsers.length ? setSelectedAccessEmails(filteredUsers) : setSelectedAccessEmails([]);
    const handleSelectAccessRow = useCallback((email: string, checked: boolean) => checked ? setSelectedAccessEmails(prev => [...prev, email]) : setSelectedAccessEmails(prev => prev.filter(e => e !== email)), []);
    const toggleRole = useCallback((email: string, role: string) => { setSaved(false); setLocalPermissions(prev => ({ ...prev, [email]: prev[email]?.includes(role as UserRole) ? prev[email].filter(r => r !== role) : [...(prev[email] || []), role as UserRole] })); }, []);
-   const handleSave = () => { onSave(localPermissions, pins); setSaved(true); setTimeout(() => setSaved(false), 2000); };
+   const handleSave = () => { onSave(localPermissions, pins, localManualInput); setSaved(true); setTimeout(() => setSaved(false), 2000); };
 
    const toggleManualInput = async (email: string) => {
-      const current = localManualInput[email] || false;
+      const lower = email.toLowerCase().trim();
+      const current = localManualInput[lower] ?? localManualInput[email] ?? false;
       const newVal = !current;
-      setLocalManualInput(prev => ({ ...prev, [email]: newVal }));
-      const { error } = await supabase.from('app_users').update({ allow_manual_input: newVal }).eq('email', email);
-      if (error) { console.error(error); setLocalManualInput(prev => ({ ...prev, [email]: current })); }
+      setLocalManualInput(prev => ({ ...prev, [email]: newVal, [lower]: newVal }));
+      const { error } = await supabase.from('app_users').update({ allow_manual_input: newVal }).ilike('email', lower);
+      if (error) { 
+         console.error("Toggle manual input error:", error); 
+         setLocalManualInput(prev => ({ ...prev, [email]: current, [lower]: current })); 
+      }
    };
 
    const handleBlockUser = async (email: string) => {
@@ -11565,7 +11601,7 @@ if (filterPackingShift !== 'ALL') {
                                                             isBlocked={blockedUsers[email] || false} 
                                                             onBlock={handleBlockUser} 
                                                             onPromptDelete={(email) => setUserToDelete(email)} 
-                                                            canManualInput={localManualInput[email] || false} 
+                                                            canManualInput={localManualInput[email?.toLowerCase().trim()] ?? localManualInput[email] ?? false} 
                                                             onToggleManualInput={toggleManualInput} 
                                                             availableRoles={accessTableVisibleRoles} 
                                                          />
@@ -11596,7 +11632,7 @@ if (filterPackingShift !== 'ALL') {
                                                    isBlocked={blockedUsers[email] || false}
                                                    onBlock={handleBlockUser}
                                                    onPromptDelete={(email) => setUserToDelete(email)}
-                                                   canManualInput={localManualInput[email] || false}
+                                                   canManualInput={localManualInput[email?.toLowerCase().trim()] ?? localManualInput[email] ?? false}
                                                    onToggleManualInput={toggleManualInput}
                                                    availableRoles={accessTableVisibleRoles}
                                                 />

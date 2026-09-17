@@ -97,7 +97,7 @@ export interface AdminDashboardProps {
   permissions: UserPermissions;
   pins: UserPins;
   manualInputAccess: UserManualInputAccess; // Added prop
-  onSave: (newPermissions: UserPermissions, newPins: UserPins) => void;
+  onSave: (newPermissions: UserPermissions, newPins: UserPins, newManualAccess?: UserManualInputAccess) => void;
   onLogout: () => void;
   currentAdmin: AdminUser | null;
   isDarkMode: boolean;

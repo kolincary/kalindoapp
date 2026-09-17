@@ -148,22 +148,34 @@ const App: React.FC = () => {
 
     const fetchSupabaseData = async () => {
       try {
-        const { data, error } = await supabase.from('app_users').select('email, roles, allow_manual_input, is_blocked');
+        const { data, error } = await supabase.from('app_users').select('email, roles, allow_manual_input, is_blocked, pin');
 
         if (error) throw error;
 
         if (data && data.length > 0) {
           const newPerms: UserPermissions = { ...DEFAULT_PERMISSIONS };
           const newManualAccess: UserManualInputAccess = {};
+          const newPins: UserPins = { ...DEFAULT_PINS };
 
           data.forEach((user: any) => {
-            newPerms[user.email] = user.roles;
-            // Load manual input permission. Default false (locked) if undefined/null.
-            newManualAccess[user.email] = user.allow_manual_input === true;
+            if (!user.email) return;
+            const rawEmail = user.email;
+            const lowerEmail = rawEmail.toLowerCase().trim();
+            const roles = user.roles || [];
+            const allowManual = user.allow_manual_input === true;
+            const pin = user.pin || '123456';
+
+            newPerms[rawEmail] = roles;
+            newPerms[lowerEmail] = roles;
+            newManualAccess[rawEmail] = allowManual;
+            newManualAccess[lowerEmail] = allowManual;
+            newPins[rawEmail] = pin;
+            newPins[lowerEmail] = pin;
           });
 
           setUserPermissions(newPerms);
           setUserManualInputAccess(newManualAccess);
+          setUserPins(newPins);
         }
       } catch (err: any) {
         // Graceful error handling for missing tables or connection issues
@@ -398,31 +410,44 @@ const App: React.FC = () => {
     syncAdminPermissions();
   }, [authStep, currentAdmin?.username]);
 
-  // --- 3. REALTIME BLOCKING LISTENER ---
+  // --- 3. REALTIME BLOCKING & PERMISSION LISTENER ---
   useEffect(() => {
-    // If no user logged in, no need to listen
     if (!userEmail) return;
+
+    const lowerUserEmail = userEmail.toLowerCase().trim();
 
     // Subscribe to UPDATE events on app_users
     const subscription = supabase
-      .channel('public:app_users')
+      .channel(`public:app_users:${lowerUserEmail}`)
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'app_users', filter: `email=eq.${userEmail}` },
+        { event: 'UPDATE', schema: 'public', table: 'app_users' },
         (payload) => {
-          // Check if is_blocked changed to true
-          if (payload.new) {
-            if (payload.new.is_blocked === true) {
-              setIsUserBlocked(true);
-              localStorage.removeItem(STORAGE_KEY_USER);
-              localStorage.removeItem(STORAGE_KEY_ROLE);
-            }
-            // Realtime update for manual input access
-            if (payload.new.allow_manual_input !== undefined) {
-              setUserManualInputAccess(prev => ({
-                ...prev,
-                [userEmail]: payload.new.allow_manual_input
-              }));
+          if (payload.new && payload.new.email) {
+            const updatedEmail = (payload.new.email as string).toLowerCase().trim();
+            if (updatedEmail === lowerUserEmail) {
+              if (payload.new.is_blocked === true) {
+                setIsUserBlocked(true);
+                localStorage.removeItem(STORAGE_KEY_USER);
+                localStorage.removeItem(STORAGE_KEY_ROLE);
+              }
+              if (payload.new.allow_manual_input !== undefined) {
+                const allowManual = payload.new.allow_manual_input === true;
+                setUserManualInputAccess(prev => ({
+                  ...prev,
+                  [userEmail]: allowManual,
+                  [lowerUserEmail]: allowManual,
+                  [payload.new.email]: allowManual
+                }));
+              }
+              if (payload.new.roles !== undefined) {
+                setUserPermissions(prev => ({
+                  ...prev,
+                  [userEmail]: payload.new.roles,
+                  [lowerUserEmail]: payload.new.roles,
+                  [payload.new.email]: payload.new.roles
+                }));
+              }
             }
           }
         }
@@ -510,48 +535,77 @@ const App: React.FC = () => {
 
   // Handlers
   const handleLoginSuccess = async (email: string) => {
-    setUserEmail(email);
-    localStorage.setItem(STORAGE_KEY_USER, email);
+    const trimmedEmail = email.trim();
+    const lowerEmail = trimmedEmail.toLowerCase();
+    setUserEmail(trimmedEmail);
+    localStorage.setItem(STORAGE_KEY_USER, trimmedEmail);
 
     // --- SUPABASE REGISTRATION & BLOCK CHECK ---
     try {
-      // 1. Check if user exists
+      // 1. Check if user exists (case-insensitive)
       const { data: existingUser, error: fetchError } = await supabase
         .from('app_users')
         .select('*')
-        .eq('email', email)
-        .single();
+        .ilike('email', lowerEmail)
+        .maybeSingle();
 
-      // If user exists, CHECK IF BLOCKED
+      // If user exists, CHECK IF BLOCKED & SYNC STATE
       if (existingUser) {
         if (existingUser.is_blocked) {
           // SHOW MODAL INSTEAD OF ALERT
           setIsUserBlocked(true);
           return;
         }
+
+        // CRITICAL: Directly sync permissions, PIN, and manual input access from existingUser
+        const allowManual = existingUser.allow_manual_input === true;
+        setUserManualInputAccess(prev => ({
+          ...prev,
+          [trimmedEmail]: allowManual,
+          [lowerEmail]: allowManual,
+          [existingUser.email]: allowManual
+        }));
+
+        if (existingUser.roles) {
+          setUserPermissions(prev => ({
+            ...prev,
+            [trimmedEmail]: existingUser.roles,
+            [lowerEmail]: existingUser.roles,
+            [existingUser.email]: existingUser.roles
+          }));
+        }
+
+        if (existingUser.pin) {
+          setUserPins(prev => ({
+            ...prev,
+            [trimmedEmail]: existingUser.pin,
+            [lowerEmail]: existingUser.pin,
+            [existingUser.email]: existingUser.pin
+          }));
+        }
       }
 
       // Reset force_logout flag in user_activity so user can log in again after a force logout
       try {
-        await supabase.from('user_activity').update({ force_logout: false }).eq('user_email', email);
+        await supabase.from('user_activity').update({ force_logout: false }).ilike('user_email', lowerEmail);
       } catch (resetErr) {
         console.warn("Could not reset force_logout flag:", resetErr);
       }
 
       // 2. If not found (or error implying not found but table exists), Insert new user
       if (!existingUser && (!fetchError || fetchError.code !== '42P01')) {
-        console.log(`Registering new user to Supabase: ${email}`);
+        console.log(`Registering new user to Supabase: ${trimmedEmail}`);
 
         // Default roles for the demo user 'gudang.user', otherwise empty for safety
-        const defaultRoles = (email === 'gudang.user@gmail.com' || email === 'developer@kalindo.com')
-          ? [UserRole.PICKER, UserRole.PICKER_2, UserRole.PICKER_2, UserRole.SORTIR, UserRole.PACKING, UserRole.GUDANG, UserRole.ADMIN]
+        const defaultRoles = (lowerEmail === 'gudang.user@gmail.com' || lowerEmail === 'developer@kalindo.com')
+          ? [UserRole.PICKER, UserRole.PICKER_2, UserRole.SORTIR, UserRole.PACKING, UserRole.GUDANG, UserRole.ADMIN]
           : [];
 
         const { error: insertError } = await supabase
           .from('app_users')
           .insert([
             {
-              email: email,
+              email: trimmedEmail,
               pin: '123456',
               roles: defaultRoles,
               allow_manual_input: false // Default locked
@@ -566,9 +620,9 @@ const App: React.FC = () => {
           }
         } else {
           // Update local state to reflect new user immediately
-          setUserPermissions(prev => ({ ...prev, [email]: defaultRoles }));
-          setUserPins(prev => ({ ...prev, [email]: '123456' }));
-          setUserManualInputAccess(prev => ({ ...prev, [email]: false }));
+          setUserPermissions(prev => ({ ...prev, [trimmedEmail]: defaultRoles, [lowerEmail]: defaultRoles }));
+          setUserPins(prev => ({ ...prev, [trimmedEmail]: '123456', [lowerEmail]: '123456' }));
+          setUserManualInputAccess(prev => ({ ...prev, [trimmedEmail]: false, [lowerEmail]: false }));
         }
       }
     } catch (err) {
@@ -706,18 +760,29 @@ const App: React.FC = () => {
     setAuthStep('ADMIN_DASHBOARD');
   };
 
-  const handleAdminSave = async (newPermissions: UserPermissions, newPins: UserPins) => {
+  const handleAdminSave = async (newPermissions: UserPermissions, newPins: UserPins, newManualAccess?: UserManualInputAccess) => {
     // 1. Update Local State
     setUserPermissions(newPermissions);
     setUserPins(newPins);
+    if (newManualAccess) {
+      setUserManualInputAccess(newManualAccess);
+    }
 
     // 2. Sync to Supabase
     try {
-      const updates = Object.keys(newPermissions).map(email => ({
-        email: email,
-        roles: newPermissions[email],
-        pin: newPins[email] || '123456'
-      }));
+      const updates = Object.keys(newPermissions).map(email => {
+        const lower = email.toLowerCase().trim();
+        const allowManual = newManualAccess
+          ? (newManualAccess[lower] ?? newManualAccess[email] ?? false)
+          : (userManualInputAccess[lower] ?? userManualInputAccess[email] ?? false);
+
+        return {
+          email: email,
+          roles: newPermissions[email],
+          pin: newPins[email] || '123456',
+          allow_manual_input: allowManual
+        };
+      });
 
       // Upsert allows us to update existing rows or insert new ones if they are missing
       const { error } = await supabase
@@ -1005,14 +1070,14 @@ const App: React.FC = () => {
               role={currentRole}
               onBack={handleDashboardBack}
               userEmail={effectiveEmail}
-              userPin={userPins[effectiveEmail] || '123456'}
+              userPin={userPins[effectiveEmail] || userPins[(effectiveEmail || '').toLowerCase().trim()] || '123456'}
               employeeName={employeeName}
               dailyTarget={employeeTarget}
               isDarkMode={isDarkMode}
               toggleTheme={toggleTheme}
               scanButtonPosition={scanButtonPosition}
               setScanButtonPosition={handleSetScanPosition}
-              allowManualInput={userManualInputAccess[effectiveEmail] ?? false}
+              allowManualInput={userManualInputAccess[(effectiveEmail || '').toLowerCase().trim()] ?? userManualInputAccess[effectiveEmail] ?? false}
               profileConfig={profileConfig}
             />
           </div>
