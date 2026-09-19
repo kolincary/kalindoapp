@@ -34,7 +34,7 @@ export function SupabaseManagerView() {
   const [searchBy, setSearchBy] = useState<'barcode' | 'destination' | 'id'>('barcode');
   const [selectedRoleFilter, setSelectedRoleFilter] = useState<string>('ALL');
   const [limitCount, setLimitCount] = useState(100);
-  const [startDate, setStartDate] = useState('');
+  const [startDate, setStartDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState('');
   const [isDateRange, setIsDateRange] = useState(false);
   

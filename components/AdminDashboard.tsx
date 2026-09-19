@@ -3734,24 +3734,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          const startTs = new Date(filterDate + 'T00:00:00').getTime();
          const endTs = new Date(filterDate + 'T23:59:59').getTime();
 
-         // 1. Fetch batches lookup map using Promise.all to bypass 1000 limit and improve speed
-         const { count: totalBatches } = await supabase.from('batches').select('*', { count: 'exact', head: true });
-         let allBatches: any[] = [];
-         if (totalBatches) {
-             const batchPromises = [];
-             for (let i = 0; i < totalBatches; i += 1000) {
-                 batchPromises.push(supabase.from('batches').select('excel_filename, batch_no, created_by, created_at')
-                     .order('created_at', { ascending: false })
-                     .range(i, i + 999));
-             }
-             for (let i = 0; i < batchPromises.length; i += 10) {
-                 const res = await Promise.all(batchPromises.slice(i, i + 10));
-                 res.forEach(r => { if (r.error) throw r.error; r.data && allBatches.push(...r.data); });
-             }
-         }
+         // 1. Fetch batches lookup map scoped to filterDate (with 14-day lookback for cross-day batches)
+         const lookbackDateISO = new Date(new Date(filterDate + 'T00:00:00').getTime() - 14 * 86400000).toISOString();
+         const { data: recentBatches } = await supabase
+            .from('batches')
+            .select('excel_filename, batch_no, created_by, created_at')
+            .gte('created_at', lookbackDateISO)
+            .lte('created_at', endOfDayISO)
+            .limit(5000);
 
          const filenameToBatchInfo: Record<string, { batch_no: string; created_by: string; created_at: string }> = {};
-         allBatches.forEach(b => {
+         (recentBatches || []).forEach((b: any) => {
             if (b.excel_filename) {
                filenameToBatchInfo[b.excel_filename] = {
                   batch_no: b.batch_no,
@@ -4230,8 +4223,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                    query = query.or(`batch_no.ilike.%${fuzzySearch}%,excel_filename.ilike.%${fuzzySearch}%`);
                 }
 
-               const { data: batches, error } = await query.order('created_at', { ascending: false }).limit(9999);
-               if (error) throw error;
+               const { data: batches, error } = await query.order('created_at', { ascending: false }).limit(500);
+               if (error) {
+                  console.error("Error fetching batches for summary:", error);
+                  setIsLoadingBatchSummary(false);
+                  return;
+               }
                const summaryData = batches || [];
                
                 // Pre-fill Leader Staff and Auto-Check Progress efficiently
@@ -4239,15 +4236,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                    const batchIds = summaryData.map((b: any) => b.id);
                    
                    // 1. Fetch all batch items for these batches
-                   const { data: allItemsData, error: itemsErr } = await supabase
-                      .from('batch_items')
-                      .select('barcode, batch_id')
-                      .in('batch_id', batchIds);
+                   const { data: allItemsData, error: itemsErr } = await Promise.resolve(
+                      supabase
+                         .from('batch_items')
+                         .select('barcode, batch_id')
+                         .in('batch_id', batchIds)
+                   ).catch(() => ({ data: [], error: null }));
 
                    let scannedBarcodesMap = new Map();
-                   const batchToBarcodes = {};
+                   const batchToBarcodes: Record<string, string[]> = {};
 
-                   if (!itemsErr && allItemsData) {
+                   if (!itemsErr && allItemsData && allItemsData.length > 0) {
                       const allBarcodes = allItemsData.map((item: any) => item.barcode).filter(Boolean);
                       
                       // 2. Fetch all scans for these barcodes in parallel chunks
@@ -4255,19 +4254,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       for (let i = 0; i < allBarcodes.length; i += 800) {
                          const chunk = allBarcodes.slice(i, i + 800);
                          scanPromises.push(
-                            supabase.from('scanned_items')
-                               .select('barcode, role')
-                               .in('barcode', chunk)
-                               .in('role', ['PICKER', 'PICKER_2', 'SORTIR_BATCH', 'CHECKER', 'OJOL'])
+                            Promise.resolve(
+                               supabase.from('scanned_items')
+                                  .select('barcode, role')
+                                  .in('barcode', chunk)
+                                  .in('role', ['PICKER', 'PICKER_2', 'SORTIR_BATCH', 'CHECKER', 'OJOL'])
+                            ).catch(() => ({ data: [], error: null }))
                          );
                       }
                       
                       for (let i = 0; i < scanPromises.length; i += 10) {
                           const results = await Promise.all(scanPromises.slice(i, i + 10));
                           results.forEach(res => {
-                              if (res.error) console.error("Error fetching scans:", res.error);
-                              if (res.data) {
-                                  res.data.forEach(row => {
+                              if (res?.data) {
+                                  res.data.forEach((row: any) => {
                                       if (!scannedBarcodesMap.has(row.barcode)) {
                                           scannedBarcodesMap.set(row.barcode, new Set());
                                       }
@@ -5531,38 +5531,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          const startTs = startOfDay.getTime();
          const endTs = endOfDay.getTime();
 
-         // 1. Parallel execution: fetch batches, scanned_items (Supabase & Firestore), and leader_scans simultaneously
-         const fsQueryScanned = fsQuery(
-            collection(db, 'scanned_items'),
-            where('timestamp', '>=', startTs),
-            where('timestamp', '<=', endTs)
-         );
-
-         const [batchesRes, leaderRes, fsScannedSnap] = await Promise.all([
-            supabase
-               .from('batches')
-               .select('id')
-               .gte('created_at', startOfDay.toISOString())
-               .lte('created_at', endOfDay.toISOString()),
-            supabase
-               .from('leader_scan_2')
-               .select('barcode, assignees')
-               .gte('timestamp', startTs - 2 * 86400000)
-               .lte('timestamp', endTs + 2 * 86400000),
-            getDocs(fsQueryScanned).catch(() => ({ docs: [], empty: true }))
-         ]);
-
-         if (batchesRes.error) throw batchesRes.error;
-         const batchIds = batchesRes.data?.map(b => b.id) || [];
-
-         if (batchIds.length === 0) {
-            setBatchDataList([]);
-            setBatchTotalRows(0);
-            setIsLoadingBatchData(false);
-            return;
-         }
-
-         // 2. Fetch batch items for today's batches using inner join filters
+         // Build batch items query with inner join on batches
          let query = supabase
             .from('batch_items')
             .select('*, batches!inner(batch_no, excel_filename, created_at)', { count: 'exact' })
@@ -5573,7 +5542,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             query = query.in('barcode', batchMassSearchApplied.slice(0, 1000));
          } else if (batchSearch) {
             const fuzzySearch = batchSearch.trim().replace(/\s+/g, '%');
-            const { data: matchingBatches } = await supabase.from('batches').select('id').or(`batch_no.ilike.%${fuzzySearch}%,excel_filename.ilike.%${fuzzySearch}%`).limit(100);
+            const { data: matchingBatches } = await supabase
+               .from('batches')
+               .select('id')
+               .or(`batch_no.ilike.%${fuzzySearch}%,excel_filename.ilike.%${fuzzySearch}%`)
+               .limit(100);
             const matchingBatchIds = matchingBatches?.map(b => b.id) || [];
             if (matchingBatchIds.length > 0) {
                query = query.or(`barcode.ilike.%${fuzzySearch}%,batch_id.in.(${matchingBatchIds.join(',')})`);
@@ -5582,11 +5555,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             }
          }
 
-         const { data: itemsData, error: itemsErr, count } = await query
-            .order('created_at', { ascending: false })
-            .limit(5000);
+         const fsQueryScanned = fsQuery(
+            collection(db, 'scanned_items'),
+            where('timestamp', '>=', startTs),
+            where('timestamp', '<=', endTs)
+         );
 
-         if (itemsErr) throw itemsErr;
+         // Fetch batch items, leader_scan_2, and Firestore scans in parallel with error protection
+         const [itemsRes, leaderRes, fsScannedSnap] = await Promise.all([
+            Promise.resolve(query.order('created_at', { ascending: false }).limit(5000)).catch(err => {
+               console.error("Error in batch_items query:", err);
+               return { data: [], count: 0, error: err };
+            }),
+            Promise.resolve(
+               supabase
+                  .from('leader_scan_2')
+                  .select('barcode, assignees')
+                  .gte('timestamp', startTs - 2 * 86400000)
+                  .lte('timestamp', endTs + 2 * 86400000)
+                  .limit(5000)
+            ).catch(err => {
+               console.warn("Notice: leader_scan_2 lookup skipped or timed out:", err);
+               return { data: [], error: null };
+            }),
+            getDocs(fsQueryScanned).catch(() => ({ docs: [], empty: true }))
+         ]);
+
+         if (itemsRes.error) {
+            console.error("Error fetching batch items:", itemsRes.error);
+            setBatchDataList([]);
+            setBatchTotalRows(0);
+            return;
+         }
+
+         const itemsData = itemsRes.data || [];
+         const count = itemsRes.count;
+
+         if (itemsData.length === 0) {
+            setBatchDataList([]);
+            setBatchTotalRows(0);
+            return;
+         }
 
          // Extract all distinct barcodes from itemsData for accurate cross-matching
          const allBarcodes = Array.from(new Set((itemsData || []).map((i: any) => i.barcode?.trim().toUpperCase()).filter(Boolean)));
@@ -5594,33 +5603,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          // Build lookup maps in O(1) combining Supabase & Firestore scans
          const scannedBarcodesMap = new Map<string, string>();
 
-         // Query scanned_items directly for the active barcodes to execute in <100ms instead of sequential while loop
-          if (allBarcodes.length > 0) {
-             const CHUNK_SIZE = 500;
-             const scannedPromises = [];
-             for (let i = 0; i < allBarcodes.length; i += CHUNK_SIZE) {
-                const chunk = allBarcodes.slice(i, i + CHUNK_SIZE);
-                scannedPromises.push(
-                   supabase
-                      .from('scanned_items')
-                      .select('barcode, user_email, employee_name, role')
-                      .in('role', ['PICKER', 'PICKER_2', 'OJOL'])
-                      .in('barcode', chunk)
-                );
-             }
-             const scannedResults = await Promise.all(scannedPromises);
-             scannedResults.forEach(res => {
-                if (res.data) {
-                   res.data.forEach(s => {
-                      if (s.barcode) {
-                         const key = s.barcode.trim().toUpperCase();
-                         const staffName = s.employee_name || s.user_email || 'Scanned';
-                         scannedBarcodesMap.set(key, staffName);
-                      }
-                   });
-                }
-             });
-          }
+         // Query scanned_items directly for active barcodes in safe chunks with error catch
+         if (allBarcodes.length > 0) {
+            const CHUNK_SIZE = 500;
+            const scannedPromises = [];
+            for (let i = 0; i < allBarcodes.length; i += CHUNK_SIZE) {
+               const chunk = allBarcodes.slice(i, i + CHUNK_SIZE);
+               scannedPromises.push(
+                  Promise.resolve(
+                     supabase
+                        .from('scanned_items')
+                        .select('barcode, user_email, employee_name, role')
+                        .in('role', ['PICKER', 'PICKER_2', 'OJOL'])
+                        .in('barcode', chunk)
+                  ).catch(() => ({ data: [], error: null }))
+               );
+            }
+            const scannedResults = await Promise.all(scannedPromises);
+            scannedResults.forEach(res => {
+               if (res?.data) {
+                  res.data.forEach((s: any) => {
+                     if (s.barcode) {
+                        const key = s.barcode.trim().toUpperCase();
+                        const staffName = s.employee_name || s.user_email || 'Scanned';
+                        scannedBarcodesMap.set(key, staffName);
+                     }
+                  });
+               }
+            });
+         }
 
          // Process Firestore offline scans (filter by role locally)
          if (fsScannedSnap && !('empty' in fsScannedSnap && fsScannedSnap.empty) && 'docs' in fsScannedSnap) {
@@ -5635,7 +5646,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
          const normalize = (n: string) => (n || '').toLowerCase().replace(/\.(xlsx|xls|pdf|csv)$/i, '').replace(/\s+/g, '');
          const leaderStaffDataMap = new Map<string, string>();
-         if (leaderRes.data) {
+         if (leaderRes?.data) {
             leaderRes.data.forEach((s: any) => {
                if (s.barcode && s.assignees) {
                   const normKey = normalize(s.barcode);

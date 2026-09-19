@@ -150,10 +150,10 @@ export const testSupabaseConnection = async (
       }
     });
 
-    // Check table accessibility and count
+    // Check table accessibility and count safely
     const { count, error } = await testClient
       .from('scanned_items')
-      .select('*', { count: 'exact', head: true });
+      .select('id', { count: 'exact', head: true });
 
     if (error) {
       const errMsg = (error.message || '').toLowerCase();
@@ -175,8 +175,8 @@ export const testSupabaseConnection = async (
         };
       }
 
-      // If table doesn't exist yet, check if project is reachable
-      if (errCode === '42P01' || errMsg.includes('relation "public.scanned_items" does not exist')) {
+      // 404 or Table doesn't exist yet diagnostics
+      if (errCode === '42P01' || errCode === '404' || errMsg.includes('relation "public.scanned_items" does not exist') || errMsg.includes('not found')) {
         return {
           success: true,
           message: 'Terkoneksi ke Supabase! (Catatan: Tabel scanned_items belum dibuat, silakan jalankan Master SQL Schema atau restore database).',
