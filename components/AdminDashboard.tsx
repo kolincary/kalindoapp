@@ -4233,20 +4233,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                
                 // Pre-fill Leader Staff and Auto-Check Progress efficiently
                 if (summaryData.length > 0) {
-                   const batchIds = summaryData.map((b: any) => b.id);
-                   
-                   // 1. Fetch all batch items for these batches
-                   const { data: allItemsData, error: itemsErr } = await Promise.resolve(
-                      supabase
-                         .from('batch_items')
-                         .select('barcode, batch_id')
-                         .in('batch_id', batchIds)
-                   ).catch(() => ({ data: [], error: null }));
+                   // 1. Fetch all batch items for these batches in parallel
+                   const itemPromises = summaryData.map((b: any) =>
+                      Promise.resolve(
+                         supabase
+                            .from('batch_items')
+                            .select('barcode, batch_id')
+                            .eq('batch_id', b.id)
+                            .limit(1000)
+                      ).catch(() => ({ data: [] }))
+                   );
+                   const itemResults = await Promise.all(itemPromises);
+                   const allItemsData: any[] = itemResults.flatMap((r: any) => r.data || []);
 
                    let scannedBarcodesMap = new Map();
                    const batchToBarcodes: Record<string, string[]> = {};
 
-                   if (!itemsErr && allItemsData && allItemsData.length > 0) {
+                   if (allItemsData && allItemsData.length > 0) {
                       const allBarcodes = allItemsData.map((item: any) => item.barcode).filter(Boolean);
                       
                       // 2. Fetch all scans for these barcodes in parallel chunks
@@ -4288,13 +4291,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                    const minBatchTime = Math.min(...summaryData.map((b: any) => b.created_at ? new Date(b.created_at).getTime() : Date.now()));
                    const maxBatchTime = Math.max(...summaryData.map((b: any) => b.created_at ? new Date(b.created_at).getTime() : Date.now()));
-                   
-                   // Fetch all leader scans in the 4-day range
-                   const { data: leaderScansData } = await supabase.from('leader_scan_2')
-                      .select('barcode, assignees, timestamp')
-                      .gte('timestamp', minBatchTime - 2 * 24 * 60 * 60 * 1000)
-                      .lte('timestamp', maxBatchTime + 2 * 24 * 60 * 60 * 1000)
-                      .order('timestamp', { ascending: false });
+                    
+                   const minD = new Date(minBatchTime - 2 * 86400000);
+                   const maxD = new Date(maxBatchTime + 2 * 86400000);
+                   const leaderDates = [];
+                   for (let dt = new Date(minD); dt <= maxD; dt.setDate(dt.getDate() + 1)) {
+                      const d = dt.getDate();
+                      const m = dt.getMonth() + 1;
+                      const y = dt.getFullYear();
+                      leaderDates.push(`${d}/${m}/${y}`, `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`);
+                   }
+
+                   // Fetch all leader scans in the date range safely
+                   const { data: leaderScansData } = await Promise.resolve(
+                      supabase.from('leader_scan_2')
+                         .select('barcode, assignees, timestamp, date')
+                         .in('date', Array.from(new Set(leaderDates)))
+                         .limit(5000)
+                   ).catch(() => ({ data: [] }));
                    const leaderScans = leaderScansData || [];
                    
                    const autoCompletedBatchIds = new Set();
@@ -5338,11 +5352,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 const safeSearch = baseName.replace(/"/g, '').replace(/\s+/g, '%').replace(/,/g, '');
                 
                 const bTime = batchData.created_at ? new Date(batchData.created_at).getTime() : Date.now();
-                const { data: leaderScans } = await supabase.from('leader_scan_2')
-                   .select('barcode, assignees, timestamp')
-                   .gte('timestamp', bTime - 2 * 24 * 60 * 60 * 1000)
-                   .lte('timestamp', bTime + 2 * 24 * 60 * 60 * 1000)
-                   .ilike('barcode', `${safeSearch}%`);
+                const dt = new Date(bTime);
+                const dStr1 = `${dt.getDate()}/${dt.getMonth() + 1}/${dt.getFullYear()}`;
+                const dStr2 = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+                const { data: leaderScans } = await Promise.resolve(
+                   supabase.from('leader_scan_2')
+                      .select('barcode, assignees, timestamp, date')
+                      .in('date', [dStr1, dStr2])
+                      .limit(500)
+                ).catch(() => ({ data: [] }));
                    
                 if (leaderScans && leaderScans.length > 0) {
                    const normalize = (n: string) => (n || '').toLowerCase().replace(/\.(xlsx|xls|pdf|csv)$/i, '').replace(/\s+/g, '');
@@ -5445,11 +5463,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             const safeSearch = baseName.replace(/"/g, '').replace(/\s+/g, '%').replace(/,/g, '');
             
             const bTime = batchData.created_at ? new Date(batchData.created_at).getTime() : Date.now();
-            const { data: leaderScans } = await supabase.from('leader_scan_2')
-               .select('barcode, assignees, timestamp')
-               .gte('timestamp', bTime - 2 * 24 * 60 * 60 * 1000)
-               .lte('timestamp', bTime + 2 * 24 * 60 * 60 * 1000)
-               .ilike('barcode', `${safeSearch}%`);
+            const dt = new Date(bTime);
+            const dStr1 = `${dt.getDate()}/${dt.getMonth() + 1}/${dt.getFullYear()}`;
+            const dStr2 = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+            const { data: leaderScans } = await Promise.resolve(
+               supabase.from('leader_scan_2')
+                  .select('barcode, assignees, timestamp, date')
+                  .in('date', [dStr1, dStr2])
+                  .limit(500)
+            ).catch(() => ({ data: [] }));
                
             if (leaderScans && leaderScans.length > 0) {
                const normalize = (n: string) => (n || '').toLowerCase().replace(/\.(xlsx|xls|pdf|csv)$/i, '').replace(/\s+/g, '');
@@ -5531,28 +5553,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          const startTs = startOfDay.getTime();
          const endTs = endOfDay.getTime();
 
-         // Build batch items query with inner join on batches
-         let query = supabase
-            .from('batch_items')
-            .select('*, batches!inner(batch_no, excel_filename, created_at)', { count: 'exact' })
-            .gte('batches.created_at', startOfDay.toISOString())
-            .lte('batches.created_at', endOfDay.toISOString());
+         // 1. Fetch batches matching date range and search
+         let batchesQuery = supabase
+            .from('batches')
+            .select('id, batch_no, excel_filename, created_at')
+            .gte('created_at', startOfDay.toISOString())
+            .lte('created_at', endOfDay.toISOString())
+            .order('created_at', { ascending: false })
+            .limit(500);
 
-         if (batchSearchMode === 'MASS' && batchMassSearchApplied.length > 0) {
-            query = query.in('barcode', batchMassSearchApplied.slice(0, 1000));
-         } else if (batchSearch) {
+         if (batchSearch) {
             const fuzzySearch = batchSearch.trim().replace(/\s+/g, '%');
-            const { data: matchingBatches } = await supabase
-               .from('batches')
-               .select('id')
-               .or(`batch_no.ilike.%${fuzzySearch}%,excel_filename.ilike.%${fuzzySearch}%`)
-               .limit(100);
-            const matchingBatchIds = matchingBatches?.map(b => b.id) || [];
-            if (matchingBatchIds.length > 0) {
-               query = query.or(`barcode.ilike.%${fuzzySearch}%,batch_id.in.(${matchingBatchIds.join(',')})`);
-            } else {
-               query = query.ilike('barcode', `%${fuzzySearch}%`);
-            }
+            batchesQuery = batchesQuery.or(`batch_no.ilike.%${fuzzySearch}%,excel_filename.ilike.%${fuzzySearch}%`);
+         }
+
+         const { data: batchesData, error: batchesErr } = await Promise.resolve(batchesQuery).catch(() => ({ data: [], error: null }));
+         const batches = batchesData || [];
+
+         if (batches.length === 0 && !batchSearch) {
+            setBatchDataList([]);
+            setBatchTotalRows(0);
+            return;
          }
 
          const fsQueryScanned = fsQuery(
@@ -5561,35 +5582,72 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             where('timestamp', '<=', endTs)
          );
 
-         // Fetch batch items, leader_scan_2, and Firestore scans in parallel with error protection
-         const [itemsRes, leaderRes, fsScannedSnap] = await Promise.all([
-            Promise.resolve(query.order('created_at', { ascending: false }).limit(5000)).catch(err => {
-               console.error("Error in batch_items query:", err);
-               return { data: [], count: 0, error: err };
-            }),
+         // Format dates for fast indexed lookup in leader_scan_2
+         const filterDateStr = batchDateFilter || new Date().toISOString().split('T')[0];
+         const [y, m, d] = filterDateStr.split('-');
+         const dFormatted1 = `${parseInt(d, 10)}/${parseInt(m, 10)}/${y}`;
+         const dFormatted2 = `${d}/${m}/${y}`;
+         const dPrev = new Date(startOfDay.getTime() - 86400000);
+         const dPrevStr1 = `${dPrev.getDate()}/${dPrev.getMonth() + 1}/${dPrev.getFullYear()}`;
+         const dPrevStr2 = `${String(dPrev.getDate()).padStart(2, '0')}/${String(dPrev.getMonth() + 1).padStart(2, '0')}/${dPrev.getFullYear()}`;
+         const leaderDates = Array.from(new Set([dFormatted1, dFormatted2, dPrevStr1, dPrevStr2]));
+
+         // Fetch batch items per batch, leader_scan_2, and Firestore scans in parallel
+         const itemPromises = batches.map(b =>
+            Promise.resolve(
+               supabase
+                  .from('batch_items')
+                  .select('id, barcode, batch_id, created_at, msku, qty, order_id')
+                  .eq('batch_id', b.id)
+                  .limit(1000)
+            ).catch(() => ({ data: [] }))
+         );
+
+         const [itemResults, leaderRes, fsScannedSnap] = await Promise.all([
+            Promise.all(itemPromises),
             Promise.resolve(
                supabase
                   .from('leader_scan_2')
-                  .select('barcode, assignees')
-                  .gte('timestamp', startTs - 2 * 86400000)
-                  .lte('timestamp', endTs + 2 * 86400000)
+                  .select('barcode, assignees, date')
+                  .in('date', leaderDates)
                   .limit(5000)
             ).catch(err => {
-               console.warn("Notice: leader_scan_2 lookup skipped or timed out:", err);
+               console.warn("Notice: leader_scan_2 lookup skipped:", err);
                return { data: [], error: null };
             }),
             getDocs(fsQueryScanned).catch(() => ({ docs: [], empty: true }))
          ]);
 
-         if (itemsRes.error) {
-            console.error("Error fetching batch items:", itemsRes.error);
-            setBatchDataList([]);
-            setBatchTotalRows(0);
-            return;
+         let itemsData: any[] = [];
+         itemResults.forEach((res: any, idx: number) => {
+            if (res?.data) {
+               const bHeader = batches[idx];
+               res.data.forEach((item: any) => {
+                  itemsData.push({
+                     ...item,
+                     batches: {
+                        batch_no: bHeader.batch_no,
+                        excel_filename: bHeader.excel_filename,
+                        created_at: bHeader.created_at
+                     }
+                  });
+               });
+            }
+         });
+
+         if (batchSearchMode === 'MASS' && batchMassSearchApplied.length > 0) {
+            const massSet = new Set(batchMassSearchApplied.map(b => b.trim().toUpperCase()));
+            itemsData = itemsData.filter(it => it.barcode && massSet.has(it.barcode.trim().toUpperCase()));
+         } else if (batchSearch) {
+            const fuzzy = batchSearch.trim().toUpperCase();
+            itemsData = itemsData.filter(it => 
+               (it.barcode && it.barcode.toUpperCase().includes(fuzzy)) || 
+               (it.batches?.batch_no && it.batches.batch_no.toUpperCase().includes(fuzzy)) || 
+               (it.batches?.excel_filename && it.batches.excel_filename.toUpperCase().includes(fuzzy))
+            );
          }
 
-         const itemsData = itemsRes.data || [];
-         const count = itemsRes.count;
+         const count = itemsData.length;
 
          if (itemsData.length === 0) {
             setBatchDataList([]);

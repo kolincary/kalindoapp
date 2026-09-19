@@ -540,16 +540,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
       if (role === UserRole.LEADER && (currentView === 'LEADER_ORDERS' || currentView === 'LEADER_GLOBAL' || currentView === 'LEADER_SUMMARY')) {
          const fetchLeaderOrders = async () => {
             try {
-               const selectedDate = new Date(leaderOrdersDate);
-               const startOfDay = new Date(selectedDate.setHours(0, 0, 0, 0)).getTime();
-               const endOfDay = new Date(selectedDate.setHours(23, 59, 59, 999)).getTime();
+               const [y, m, d] = (leaderOrdersDate || '').split('-');
+               const dFormatted1 = `${parseInt(d, 10)}/${parseInt(m, 10)}/${y}`;
+               const dFormatted2 = `${d}/${m}/${y}`;
 
-               const { data, error } = await supabase
-                  .from('leader_scan_2')
-                  .select('id, barcode, leader_name, scan_type, timestamp, assignment_mode, assignees')
-                  .gte('timestamp', startOfDay)
-                  .lte('timestamp', endOfDay)
-                  .order('timestamp', { ascending: false });
+               const { data, error } = await Promise.resolve(
+                  supabase
+                     .from('leader_scan_2')
+                     .select('id, barcode, leader_name, scan_type, timestamp, assignment_mode, assignees, date')
+                     .in('date', [dFormatted1, dFormatted2])
+                     .limit(5000)
+               ).catch((e) => ({ data: null, error: e }));
 
                if (data) {
                   setLeaderOrdersData(data);
