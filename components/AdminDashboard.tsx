@@ -3327,6 +3327,62 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return (new Date(today.getTime() - offset)).toISOString().slice(0, 10);
    });
    const [isSavingLogistik, setIsSavingLogistik] = useState(false);
+
+   // 18.2 DATA LOGISTIK: 2-TAB & DUAL-COLUMN COMPARISON STATE
+   const [logistikActiveTab, setLogistikActiveTab] = useState<'LOGISTIK' | 'PICKER'>('LOGISTIK');
+   
+   // --- MASTER DATA LISTS (FULL UNLIMITED) ---
+   const [allPickerMasterList, setAllPickerMasterList] = useState<any[]>([]);
+   const [allLogistikMasterList, setAllLogistikMasterList] = useState<any[]>([]);
+   const [isLoadingDualComparison, setIsLoadingDualComparison] = useState<boolean>(false);
+   const [logistikPickerStaffList, setLogistikPickerStaffList] = useState<string[]>([]);
+   
+   // --- KIRI: PICKER FILTER & PAGINATION ---
+   const [pickerLogistikSearch, setPickerLogistikSearch] = useState<string>('');
+   const [pickerLogistikStaffFilter, setPickerLogistikStaffFilter] = useState<string>('ALL');
+   const [pickerLogistikTypeFilter, setPickerLogistikTypeFilter] = useState<'ALL' | 'MANUAL' | 'PACKING_LIST'>('ALL');
+   const [pickerLogistikMatchFilter, setPickerLogistikMatchFilter] = useState<'ALL' | 'MATCH' | 'UNMATCH'>('ALL');
+   const [pickerLogistikPage, setPickerLogistikPage] = useState<number>(1);
+   const [pickerLogistikRowsPerPage, setPickerLogistikRowsPerPage] = useState<number>(50);
+   
+   // --- KANAN: LOGISTIK FILTER & PAGINATION ---
+   const [compLogistikSearch, setCompLogistikSearch] = useState<string>('');
+   const [compLogistikMatchFilter, setCompLogistikMatchFilter] = useState<'ALL' | 'MATCH_SAME_DAY' | 'MATCH_PREV_DAY' | 'CANCEL' | 'UNMATCH'>('ALL');
+   const [compLogistikPage, setCompLogistikPage] = useState<number>(1);
+   const [compLogistikRowsPerPage, setCompLogistikRowsPerPage] = useState<number>(50);
+
+   // --- MATCHING CACHES & STATS ---
+   const [compComparisonStats, setCompComparisonStats] = useState<{
+      totalPicker: number;
+      totalLogistik: number;
+      matchCount: number;
+      matchTodayCount: number;
+      matchPrevCount: number;
+      cancelLogistikCount: number;
+      totalMatchLogistik: number;
+      pureUnmatchLogistik: number;
+      pickerUnmatchCount: number;
+      logistikUnmatchCount: number;
+      matchPercentage: string;
+      satuanCount: number;
+      packingListCount: number;
+      uniqueStaff: number;
+   }>({
+      totalPicker: 0,
+      totalLogistik: 0,
+      matchCount: 0,
+      matchTodayCount: 0,
+      matchPrevCount: 0,
+      cancelLogistikCount: 0,
+      totalMatchLogistik: 0,
+      pureUnmatchLogistik: 0,
+      pickerUnmatchCount: 0,
+      logistikUnmatchCount: 0,
+      matchPercentage: '0%',
+      satuanCount: 0,
+      packingListCount: 0,
+      uniqueStaff: 0
+   });
    const [excelFilesToImport, setExcelFilesToImport] = useState<File[]>([]);
    const [isExcelDragActive, setIsExcelDragActive] = useState(false);
    const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -4415,7 +4471,480 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return () => clearTimeout(delayDebounceFn);
    }, [batchSearch, batchSearchMode, batchMassSearchApplied, batchDateFilter, batchTimeFilter, batchPage, activeView]);
 
-   // 4. Data Fetching for Packing/Sortir
+   // --- DATA LOGISTIK: TAB 2 (DUAL-COLUMN PICKER VS LOGISTIK COMPARISON) FETCHERS ---
+   const normalizeBarcodeKey = (raw: string): string => {
+      if (!raw) return '';
+      let s = String(raw).trim().toUpperCase();
+      if (s.startsWith('0026')) s = s.slice(2);
+      s = s.replace(/[\s\-_/\\,.]/g, '');
+      if (s.startsWith('00') && s.length > 8) {
+         s = s.substring(2);
+      }
+      return s;
+   };
+
+   // Helper: Reset all comparison filters back to default 'ALL' / empty
+   const resetDualComparisonFilters = () => {
+      setPickerLogistikMatchFilter('ALL');
+      setPickerLogistikStaffFilter('ALL');
+      setPickerLogistikTypeFilter('ALL');
+      setPickerLogistikSearch('');
+      setPickerLogistikPage(1);
+      setCompLogistikMatchFilter('ALL');
+      setCompLogistikSearch('');
+      setCompLogistikPage(1);
+   };
+
+   // Helper: Fetch all cancelled orders for date with loop chunking
+   const fetchAllCancelledOrdersForDate = async (targetDate: string) => {
+      const startOfDay = new Date(targetDate + 'T00:00:00').toISOString();
+      const endOfDay = new Date(targetDate + 'T23:59:59.999').toISOString();
+      let allCancel: any[] = [];
+      let offset = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+         const { data, error } = await supabase
+            .from('cancelled_orders')
+            .select('barcode, cancelled_at')
+            .eq('is_active', true)
+            .gte('cancelled_at', startOfDay)
+            .lte('cancelled_at', endOfDay)
+            .range(offset, offset + 999);
+
+         if (error || !data || data.length === 0) break;
+         allCancel.push(...data);
+         if (data.length < 1000) break;
+         offset += 1000;
+      }
+      return allCancel;
+   };
+
+   // Helper: Loop fetch all records from Supabase with selective columns for ultra-fast performance
+   const fetchAllRecordsForRole = async (role: 'PICKER' | 'LOGISTIK', startMs: number, endMs: number) => {
+      let allData: any[] = [];
+      let offset = 0;
+      const batchSize = 1000;
+      let hasMore = true;
+
+      while (hasMore) {
+         const { data, error } = await supabase
+            .from('scanned_items')
+            .select('id, barcode, employee_name, timestamp, role, menu_context')
+            .eq('role', role)
+            .gte('timestamp', startMs)
+            .lte('timestamp', endMs)
+            .order('timestamp', { ascending: false })
+            .range(offset, offset + batchSize - 1);
+
+         if (error || !data || data.length === 0) {
+            hasMore = false;
+            break;
+         }
+         allData.push(...data);
+         if (data.length < batchSize) {
+            hasMore = false;
+         } else {
+            offset += batchSize;
+         }
+      }
+      return allData;
+   };
+
+   const loadDualComparisonData = async () => {
+      setIsLoadingDualComparison(true);
+      try {
+         const effectiveDate = canManageDate ? filterDate : getTodayString();
+         const start = new Date(effectiveDate + 'T00:00:00').getTime();
+         const end = new Date(effectiveDate + 'T23:59:59.999').getTime();
+
+         // 1. Fetch PICKER, LOGISTIK, LEADER, and CANCELLED ORDERS parallel in a single lightning-fast burst
+         const [pickerRaw, logistikRaw, leaderRes, cancelRows] = await Promise.all([
+            fetchAllRecordsForRole('PICKER', start, end),
+            fetchAllRecordsForRole('LOGISTIK', start, end),
+            supabase
+               .from('leader_scan_2')
+               .select('barcode, leader_profile, leader_name')
+               .gte('timestamp', start)
+               .lte('timestamp', end),
+            fetchAllCancelledOrdersForDate(effectiveDate)
+         ]);
+
+         // Cancelled Barcodes Set
+         const cancelledBarcodeSet = new Set<string>();
+         if (cancelRows && cancelRows.length > 0) {
+            cancelRows.forEach((c: any) => {
+               const raw = (c.barcode || '').trim().toUpperCase();
+               const norm = normalizeBarcodeKey(raw);
+               if (raw) {
+                  cancelledBarcodeSet.add(raw);
+                  if (raw.startsWith('0026')) cancelledBarcodeSet.add(raw.slice(2));
+               }
+               if (norm) cancelledBarcodeSet.add(norm);
+            });
+         }
+
+         // Exclude Cancelled Orders from Picker Data
+         const activePickerRaw = pickerRaw.filter((item: any) => {
+            let rawBarcode = (item.barcode || '').toString().trim().toUpperCase();
+            let stripped0026 = rawBarcode.startsWith('0026') ? rawBarcode.slice(2) : rawBarcode;
+            const norm = normalizeBarcodeKey(rawBarcode);
+            const isCancelled = cancelledBarcodeSet.has(rawBarcode) ||
+                                cancelledBarcodeSet.has(stripped0026) ||
+                                (norm && cancelledBarcodeSet.has(norm));
+            return !isCancelled;
+         });
+
+         // Leader Map
+         const leaderMap = new Map<string, string>();
+         if (leaderRes && leaderRes.data) {
+            leaderRes.data.forEach((l: any) => {
+               const raw = (l.barcode || '').trim();
+               const name = l.leader_profile || l.leader_name;
+               if (raw && name) {
+                  leaderMap.set(raw, name);
+                  leaderMap.set(raw.toUpperCase(), name);
+                  const norm = normalizeBarcodeKey(raw);
+                  if (norm) leaderMap.set(norm, name);
+               }
+            });
+         }
+
+         const pickerNormMap = new Map<string, any>();
+         const logistikNormSet = new Set<string>();
+         const staffSet = new Set<string>();
+         let satuanCount = 0;
+         let packingListCount = 0;
+
+         logistikRaw.forEach((item: any) => {
+            const raw = (item.barcode || '').trim();
+            const norm = normalizeBarcodeKey(raw);
+            if (norm) {
+               logistikNormSet.add(norm);
+               logistikNormSet.add(raw.toUpperCase());
+            }
+         });
+
+         activePickerRaw.forEach((item: any) => {
+            if (item.employee_name) staffSet.add(item.employee_name.trim());
+            const raw = (item.barcode || '').trim();
+            if (raw.includes(' ')) packingListCount++;
+            else satuanCount++;
+            const norm = normalizeBarcodeKey(raw);
+            if (norm) {
+               pickerNormMap.set(norm, item);
+               pickerNormMap.set(raw.toUpperCase(), item);
+            }
+         });
+
+         let pickerMatchCount = 0;
+         const formattedPicker = activePickerRaw.map((item: any) => {
+            let rawBarcode = (item.barcode || '').toString().trim();
+            if (rawBarcode.startsWith('0026')) {
+               rawBarcode = rawBarcode.slice(2);
+            }
+            if (/^LXAD[^-]/i.test(rawBarcode)) rawBarcode = 'LXAD-' + rawBarcode.substring(4);
+            if (/^JNAP[^-]/i.test(rawBarcode)) rawBarcode = 'JNAP-' + rawBarcode.substring(4);
+            if (/^JNEB[^-]/i.test(rawBarcode)) rawBarcode = 'JNEB-' + rawBarcode.substring(4);
+
+            const norm = normalizeBarcodeKey(rawBarcode);
+            const isMatch = logistikNormSet.has(norm) || logistikNormSet.has(rawBarcode.toUpperCase());
+            if (isMatch) pickerMatchCount++;
+
+            return {
+               ...item,
+               barcode: rawBarcode,
+               leader_profile: leaderMap.get(item.barcode) || leaderMap.get(rawBarcode) || leaderMap.get(norm) || '-',
+               is_packing_list: rawBarcode.includes(' '),
+               is_matched_logistik: isMatch
+            };
+         });
+
+         // 2. Identify unmatched non-cancelled Logistik barcodes on the current date
+         const unmatchedLogistikBarcodes: string[] = [];
+         logistikRaw.forEach((item: any) => {
+            const raw = (item.barcode || '').toString().trim();
+            const norm = normalizeBarcodeKey(raw);
+            const stripped0026 = raw.startsWith('0026') ? raw.slice(2) : raw;
+            const isCancelled = cancelledBarcodeSet.has(raw.toUpperCase()) ||
+                                cancelledBarcodeSet.has(stripped0026.toUpperCase()) ||
+                                (norm ? cancelledBarcodeSet.has(norm) : false);
+            const isMatchToday = pickerNormMap.has(norm) || pickerNormMap.has(raw.toUpperCase());
+            if (!isCancelled && !isMatchToday && raw) {
+               unmatchedLogistikBarcodes.push(raw);
+               if (norm && norm !== raw) unmatchedLogistikBarcodes.push(norm);
+            }
+         });
+
+         // 3. Fast Historical Cross-Date Search for Unmatched Non-Cancelled Logistik items prior to current date
+         const historicalPickerMap = new Map<string, any>();
+         if (unmatchedLogistikBarcodes.length > 0) {
+            const uniqueUnmatched = Array.from(new Set(unmatchedLogistikBarcodes));
+            const chunkSize = 500;
+            const chunkPromises = [];
+            for (let i = 0; i < uniqueUnmatched.length; i += chunkSize) {
+               const chunk = uniqueUnmatched.slice(i, i + chunkSize);
+               chunkPromises.push(
+                  supabase
+                     .from('scanned_items')
+                     .select('barcode, employee_name, timestamp, scan_date')
+                     .eq('role', 'PICKER')
+                     .lt('timestamp', start)
+                     .in('barcode', chunk)
+                     .order('timestamp', { ascending: false })
+               );
+            }
+            const chunkResults = await Promise.all(chunkPromises);
+            chunkResults.forEach((res: any) => {
+               if (res && res.data) {
+                  res.data.forEach((pItem: any) => {
+                     const bRaw = (pItem.barcode || '').trim();
+                     const bNorm = normalizeBarcodeKey(bRaw);
+                     const isCanc = cancelledBarcodeSet.has(bRaw.toUpperCase()) || (bNorm && cancelledBarcodeSet.has(bNorm));
+                     if (!isCanc) {
+                        if (bRaw && !historicalPickerMap.has(bRaw.toUpperCase())) {
+                           historicalPickerMap.set(bRaw.toUpperCase(), pItem);
+                        }
+                        if (bNorm && !historicalPickerMap.has(bNorm)) {
+                           historicalPickerMap.set(bNorm, pItem);
+                        }
+                     }
+                  });
+               }
+            });
+         }
+
+         // 4. Format Logistik with 4 Dedicated Classification Types (CANCEL, SAME_DAY, PREV_DAY, UNMATCH)
+         let matchTodayCount = 0;
+         let matchPrevCount = 0;
+         let cancelLogistikCount = 0;
+         let pureUnmatchCount = 0;
+
+         const formattedLogistik = logistikRaw.map((item: any) => {
+            let rawBarcode = (item.barcode || '').toString().trim();
+            let stripped0026 = rawBarcode.startsWith('0026') ? rawBarcode.slice(2) : rawBarcode;
+            const norm = normalizeBarcodeKey(rawBarcode);
+            const isCancelled = cancelledBarcodeSet.has(rawBarcode.toUpperCase()) ||
+                                cancelledBarcodeSet.has(stripped0026.toUpperCase()) ||
+                                (norm ? cancelledBarcodeSet.has(norm) : false);
+
+            // Priority 1: Data Cancel (Terpisah total, tidak dihitung sebagai match)
+            if (isCancelled) {
+               cancelLogistikCount++;
+               return {
+                  ...item,
+                  barcode: rawBarcode,
+                  match_type: 'CANCEL' as const,
+                  is_matched_picker: false,
+                  is_cancelled: true,
+                  picker_history_date: null,
+                  picker_history_staff: null
+               };
+            }
+
+            // Priority 2: Match Hari Ini
+            const isMatchToday = pickerNormMap.has(norm) || pickerNormMap.has(rawBarcode.toUpperCase());
+            if (isMatchToday) {
+               matchTodayCount++;
+               const pMatch = pickerNormMap.get(norm) || pickerNormMap.get(rawBarcode.toUpperCase());
+               return {
+                  ...item,
+                  barcode: rawBarcode,
+                  match_type: 'SAME_DAY' as const,
+                  is_matched_picker: true,
+                  is_cancelled: false,
+                  picker_history_date: effectiveDate,
+                  picker_history_staff: pMatch?.employee_name || '-'
+               };
+            }
+
+            // Priority 3: Match Beda Hari (Riwayat sebelum hari ini)
+            const histItem = historicalPickerMap.get(norm) || historicalPickerMap.get(rawBarcode.toUpperCase());
+            if (histItem) {
+               matchPrevCount++;
+               let histDateStr = histItem.scan_date;
+               if (!histDateStr && histItem.timestamp) {
+                  const d = new Date(histItem.timestamp);
+                  histDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+               }
+               return {
+                  ...item,
+                  barcode: rawBarcode,
+                  match_type: 'PREV_DAY' as const,
+                  is_matched_picker: true,
+                  is_cancelled: false,
+                  picker_history_date: histDateStr || 'Tgl Riwayat',
+                  picker_history_staff: histItem.employee_name || 'Picker',
+                  picker_history_timestamp: histItem.timestamp
+               };
+            }
+
+            // Priority 4: Pure Unmatch (Belum pernah di-scan)
+            pureUnmatchCount++;
+            return {
+               ...item,
+               barcode: rawBarcode,
+               match_type: 'UNMATCH' as const,
+               is_matched_picker: false,
+               is_cancelled: false,
+               picker_history_date: null,
+               picker_history_staff: null
+            };
+         });
+
+         const totalPicker = formattedPicker.length;
+         const totalLogistik = formattedLogistik.length;
+         const totalMatchLogistik = matchTodayCount + matchPrevCount;
+         const pickerUnmatchCount = Math.max(0, totalPicker - pickerMatchCount);
+         const matchPercentage = totalLogistik > 0 
+            ? `${((totalMatchLogistik / totalLogistik) * 100).toFixed(1)}%` 
+            : '0%';
+
+         setAllPickerMasterList(formattedPicker);
+         setAllLogistikMasterList(formattedLogistik);
+         setLogistikPickerStaffList(Array.from(staffSet).sort());
+
+         setCompComparisonStats({
+            totalPicker,
+            totalLogistik,
+            matchCount: matchTodayCount,
+            matchTodayCount,
+            matchPrevCount,
+            cancelLogistikCount,
+            totalMatchLogistik,
+            pureUnmatchLogistik: pureUnmatchCount,
+            pickerUnmatchCount,
+            logistikUnmatchCount: pureUnmatchCount,
+            matchPercentage,
+            satuanCount,
+            packingListCount,
+            uniqueStaff: staffSet.size
+         });
+      } catch (err) {
+         console.error('Error loading dual comparison data:', err);
+      } finally {
+         setIsLoadingDualComparison(false);
+      }
+   };
+
+   // Filtered Picker List (Left Column)
+   const filteredPickerComparisonList = useMemo(() => {
+      return allPickerMasterList.filter(item => {
+         if (pickerLogistikMatchFilter === 'MATCH' && !item.is_matched_logistik) return false;
+         if (pickerLogistikMatchFilter === 'UNMATCH' && item.is_matched_logistik) return false;
+         if (pickerLogistikStaffFilter !== 'ALL' && item.employee_name !== pickerLogistikStaffFilter) return false;
+         if (pickerLogistikTypeFilter === 'PACKING_LIST' && !item.is_packing_list) return false;
+         if (pickerLogistikTypeFilter === 'MANUAL' && item.is_packing_list) return false;
+         if (pickerLogistikSearch.trim()) {
+            const s = pickerLogistikSearch.trim().toLowerCase();
+            const b = (item.barcode || '').toLowerCase();
+            const e = (item.employee_name || '').toLowerCase();
+            const l = (item.leader_profile || '').toLowerCase();
+            if (!b.includes(s) && !e.includes(s) && !l.includes(s)) return false;
+         }
+         return true;
+      });
+   }, [allPickerMasterList, pickerLogistikMatchFilter, pickerLogistikStaffFilter, pickerLogistikTypeFilter, pickerLogistikSearch]);
+
+   // Paginated Picker List
+   const paginatedPickerComparisonList = useMemo(() => {
+      const from = (pickerLogistikPage - 1) * pickerLogistikRowsPerPage;
+      const to = from + pickerLogistikRowsPerPage;
+      return filteredPickerComparisonList.slice(from, to);
+   }, [filteredPickerComparisonList, pickerLogistikPage, pickerLogistikRowsPerPage]);
+
+   // Filtered Logistik List (Right Column) with 4-Level Match & Cancel filtering
+   const filteredLogistikComparisonList = useMemo(() => {
+      return allLogistikMasterList.filter(item => {
+         if (compLogistikMatchFilter === 'MATCH_SAME_DAY' && item.match_type !== 'SAME_DAY') return false;
+         if (compLogistikMatchFilter === 'MATCH_PREV_DAY' && item.match_type !== 'PREV_DAY') return false;
+         if (compLogistikMatchFilter === 'CANCEL' && item.match_type !== 'CANCEL') return false;
+         if (compLogistikMatchFilter === 'UNMATCH' && item.match_type !== 'UNMATCH') return false;
+         if (compLogistikSearch.trim()) {
+            const s = compLogistikSearch.trim().toLowerCase();
+            const b = (item.barcode || '').toLowerCase();
+            const r = (item.role || '').toLowerCase();
+            const st = (item.picker_history_staff || '').toLowerCase();
+            const dt = (item.picker_history_date || '').toLowerCase();
+            const isCanc = item.is_cancelled ? 'cancel data cancel batal' : '';
+            if (!b.includes(s) && !r.includes(s) && !st.includes(s) && !dt.includes(s) && !isCanc.includes(s)) return false;
+         }
+         return true;
+      });
+   }, [allLogistikMasterList, compLogistikMatchFilter, compLogistikSearch]);
+
+   // Paginated Logistik List
+   const paginatedLogistikComparisonList = useMemo(() => {
+      const from = (compLogistikPage - 1) * compLogistikRowsPerPage;
+      const to = from + compLogistikRowsPerPage;
+      return filteredLogistikComparisonList.slice(from, to);
+   }, [filteredLogistikComparisonList, compLogistikPage, compLogistikRowsPerPage]);
+
+   // Excel Export with Multiple Sheets (Picker, Logistik, Ringkasan)
+   const handleExportDualComparisonExcel = () => {
+      try {
+         const effectiveDate = canManageDate ? filterDate : getTodayString();
+
+         const pickerRows = allPickerMasterList.map((item: any, idx: number) => ({
+            'No': idx + 1,
+            'Tanggal & Waktu': new Date(item.timestamp).toLocaleString('id-ID'),
+            'No Resi / Barcode': item.barcode,
+            'Staff Picker': item.employee_name || '-',
+            'Leader': item.leader_profile || '-',
+            'Status Match Logistik': item.is_matched_logistik ? 'MATCH' : 'BELUM DI LOGISTIK',
+            'Tipe Scan': item.is_packing_list ? 'PACKING LIST' : 'SATUAN'
+         }));
+
+         const logistikRows = allLogistikMasterList.map((item: any, idx: number) => {
+            let statusText = 'BELUM DI-SCAN PICKER';
+            if (item.match_type === 'SAME_DAY') {
+               statusText = 'MATCH (HARI INI)';
+            } else if (item.match_type === 'PREV_DAY') {
+               statusText = `MATCH (TGL ${item.picker_history_date || '-'} OLEH ${item.picker_history_staff || '-'})`;
+            }
+
+            return {
+               'No': idx + 1,
+               'Tanggal & Waktu': new Date(item.timestamp).toLocaleString('id-ID'),
+               'No Resi / Barcode': item.barcode,
+               'Role / Context': item.role || 'LOGISTIK',
+               'Status Match Picker': statusText,
+               'Tgl Scan Picker Asli': item.picker_history_date || (item.match_type === 'SAME_DAY' ? effectiveDate : '-'),
+               'Staff Picker Terkait': item.picker_history_staff || '-'
+            };
+         });
+
+         const summaryRows = [
+            { 'Kategori': 'Tanggal Data', 'Nilai': effectiveDate },
+            { 'Kategori': 'Total Scan Picker (Tanggal Terpilih)', 'Nilai': allPickerMasterList.length },
+            { 'Kategori': 'Total Data Logistik (Tanggal Terpilih)', 'Nilai': allLogistikMasterList.length },
+            { 'Kategori': 'Match Hari Ini', 'Nilai': compComparisonStats.matchTodayCount },
+            { 'Kategori': 'Match Riwayat / Beda Hari', 'Nilai': compComparisonStats.matchPrevCount },
+            { 'Kategori': 'Total Logistik Ter-Match', 'Nilai': compComparisonStats.totalMatchLogistik },
+            { 'Kategori': 'Persentase Match Logistik', 'Nilai': compComparisonStats.matchPercentage },
+            { 'Kategori': 'Logistik Belum Pernah di-Picker (Murni Belum)', 'Nilai': compComparisonStats.pureUnmatchLogistik },
+            { 'Kategori': 'Picker Belum di Logistik (Hari Ini)', 'Nilai': compComparisonStats.pickerUnmatchCount }
+         ];
+
+         const wb = XLSX.utils.book_new();
+         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Ringkasan_Komparasi');
+         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(pickerRows), 'Data_Picker');
+         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(logistikRows), 'Data_Logistik');
+
+         XLSX.writeFile(wb, `Komparasi_Picker_vs_Logistik_${effectiveDate}.xlsx`);
+         setSuccessToast(`Berhasil mengekspor komparasi Picker vs Logistik (${pickerRows.length} Picker & ${logistikRows.length} Logistik)!`);
+      } catch (err: any) {
+         console.error('Export dual comparison error:', err);
+         alert('Gagal mengekspor data: ' + err.message);
+      }
+   };
+
+   // Synchronized effect for Dual-Column Tab
+   useEffect(() => {
+      if (activeView === 'LOGISTIK_DATA' && logistikActiveTab === 'PICKER') {
+         loadDualComparisonData();
+      }
+   }, [activeView, filterDate, logistikActiveTab]);
    useEffect(() => {
       if (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'LEADER_PENDING_ADMIN' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'SCAN_ALL') {
          fetchPackingData(page);
@@ -10453,14 +10982,20 @@ if (filterPackingShift !== 'ALL') {
                         <div className="bg-white dark:bg-gray-800 p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 shrink-0">
                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 w-full">
                               <div className="flex items-center gap-3">
-                                 <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 border border-indigo-200/60 dark:border-indigo-800/60 shadow-sm">
-                                    <Truck className="w-5 h-5 sm:w-6 sm:h-6" />
+                                 <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-indigo-500/20">
+                                    {logistikActiveTab === 'LOGISTIK' ? <Truck className="w-5 h-5 sm:w-6 sm:h-6" /> : <ScanLine className="w-5 h-5 sm:w-6 sm:h-6" />}
                                  </div>
                                  <div>
                                     <div className="flex items-center gap-2">
-                                       <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">Data Logistik</h2>
+                                       <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">
+                                          {logistikActiveTab === 'LOGISTIK' ? 'Data Logistik' : 'Komparasi Picker vs Logistik'}
+                                       </h2>
                                     </div>
-                                    <p className="text-gray-500 dark:text-gray-400 text-xs sm:text-sm mt-0.5">Import data resi logistik dengan cepat. Cukup copy-paste no resi / ID pesanan.</p>
+                                    <p className="text-gray-500 dark:text-gray-400 text-xs sm:text-sm mt-0.5">
+                                       {logistikActiveTab === 'LOGISTIK'
+                                          ? 'Kelola & import data resi logistik dengan cepat. Cukup copy-paste no resi / ID pesanan.'
+                                          : `Komparasi 2 kolom data scan Picker vs data Logistik pada tanggal terpilih (${filterDate}).`}
+                                    </p>
                                  </div>
                               </div>
                               <div className="flex items-center gap-3 w-full sm:w-auto relative">
@@ -10630,19 +11165,80 @@ if (filterPackingShift !== 'ALL') {
                                        )}
                                     </div>
                                  )}
-                                 <button
-                                    onClick={() => setIsLogistikImportModalOpen(true)}
-                                    className="flex items-center justify-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 dark:shadow-none transition-all active:scale-95 sm:w-auto w-full border border-indigo-500/20 cursor-pointer text-xs sm:text-sm"
-                                 >
-                                    <Plus size={18} /> Import Text (Cepat)
-                                 </button>
+                                 {logistikActiveTab === 'LOGISTIK' ? (
+                                     <button
+                                        onClick={() => setIsLogistikImportModalOpen(true)}
+                                        className="flex items-center justify-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 dark:shadow-none transition-all active:scale-95 sm:w-auto w-full border border-indigo-500/20 cursor-pointer text-xs sm:text-sm"
+                                     >
+                                        <Plus size={18} /> Import Text (Cepat)
+                                     </button>
+                                  ) : (
+                                     <div className="flex items-center gap-2 sm:w-auto w-full">
+                                        <button
+                                           onClick={() => {
+                                              resetDualComparisonFilters();
+                                              loadDualComparisonData();
+                                           }}
+                                           disabled={isLoadingDualComparison}
+                                           className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-750 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl font-bold transition-all text-xs sm:text-sm cursor-pointer disabled:opacity-50 shadow-xs"
+                                        >
+                                           <RefreshCw size={15} className={isLoadingDualComparison ? 'animate-spin' : ''} />
+                                           <span>Refresh Data</span>
+                                        </button>
+                                     </div>
+                                  )}
                               </div>
+                           </div>
+
+                           {/* 2-TAB SWITCHER FOR DATA LOGISTIK */}
+                           <div className="flex items-center gap-2 mt-5 pt-3 border-t border-gray-100 dark:border-gray-750">
+                              <button
+                                 onClick={() => setLogistikActiveTab('LOGISTIK')}
+                                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+                                    logistikActiveTab === 'LOGISTIK'
+                                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25 ring-2 ring-indigo-500/20'
+                                       : 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-750 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300'
+                                 }`}
+                              >
+                                 <Truck size={16} />
+                                 <span>Data Logistik</span>
+                                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                                    logistikActiveTab === 'LOGISTIK'
+                                       ? 'bg-white/20 text-white'
+                                       : 'bg-gray-200 dark:bg-gray-650 text-gray-700 dark:text-gray-300'
+                                 }`}>
+                                    {totalRows.toLocaleString('id-ID')} Resi
+                                 </span>
+                              </button>
+
+                              <button
+                                 onClick={() => {
+                                    setLogistikActiveTab('PICKER');
+                                    setPickerLogistikPage(1);
+                                    setCompLogistikPage(1);
+                                 }}
+                                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+                                    logistikActiveTab === 'PICKER'
+                                       ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/25 ring-2 ring-cyan-500/20'
+                                       : 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-750 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300'
+                                 }`}
+                              >
+                                 <ArrowRightLeft size={16} />
+                                 <span>Komparasi Picker vs Logistik</span>
+                                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                                    logistikActiveTab === 'PICKER'
+                                       ? 'bg-white/20 text-white'
+                                       : 'bg-gray-200 dark:bg-gray-650 text-gray-700 dark:text-gray-300'
+                                 }`}>
+                                    {compComparisonStats.matchCount.toLocaleString('id-ID')} Match / {compComparisonStats.totalPicker.toLocaleString('id-ID')} Pckr
+                                 </span>
+                              </button>
                            </div>
                         </div>
                      )}
 
                      {/* TOOLBAR 1: Packing, Sortir, Scan All, Ojol, Failed Scans, Gudang, Logistik */}
-                     {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'LEADER_PENDING_ADMIN' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING' || activeView === 'SCAN_ALL' || activeView === 'OJOL_DATA' || activeView === 'FAILED_SCANS') && (
+                     {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || (activeView === 'LOGISTIK_DATA' && logistikActiveTab === 'LOGISTIK') || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'LEADER_PENDING_ADMIN' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING' || activeView === 'SCAN_ALL' || activeView === 'OJOL_DATA' || activeView === 'FAILED_SCANS') && (
                         <div className="p-3 sm:p-4 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200/80 dark:border-gray-800 shrink-0 w-full max-w-[100vw] shadow-2xs">
 
                            {/* REFACTORED TOOLBAR FOR PACKING, SORTIR, PICKER, OJOL, SCAN_ALL, GUDANG, LOGISTIK (UNIFIED GRID) */}
@@ -13995,7 +14591,7 @@ if (filterPackingShift !== 'ALL') {
                            </div>
                         )}
 
-                        {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'LEADER_PENDING_ADMIN' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING' || activeView === 'SCAN_ALL') && (
+                        {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || (activeView === 'LOGISTIK_DATA' && logistikActiveTab === 'LOGISTIK') || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'LEADER_PENDING_ADMIN' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING' || activeView === 'SCAN_ALL') && (
                            <div className={`w-full ${activeView === 'PACKING_2_DATA' && filterPackingStaff !== 'ALL' ? 'flex flex-col lg:flex-row items-start min-h-full' : 'h-full flex flex-col overflow-hidden'} bg-white dark:bg-gray-800`}>
                               {/* Left / Main Table Area */}
                               <div className={`w-full ${activeView === 'PACKING_2_DATA' && filterPackingStaff !== 'ALL' ? 'lg:flex-1 min-w-0 flex flex-col' : 'flex-1 min-w-0 flex flex-col h-full overflow-hidden'}`}>
@@ -14793,6 +15389,653 @@ if (filterPackingShift !== 'ALL') {
                                      </div>
                                   </div>
                               )}
+                           </div>
+                        )}
+
+                        {/* 18.2 DATA LOGISTIK - TAB 2: KOMPARASI 2 KOLOM (DATA PICKER VS DATA LOGISTIK) */}
+                        {activeView === 'LOGISTIK_DATA' && logistikActiveTab === 'PICKER' && (
+                           <div className="w-full flex-1 flex flex-col min-h-0 overflow-y-auto bg-gray-50/50 dark:bg-gray-900/50 p-3.5 sm:p-5 gap-4">
+                              {/* 1. TOP COMPARISON KPI ANALYTICS HEADER */}
+                              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
+                                 {/* Card 1: Total Picker (Kiri) */}
+                                 <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-gray-800 border border-cyan-200/80 dark:border-cyan-800/80 shadow-xs flex items-center gap-3 transition-all hover:shadow-md">
+                                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-cyan-500/20">
+                                       <ScanLine size={22} />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                       <div className="text-[10px] sm:text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Scan Picker</div>
+                                       <div className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white font-mono mt-0.5">
+                                          {compComparisonStats.totalPicker.toLocaleString('id-ID')}
+                                       </div>
+                                       <div className="text-[10px] text-cyan-600 dark:text-cyan-400 font-semibold truncate">
+                                          {compComparisonStats.uniqueStaff} Staff Aktif
+                                       </div>
+                                    </div>
+                                 </div>
+
+                                 {/* Card 2: Total Logistik (Kanan) */}
+                                 <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-gray-800 border border-indigo-200/80 dark:border-indigo-800/80 shadow-xs flex items-center gap-3 transition-all hover:shadow-md">
+                                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-indigo-500/20">
+                                       <Truck size={22} />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                       <div className="text-[10px] sm:text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Data Logistik</div>
+                                       <div className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white font-mono mt-0.5">
+                                          {compComparisonStats.totalLogistik.toLocaleString('id-ID')}
+                                       </div>
+                                       <div className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold truncate">
+                                          Database Logistik
+                                       </div>
+                                    </div>
+                                 </div>
+
+                                 {/* Card 3: Total MATCH (Hari Ini & Beda Hari) */}
+                                 <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-gray-800 border border-emerald-200/80 dark:border-emerald-800/80 shadow-xs flex items-center gap-3 transition-all hover:shadow-md">
+                                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-500/20">
+                                       <CheckCircle2 size={22} />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                       <div className="flex items-center justify-between">
+                                          <span className="text-[10px] sm:text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total MATCH Logistik</span>
+                                          <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800">
+                                             {compComparisonStats.matchPercentage}
+                                          </span>
+                                       </div>
+                                       <div className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">
+                                          {compComparisonStats.totalMatchLogistik.toLocaleString('id-ID')}
+                                       </div>
+                                       <div className="text-[10px] text-gray-500 dark:text-gray-400 truncate flex items-center gap-1.5 font-medium">
+                                          <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{compComparisonStats.matchTodayCount.toLocaleString('id-ID')} Hari Ini</span>
+                                          <span>•</span>
+                                          <span className="text-amber-600 dark:text-amber-400 font-semibold">{compComparisonStats.matchPrevCount.toLocaleString('id-ID')} Beda Hari</span>
+                                       </div>
+                                    </div>
+                                 </div>
+
+                                 {/* Card 4: Sisa Belum Match */}
+                                 <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-gray-800 border border-rose-200/80 dark:border-rose-800/80 shadow-xs flex items-center gap-3 transition-all hover:shadow-md">
+                                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-rose-500 to-amber-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-rose-500/20">
+                                       <AlertTriangle size={22} />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                       <div className="text-[10px] sm:text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Sisa Belum Match</div>
+                                       <div className="flex items-baseline gap-1 mt-0.5">
+                                          <span className="text-base sm:text-lg font-black text-rose-600 dark:text-rose-400 font-mono">
+                                             {compComparisonStats.pickerUnmatchCount.toLocaleString('id-ID')}
+                                          </span>
+                                          <span className="text-[10px] text-gray-400 font-medium">Pckr</span>
+                                          <span className="text-gray-300 dark:text-gray-600 mx-0.5">/</span>
+                                          <span className="text-base sm:text-lg font-black text-rose-600 dark:text-rose-400 font-mono">
+                                             {compComparisonStats.pureUnmatchLogistik.toLocaleString('id-ID')}
+                                          </span>
+                                          <span className="text-[10px] text-gray-400 font-medium">Log (Murni Belum)</span>
+                                       </div>
+                                       <div className="text-[10px] text-gray-500 dark:text-gray-400 truncate flex items-center gap-1.5 font-medium">
+                                          <span>{compComparisonStats.pureUnmatchLogistik} Resi belum di-scan</span>
+                                          <span>•</span>
+                                          <span className="text-rose-600 dark:text-rose-400 font-semibold">{compComparisonStats.cancelLogistikCount} Cancel</span>
+                                       </div>
+                                    </div>
+                                 </div>
+                              </div>
+
+                              {/* GLOBAL ACTION BAR: DATE PICKER & REFRESH (EXPORT REMOVED) */}
+                              <div className="bg-white dark:bg-gray-800 p-3 sm:p-4 rounded-2xl border border-gray-200/80 dark:border-gray-700/80 shadow-xs flex flex-wrap items-center justify-between gap-3">
+                                 <div className="flex items-center gap-3">
+                                    <div className="relative h-10 w-48 sm:w-56">
+                                       <div
+                                          className="relative w-full h-full cursor-pointer group"
+                                          onClick={() => {
+                                             const input = document.getElementById('logistik-dual-comp-date-filter') as HTMLInputElement;
+                                             if (input) {
+                                                try { if (typeof input.showPicker === 'function') input.showPicker(); else input.click(); } catch (e) { input.click(); }
+                                             }
+                                          }}
+                                       >
+                                          <div className="absolute inset-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 flex items-center justify-between transition-all group-hover:border-cyan-500 shadow-2xs">
+                                             <div className="flex items-center gap-2 overflow-hidden">
+                                                <div className="w-6 h-6 rounded-lg bg-cyan-50 dark:bg-cyan-950 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0">
+                                                   <CalendarIcon size={13} />
+                                                </div>
+                                                <div className="flex flex-col text-left">
+                                                   <span className="text-[9px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500 leading-none">Tanggal Data</span>
+                                                   <span className="text-xs font-bold text-gray-800 dark:text-gray-200 truncate mt-0.5">
+                                                      {filterDate || 'Pilih Tanggal'}
+                                                   </span>
+                                                </div>
+                                             </div>
+                                             <ChevronDown size={14} className="text-gray-400 group-hover:text-cyan-500 shrink-0 transition-colors" />
+                                          </div>
+                                          <input
+                                             id="logistik-dual-comp-date-filter"
+                                             type="date"
+                                             value={filterDate}
+                                             onChange={(e) => {
+                                                setFilterDate(e.target.value);
+                                                resetDualComparisonFilters();
+                                             }}
+                                             className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
+                                          />
+                                       </div>
+                                    </div>
+
+                                    <button
+                                       onClick={() => {
+                                          resetDualComparisonFilters();
+                                          loadDualComparisonData();
+                                       }}
+                                       disabled={isLoadingDualComparison}
+                                       className="px-3.5 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-750 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 shadow-xs"
+                                    >
+                                       <RefreshCw size={14} className={isLoadingDualComparison ? 'animate-spin' : ''} />
+                                       <span>Refresh Kedua Data (Default)</span>
+                                    </button>
+                                 </div>
+                              </div>
+
+                              {/* 2. DUAL-COLUMN SIDE-BY-SIDE CONTAINER */}
+                              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 flex-1 min-h-0">
+                                 {/* ========================================================================= */}
+                                 {/* KOLOM KIRI: DATA PICKER                                                  */}
+                                 {/* ========================================================================= */}
+                                 <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200/80 dark:border-gray-700/80 shadow-xs flex flex-col overflow-hidden">
+                                    {/* Header Kolom Kiri */}
+                                    <div className="p-3.5 bg-gradient-to-r from-cyan-50 to-blue-50/40 dark:from-cyan-950/40 dark:to-blue-950/20 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-2.5">
+                                       <div className="flex items-center gap-2.5">
+                                          <div className="w-8 h-8 rounded-xl bg-cyan-600 text-white flex items-center justify-center font-bold shadow-sm shadow-cyan-600/30">
+                                             <ScanLine size={16} />
+                                          </div>
+                                          <div>
+                                             <div className="flex items-center gap-2">
+                                                <h3 className="text-sm font-bold text-gray-900 dark:text-white">Data Picker</h3>
+                                                <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-cyan-100 dark:bg-cyan-900 text-cyan-800 dark:text-cyan-200 font-mono">
+                                                   {compComparisonStats.totalPicker.toLocaleString('id-ID')} Resi
+                                                </span>
+                                             </div>
+                                             <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 flex items-center gap-2">
+                                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Match: {compComparisonStats.matchCount.toLocaleString('id-ID')}</span>
+                                                <span>•</span>
+                                                <span className="text-rose-600 dark:text-rose-400 font-semibold">Belum Logistik: {compComparisonStats.pickerUnmatchCount.toLocaleString('id-ID')}</span>
+                                             </div>
+                                          </div>
+                                       </div>
+
+                                       {/* Filter Status Match (Pills) */}
+                                       <div className="flex items-center bg-white dark:bg-gray-850 p-1 rounded-xl border border-gray-200 dark:border-gray-700 text-xs">
+                                          <button
+                                             onClick={() => { setPickerLogistikMatchFilter('ALL'); setPickerLogistikPage(1); }}
+                                             className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${
+                                                pickerLogistikMatchFilter === 'ALL'
+                                                   ? 'bg-cyan-600 text-white shadow-xs'
+                                                   : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                                             }`}
+                                          >
+                                             Semua ({compComparisonStats.totalPicker.toLocaleString('id-ID')})
+                                          </button>
+                                          <button
+                                             onClick={() => { setPickerLogistikMatchFilter('MATCH'); setPickerLogistikPage(1); }}
+                                             className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${
+                                                pickerLogistikMatchFilter === 'MATCH'
+                                                   ? 'bg-emerald-600 text-white shadow-xs'
+                                                   : 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+                                             }`}
+                                          >
+                                             ✅ Match ({compComparisonStats.matchCount.toLocaleString('id-ID')})
+                                          </button>
+                                          <button
+                                             onClick={() => { setPickerLogistikMatchFilter('UNMATCH'); setPickerLogistikPage(1); }}
+                                             className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${
+                                                pickerLogistikMatchFilter === 'UNMATCH'
+                                                   ? 'bg-rose-600 text-white shadow-xs'
+                                                   : 'text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                                             }`}
+                                          >
+                                             ❌ Belum Logistik ({compComparisonStats.pickerUnmatchCount.toLocaleString('id-ID')})
+                                          </button>
+                                       </div>
+                                    </div>
+
+                                    {/* Toolbar Filter Kolom Picker (TANPA KOLOM SHIFT) */}
+                                    <div className="p-2.5 bg-gray-50/70 dark:bg-gray-850/50 border-b border-gray-200 dark:border-gray-700 grid grid-cols-1 sm:grid-cols-12 gap-2">
+                                       <div className="sm:col-span-5 relative h-8">
+                                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" size={13} />
+                                          <input
+                                             type="text"
+                                             placeholder="Cari barcode / staff..."
+                                             value={pickerLogistikSearch}
+                                             onChange={(e) => { setPickerLogistikSearch(e.target.value); setPickerLogistikPage(1); }}
+                                             className="w-full pl-7 pr-6 h-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-semibold text-gray-800 dark:text-gray-200 placeholder-gray-400 focus:outline-none focus:border-cyan-500"
+                                          />
+                                          {pickerLogistikSearch && (
+                                             <button onClick={() => setPickerLogistikSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                                <X size={11} />
+                                             </button>
+                                          )}
+                                       </div>
+
+                                       <div className="sm:col-span-4 h-8">
+                                          <select
+                                             value={pickerLogistikStaffFilter}
+                                             onChange={(e) => { setPickerLogistikStaffFilter(e.target.value); setPickerLogistikPage(1); }}
+                                             className="w-full h-full px-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-semibold text-gray-800 dark:text-gray-200 focus:outline-none focus:border-cyan-500"
+                                          >
+                                             <option value="ALL">Semua Staff ({logistikPickerStaffList.length})</option>
+                                             {logistikPickerStaffList.map(st => (
+                                                <option key={st} value={st}>{st}</option>
+                                             ))}
+                                          </select>
+                                       </div>
+
+                                       <div className="sm:col-span-3 h-8">
+                                          <select
+                                             value={pickerLogistikTypeFilter}
+                                             onChange={(e) => { setPickerLogistikTypeFilter(e.target.value as any); setPickerLogistikPage(1); }}
+                                             className="w-full h-full px-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-semibold text-gray-800 dark:text-gray-200 focus:outline-none focus:border-cyan-500"
+                                          >
+                                             <option value="ALL">Semua Tipe</option>
+                                             <option value="MANUAL">Satuan ({compComparisonStats.satuanCount})</option>
+                                             <option value="PACKING_LIST">P.List ({compComparisonStats.packingListCount})</option>
+                                          </select>
+                                       </div>
+                                    </div>
+
+                                    {/* Tabel Data Kolom Kiri (Picker - TANPA KOLOM SHIFT) */}
+                                    <div className="flex-1 overflow-x-auto overflow-y-auto min-h-[300px] max-h-[500px]">
+                                       <table className="w-full text-left whitespace-nowrap text-xs">
+                                          <thead className="bg-gray-50/90 dark:bg-gray-850/90 backdrop-blur sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700">
+                                             <tr>
+                                                <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400 w-10 text-center">#</th>
+                                                <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">Waktu</th>
+                                                <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">Barcode / Resi</th>
+                                                <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">Staff Picker</th>
+                                                <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">Leader</th>
+                                                <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400 text-center">Status Logistik</th>
+                                             </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                                             {isLoadingDualComparison ? (
+                                                <tr>
+                                                   <td colSpan={6} className="py-12 text-center text-gray-400">
+                                                      <Loader2 size={24} className="animate-spin mx-auto text-cyan-600 mb-2" />
+                                                      <span>Memuat seluruh data Picker...</span>
+                                                   </td>
+                                                </tr>
+                                             ) : paginatedPickerComparisonList.length === 0 ? (
+                                                <tr>
+                                                   <td colSpan={6} className="py-12 text-center text-gray-400 text-xs">
+                                                      Tidak ada data scan Picker yang sesuai dengan filter.
+                                                   </td>
+                                                </tr>
+                                             ) : (
+                                                paginatedPickerComparisonList.map((item, idx) => (
+                                                   <tr
+                                                      key={item.id || idx}
+                                                      className={`transition-colors ${
+                                                         item.is_matched_logistik
+                                                            ? 'hover:bg-emerald-50/40 dark:hover:bg-emerald-950/20'
+                                                            : 'bg-rose-50/20 dark:bg-rose-950/10 hover:bg-rose-50/50'
+                                                      }`}
+                                                   >
+                                                      <td className="px-3 py-2 text-center font-mono text-gray-400 font-bold">
+                                                         {(pickerLogistikPage - 1) * pickerLogistikRowsPerPage + idx + 1}
+                                                      </td>
+                                                      <td className="px-3 py-2 text-gray-500 dark:text-gray-400 font-mono text-[11px]">
+                                                         {new Date(item.timestamp).toLocaleTimeString('id-ID')}
+                                                      </td>
+                                                      <td 
+                                                         className="px-3 py-2 font-mono font-bold text-gray-900 dark:text-gray-100 select-none cursor-default"
+                                                         onContextMenu={(e) => e.preventDefault()}
+                                                         onCopy={(e) => e.preventDefault()}
+                                                         onMouseDown={(e) => { if (e.detail > 1) e.preventDefault(); }}
+                                                      >
+                                                         <span 
+                                                            className="select-none pointer-events-none inline-block" 
+                                                            style={{ userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}
+                                                         >
+                                                            {item.barcode}
+                                                         </span>
+                                                      </td>
+                                                      <td className="px-3 py-2 font-medium text-gray-800 dark:text-gray-200">
+                                                         <div className="flex items-center gap-1.5">
+                                                            <div className="w-5 h-5 rounded-full bg-cyan-600 text-white font-bold text-[10px] flex items-center justify-center shrink-0">
+                                                               {(item.employee_name || 'P').charAt(0).toUpperCase()}
+                                                            </div>
+                                                            <span>{item.employee_name || '-'}</span>
+                                                         </div>
+                                                      </td>
+                                                      <td className="px-3 py-2 text-[11px] text-gray-500 font-mono">
+                                                         {item.leader_profile || '-'}
+                                                      </td>
+                                                      <td className="px-3 py-2 text-center">
+                                                         {item.is_matched_logistik ? (
+                                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800">
+                                                               ✅ MATCH
+                                                            </span>
+                                                         ) : (
+                                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400 border border-rose-300 dark:border-rose-800">
+                                                               ❌ BELUM LOGISTIK
+                                                            </span>
+                                                         )}
+                                                      </td>
+                                                   </tr>
+                                                ))
+                                             )}
+                                          </tbody>
+                                       </table>
+                                    </div>
+
+                                    {/* Pagination Footer Kolom Picker */}
+                                    <div className="p-2.5 bg-gray-50 dark:bg-gray-850 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between text-xs">
+                                       <div className="flex items-center gap-1 text-gray-500">
+                                          <span>Baris:</span>
+                                          <select
+                                             value={pickerLogistikRowsPerPage}
+                                             onChange={(e) => { setPickerLogistikRowsPerPage(Number(e.target.value)); setPickerLogistikPage(1); }}
+                                             className="px-1.5 py-0.5 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 font-bold text-[11px]"
+                                          >
+                                             <option value={25}>25</option>
+                                             <option value={50}>50</option>
+                                             <option value={100}>100</option>
+                                             <option value={200}>200</option>
+                                             <option value={10000}>Semua</option>
+                                          </select>
+                                          <span className="ml-1 text-[11px]">({filteredPickerComparisonList.length} dari {allPickerMasterList.length})</span>
+                                       </div>
+
+                                       <div className="flex items-center gap-1">
+                                          <button
+                                             onClick={() => setPickerLogistikPage(p => Math.max(1, p - 1))}
+                                             disabled={pickerLogistikPage === 1}
+                                             className="px-2 py-1 rounded bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 disabled:opacity-40 text-xs font-bold cursor-pointer"
+                                          >
+                                             <ChevronLeft size={12} />
+                                          </button>
+                                          <span className="px-2 py-0.5 font-bold text-[11px] text-cyan-600 dark:text-cyan-400">
+                                             {pickerLogistikPage} / {Math.max(1, Math.ceil(filteredPickerComparisonList.length / pickerLogistikRowsPerPage))}
+                                          </span>
+                                          <button
+                                             onClick={() => setPickerLogistikPage(p => p + 1)}
+                                             disabled={pickerLogistikPage * pickerLogistikRowsPerPage >= filteredPickerComparisonList.length}
+                                             className="px-2 py-1 rounded bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 disabled:opacity-40 text-xs font-bold cursor-pointer"
+                                          >
+                                             <ChevronRight size={12} />
+                                          </button>
+                                       </div>
+                                    </div>
+                                 </div>
+
+                                 {/* ========================================================================= */}
+                                 {/* KOLOM KANAN: DATA LOGISTIK                                                */}
+                                 {/* ========================================================================= */}
+                                 <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200/80 dark:border-gray-700/80 shadow-xs flex flex-col overflow-hidden">
+                                    {/* Header Kolom Kanan */}
+                                    <div className="p-3.5 bg-gradient-to-r from-indigo-50 to-purple-50/40 dark:from-indigo-950/40 dark:to-purple-950/20 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-2.5">
+                                       <div className="flex items-center gap-2.5">
+                                          <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold shadow-sm shadow-indigo-600/30">
+                                             <Truck size={16} />
+                                          </div>
+                                          <div>
+                                             <div className="flex items-center gap-2">
+                                                <h3 className="text-sm font-bold text-gray-900 dark:text-white">Data Logistik</h3>
+                                                <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200 font-mono">
+                                                   {compComparisonStats.totalLogistik.toLocaleString('id-ID')} Resi
+                                                </span>
+                                             </div>
+                                             <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 flex items-center gap-2">
+                                                 <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Match: {compComparisonStats.totalMatchLogistik.toLocaleString('id-ID')}</span>
+                                                 <span>•</span>
+                                                 <span className="text-rose-600 dark:text-rose-400 font-semibold">Cancel: {compComparisonStats.cancelLogistikCount.toLocaleString('id-ID')}</span>
+                                                 <span>•</span>
+                                                 <span className="text-gray-500 dark:text-gray-400 font-semibold">Belum Picker: {compComparisonStats.pureUnmatchLogistik.toLocaleString('id-ID')}</span>
+                                              </div>
+                                           </div>
+                                       </div>
+
+                                       {/* Filter Status Match (Pills dengan 4 Level Status) */}
+                                       <div className="flex items-center bg-white dark:bg-gray-850 p-1 rounded-xl border border-gray-200 dark:border-gray-700 text-xs flex-wrap gap-1">
+                                           <button
+                                              onClick={() => { setCompLogistikMatchFilter('ALL'); setCompLogistikPage(1); }}
+                                              className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${
+                                                 compLogistikMatchFilter === 'ALL'
+                                                    ? 'bg-indigo-600 text-white shadow-xs'
+                                                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                                              }`}
+                                           >
+                                              Semua ({compComparisonStats.totalLogistik.toLocaleString('id-ID')})
+                                           </button>
+                                           <button
+                                              onClick={() => { setCompLogistikMatchFilter('MATCH_SAME_DAY'); setCompLogistikPage(1); }}
+                                              className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${
+                                                 compLogistikMatchFilter === 'MATCH_SAME_DAY'
+                                                    ? 'bg-emerald-600 text-white shadow-xs'
+                                                    : 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+                                              }`}
+                                              title="Match dengan scan Picker hari yang sama"
+                                           >
+                                              🟢 Match Hari Ini ({compComparisonStats.matchTodayCount.toLocaleString('id-ID')})
+                                           </button>
+                                           <button
+                                              onClick={() => { setCompLogistikMatchFilter('MATCH_PREV_DAY'); setCompLogistikPage(1); }}
+                                              className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${
+                                                 compLogistikMatchFilter === 'MATCH_PREV_DAY'
+                                                    ? 'bg-amber-600 text-white shadow-xs'
+                                                    : 'text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40'
+                                              }`}
+                                              title="Match dengan scan Picker tanggal sebelumnya / riwayat"
+                                           >
+                                              🟡 Match Beda Hari ({compComparisonStats.matchPrevCount.toLocaleString('id-ID')})
+                                           </button>
+                                           <button
+                                              onClick={() => { setCompLogistikMatchFilter('CANCEL'); setCompLogistikPage(1); }}
+                                              className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${
+                                                 compLogistikMatchFilter === 'CANCEL'
+                                                    ? 'bg-rose-600 text-white shadow-xs'
+                                                    : 'text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                                              }`}
+                                              title="Data Logistik yang terdaftar di menu Data Cancel"
+                                           >
+                                              🚫 Data Cancel ({compComparisonStats.cancelLogistikCount.toLocaleString('id-ID')})
+                                           </button>
+                                           <button
+                                              onClick={() => { setCompLogistikMatchFilter('UNMATCH'); setCompLogistikPage(1); }}
+                                              className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${
+                                                 compLogistikMatchFilter === 'UNMATCH'
+                                                    ? 'bg-gray-700 text-white shadow-xs'
+                                                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                              }`}
+                                              title="Resi yang belum pernah di-scan Picker sama sekali"
+                                           >
+                                              🔴 Belum di-scan ({compComparisonStats.pureUnmatchLogistik.toLocaleString('id-ID')})
+                                           </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Toolbar Filter Kolom Logistik */}
+                                    <div className="p-2.5 bg-gray-50/70 dark:bg-gray-850/50 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
+                                       <div className="flex-1 relative h-8">
+                                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" size={13} />
+                                          <input
+                                             type="text"
+                                             placeholder="Cari resi / staff / tgl picker..."
+                                             value={compLogistikSearch}
+                                             onChange={(e) => { setCompLogistikSearch(e.target.value); setCompLogistikPage(1); }}
+                                             className="w-full pl-7 pr-6 h-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-semibold text-gray-800 dark:text-gray-200 placeholder-gray-400 focus:outline-none focus:border-indigo-500"
+                                          />
+                                          {compLogistikSearch && (
+                                             <button onClick={() => setCompLogistikSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                                <X size={11} />
+                                             </button>
+                                          )}
+                                       </div>
+
+                                       <button
+                                          onClick={() => {
+                                             resetDualComparisonFilters();
+                                             loadDualComparisonData();
+                                          }}
+                                          disabled={isLoadingDualComparison}
+                                          className="px-2.5 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 text-xs font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                          title="Refresh & Reset Filter"
+                                       >
+                                          <RefreshCw size={12} className={isLoadingDualComparison ? 'animate-spin' : ''} />
+                                       </button>
+                                    </div>
+
+                                    {/* Tabel Data Kolom Kanan (Logistik) */}
+                                    <div className="flex-1 overflow-x-auto overflow-y-auto min-h-[300px] max-h-[500px]">
+                                       <table className="w-full text-left whitespace-nowrap text-xs">
+                                          <thead className="bg-gray-50/90 dark:bg-gray-850/90 backdrop-blur sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700">
+                                             <tr>
+                                                <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400 w-10 text-center">#</th>
+                                                <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">Waktu</th>
+                                                <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">Barcode / Resi Logistik</th>
+                                                <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">Role / Context</th>
+                                                <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400 text-center">Status Picker</th>
+                                             </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                                             {isLoadingDualComparison ? (
+                                                <tr>
+                                                   <td colSpan={5} className="py-12 text-center text-gray-400">
+                                                      <Loader2 size={24} className="animate-spin mx-auto text-indigo-600 mb-2" />
+                                                      <span>Memuat seluruh data Logistik...</span>
+                                                   </td>
+                                                </tr>
+                                             ) : paginatedLogistikComparisonList.length === 0 ? (
+                                                <tr>
+                                                   <td colSpan={5} className="py-12 text-center text-gray-400 text-xs">
+                                                      Tidak ada data Logistik yang sesuai dengan filter.
+                                                   </td>
+                                                </tr>
+                                             ) : (
+                                                paginatedLogistikComparisonList.map((item, idx) => (
+                                                   <tr
+                                                      key={item.id || idx}
+                                                      className={`transition-colors ${
+                                                         item.is_cancelled
+                                                            ? 'bg-rose-50/80 dark:bg-rose-950/40 hover:bg-rose-100/70 border-l-4 border-l-rose-500'
+                                                            : item.match_type === 'SAME_DAY'
+                                                            ? 'hover:bg-emerald-50/40 dark:hover:bg-emerald-950/20'
+                                                            : item.match_type === 'PREV_DAY'
+                                                            ? 'bg-amber-50/30 dark:bg-amber-950/20 hover:bg-amber-50/60'
+                                                            : 'bg-rose-50/20 dark:bg-rose-950/10 hover:bg-rose-50/40'
+                                                      }`}
+                                                   >
+                                                      <td className="px-3 py-2 text-center font-mono text-gray-400 font-bold">
+                                                         {(compLogistikPage - 1) * compLogistikRowsPerPage + idx + 1}
+                                                      </td>
+                                                      <td className="px-3 py-2 text-gray-500 dark:text-gray-400 font-mono text-[11px]">
+                                                         {new Date(item.timestamp).toLocaleTimeString('id-ID')}
+                                                      </td>
+                                                      <td 
+                                                         className="px-3 py-2 font-mono font-bold text-gray-900 dark:text-gray-100 select-none cursor-default"
+                                                         onContextMenu={(e) => e.preventDefault()}
+                                                         onCopy={(e) => e.preventDefault()}
+                                                         onMouseDown={(e) => { if (e.detail > 1) e.preventDefault(); }}
+                                                      >
+                                                         <div className="flex items-center gap-1.5 flex-wrap">
+                                                            <span 
+                                                               className="select-none pointer-events-none inline-block" 
+                                                               style={{ userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}
+                                                            >
+                                                               {item.barcode}
+                                                            </span>
+                                                            {item.is_cancelled && (
+                                                               <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-rose-600 text-white shadow-xs">
+                                                                  CANCEL
+                                                               </span>
+                                                            )}
+                                                         </div>
+                                                      </td>
+                                                      <td className="px-3 py-2 font-semibold text-gray-700 dark:text-gray-300">
+                                                         <div className="flex items-center gap-1.5 flex-wrap">
+                                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                                                               {item.role || 'LOGISTIK'}
+                                                            </span>
+                                                            {item.is_cancelled && (
+                                                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                                                                  <AlertTriangle size={10} /> DATA CANCEL
+                                                               </span>
+                                                            )}
+                                                         </div>
+                                                      </td>
+                                                      <td className="px-3 py-2 text-center">
+                                                         {item.match_type === 'CANCEL' ? (
+                                                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                                                               <Ban size={11} className="text-rose-600 dark:text-rose-400" />
+                                                               DATA CANCEL
+                                                            </span>
+                                                         ) : item.match_type === 'SAME_DAY' ? (
+                                                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800">
+                                                               <CheckCircle2 size={11} className="text-emerald-600 dark:text-emerald-400" />
+                                                               MATCH HARI INI
+                                                            </span>
+                                                         ) : item.match_type === 'PREV_DAY' ? (
+                                                            <div className="flex flex-col items-center">
+                                                               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                                                                  <Clock size={11} className="text-amber-600 dark:text-amber-400" />
+                                                                  MATCH (TGL {item.picker_history_date || '-'})
+                                                               </span>
+                                                               {item.picker_history_staff && (
+                                                                  <span className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5 font-bold">
+                                                                     Staff: {item.picker_history_staff}
+                                                                  </span>
+                                                               )}
+                                                            </div>
+                                                         ) : (
+                                                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border border-gray-300 dark:border-gray-700">
+                                                               <XCircle size={11} className="text-gray-500" />
+                                                               BELUM DI-SCAN
+                                                            </span>
+                                                         )}
+                                                      </td>
+                                                   </tr>
+                                                ))
+                                             )}
+                                          </tbody>
+                                       </table>
+                                    </div>
+
+                                    {/* Pagination Footer Kolom Logistik */}
+                                    <div className="p-2.5 bg-gray-50 dark:bg-gray-850 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between text-xs">
+                                       <div className="flex items-center gap-1 text-gray-500">
+                                          <span>Baris:</span>
+                                          <select
+                                             value={compLogistikRowsPerPage}
+                                             onChange={(e) => { setCompLogistikRowsPerPage(Number(e.target.value)); setCompLogistikPage(1); }}
+                                             className="px-1.5 py-0.5 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 font-bold text-[11px]"
+                                          >
+                                             <option value={25}>25</option>
+                                             <option value={50}>50</option>
+                                             <option value={100}>100</option>
+                                             <option value={200}>200</option>
+                                             <option value={10000}>Semua</option>
+                                          </select>
+                                          <span className="ml-1 text-[11px]">({filteredLogistikComparisonList.length} dari {allLogistikMasterList.length})</span>
+                                       </div>
+
+                                       <div className="flex items-center gap-1">
+                                          <button
+                                             onClick={() => setCompLogistikPage(p => Math.max(1, p - 1))}
+                                             disabled={compLogistikPage === 1}
+                                             className="px-2 py-1 rounded bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 disabled:opacity-40 text-xs font-bold cursor-pointer"
+                                          >
+                                             <ChevronLeft size={12} />
+                                          </button>
+                                          <span className="px-2 py-0.5 font-bold text-[11px] text-indigo-600 dark:text-indigo-400">
+                                             {compLogistikPage} / {Math.max(1, Math.ceil(filteredLogistikComparisonList.length / compLogistikRowsPerPage))}
+                                          </span>
+                                          <button
+                                             onClick={() => setCompLogistikPage(p => p + 1)}
+                                             disabled={compLogistikPage * compLogistikRowsPerPage >= filteredLogistikComparisonList.length}
+                                             className="px-2 py-1 rounded bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 disabled:opacity-40 text-xs font-bold cursor-pointer"
+                                          >
+                                             <ChevronRight size={12} />
+                                          </button>
+                                       </div>
+                                    </div>
+                                 </div>
+                              </div>
                            </div>
                         )}
 
