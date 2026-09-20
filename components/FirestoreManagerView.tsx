@@ -47,14 +47,55 @@ export function FirestoreManagerView() {
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
+  // Helper to generate barcode variations for Firestore 'in' query
+  const generateBarcodeVariations = (input: string): string[] => {
+    const clean = input.trim();
+    if (!clean) return [];
+    const set = new Set<string>();
+    set.add(clean);
+    set.add(clean.toUpperCase());
+    set.add(clean.toLowerCase());
+    
+    // Strip or add 0026
+    if (clean.startsWith('0026')) {
+      const s = clean.slice(2);
+      set.add(s);
+      set.add(s.toUpperCase());
+    } else {
+      set.add('0026' + clean);
+    }
+    
+    // Dash variations for prefix-based couriers (LXAD, JNAP, JNEB, JP, SPX)
+    if (/^LXAD-?/i.test(clean)) {
+      const digits = clean.replace(/^LXAD-?/i, '');
+      set.add(`LXAD-${digits}`);
+      set.add(`LXAD${digits}`);
+      set.add(`lxad-${digits}`);
+      set.add(`lxad${digits}`);
+    }
+    if (/^JNAP-?/i.test(clean)) {
+      const digits = clean.replace(/^JNAP-?/i, '');
+      set.add(`JNAP-${digits}`);
+      set.add(`JNAP${digits}`);
+      set.add(`jnap-${digits}`);
+      set.add(`jnap${digits}`);
+    }
+    if (/^JNEB-?/i.test(clean)) {
+      const digits = clean.replace(/^JNEB-?/i, '');
+      set.add(`JNEB-${digits}`);
+      set.add(`JNEB${digits}`);
+      set.add(`jneb-${digits}`);
+      set.add(`jneb${digits}`);
+    }
+    
+    return Array.from(set).slice(0, 30);
+  };
+
   const fetchRecentData = async () => {
     setLoading(true);
     setErrorMsg('');
     try {
       let constraints: any[] = [orderBy('timestamp', 'desc')];
-      if (limitCount > 0) {
-        constraints.push(limit(limitCount));
-      }
       
       let actualStartDate = startDate;
       let actualEndDate = isDateRange ? endDate : startDate;
@@ -66,6 +107,10 @@ export function FirestoreManagerView() {
       if (actualEndDate) {
         const endMs = new Date(`${actualEndDate}T23:59:59.999`).getTime();
         constraints.push(where('timestamp', '<=', endMs));
+      }
+
+      if (limitCount > 0) {
+        constraints.push(limit(limitCount));
       }
 
       const q = query(
@@ -86,8 +131,8 @@ export function FirestoreManagerView() {
     }
   };
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSearch = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!searchTerm.trim()) {
       fetchRecentData();
       return;
@@ -96,12 +141,14 @@ export function FirestoreManagerView() {
     setLoading(true);
     setErrorMsg('');
     try {
-      const variations = Array.from(new Set([searchTerm.trim(), searchTerm.trim().toUpperCase(), searchTerm.trim().toLowerCase()]));
-      
       let q;
       if (searchBy === 'id') {
         q = query(collection(db, 'scanned_items'), where('__name__', '==', searchTerm.trim()));
+      } else if (searchBy === 'barcode') {
+        const variations = generateBarcodeVariations(searchTerm);
+        q = query(collection(db, 'scanned_items'), where('barcode', 'in', variations));
       } else {
+        const variations = Array.from(new Set([searchTerm.trim(), searchTerm.trim().toUpperCase(), searchTerm.trim().toLowerCase()]));
         q = query(collection(db, 'scanned_items'), where(searchBy, 'in', variations));
       }
       
@@ -134,8 +181,10 @@ export function FirestoreManagerView() {
   };
 
   useEffect(() => {
-    fetchRecentData();
-  }, [limitCount]);
+    if (!searchTerm.trim()) {
+      fetchRecentData();
+    }
+  }, [limitCount, startDate, endDate, isDateRange]);
 
   const handleDelete = async (id: string) => {
     if (!window.confirm('Yakin ingin menghapus data ini dari Firestore secara permanen?')) {
@@ -236,6 +285,14 @@ export function FirestoreManagerView() {
               <option value={5000}>5000 Data</option>
               <option value={0}>Tanpa Batas (Semua Data)</option>
             </select>
+          </div>
+        </div>
+
+        {/* Database Info Notice */}
+        <div className="p-3 bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-xl flex items-start gap-2.5 text-xs text-amber-800 dark:text-amber-300">
+          <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <span className="font-bold">Info Database Firestore:</span> Menu ini mengelola data collection <code>scanned_items</code> di <strong>Cloud Firestore (Firebase)</strong>. Seluruh data operasional harian utama (Data Packing, Picker, Ekspedisi, Retur, dll.) tersimpan di <strong>Supabase</strong>. Data bulan sebelumnya di Firestore hanya tersedia jika telah disinkronkan melalui menu <strong>Search Data 2</strong> (DevMode Sync).
           </div>
         </div>
 

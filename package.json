@@ -7,7 +7,8 @@
     "dev": "vite",
     "prebuild": "node update-version.js",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "import-csv": "node import_csv_to_firestore.cjs"
   },
   "dependencies": {
     "@google/genai": "^1.30.0",

@@ -2468,6 +2468,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       matched: boolean;
    } | null>(null);
 
+   const ALL_SYNC_ROLES = ['PICKER', 'PACKING', 'LOGISTIK', 'EKSPEDISI', 'RETUR', 'INVENTORY', 'LEADER', 'OJOL', 'UNKNOWN'];
+
    const handleVerifyAndMatchData = async (startDate?: string, endDate?: string) => {
       const start = startDate || syncStartDate || getTodayString();
       const end = endDate || syncEndDate || start;
@@ -2477,39 +2479,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          const startMs = new Date(`${start}T00:00:00`).getTime();
          const endMs = new Date(`${end}T23:59:59.999`).getTime();
 
-         // 1. Fetch Supabase count & role breakdown
-         let allSbData: any[] = [];
-         let page = 0;
-         const pageSize = 1000;
-         let hasMore = true;
+         // 1. Fetch Supabase count & role breakdown using role-indexed queries (lightning fast)
+         const sbRoles: Record<string, number> = {};
+         let sbTotalCount = 0;
 
-         while (hasMore) {
-            const { data, error } = await supabase
-               .from('scanned_items')
-               .select('role')
-               .gte('timestamp', startMs)
-               .lte('timestamp', endMs)
-               .order('timestamp', { ascending: true })
-               .range(page * pageSize, (page + 1) * pageSize - 1);
+         const rolesToCheck = (!syncRole || syncRole === 'SEMUA') ? ALL_SYNC_ROLES : [syncRole];
 
-            if (error) {
-               console.error("Supabase count error:", error);
-               break;
-            }
-            if (data && data.length > 0) {
-               allSbData = allSbData.concat(data);
-               if (data.length < pageSize) hasMore = false;
-               else page++;
-            } else {
-               hasMore = false;
+         for (const r of rolesToCheck) {
+            let offset = 0;
+            const pageSize = 1000;
+            let hasMore = true;
+
+            while (hasMore) {
+               const { data, error } = await supabase
+                  .from('scanned_items')
+                  .select('id')
+                  .eq('role', r)
+                  .gte('timestamp', startMs)
+                  .lte('timestamp', endMs)
+                  .range(offset, offset + pageSize - 1);
+
+               if (error) {
+                  console.error(`Supabase count error for role ${r}:`, error);
+                  break;
+               }
+
+               if (data && data.length > 0) {
+                  sbRoles[r] = (sbRoles[r] || 0) + data.length;
+                  sbTotalCount += data.length;
+                  if (data.length < pageSize) hasMore = false;
+                  else offset += pageSize;
+               } else {
+                  hasMore = false;
+               }
             }
          }
-
-         const sbRoles: Record<string, number> = {};
-         allSbData.forEach(row => {
-            const r = (row.role || 'MISSING_ROLE').toUpperCase();
-            sbRoles[r] = (sbRoles[r] || 0) + 1;
-         });
 
          // 2. Fetch Firestore count & role breakdown
          const activeFsQuery = fsQuery(
@@ -2528,11 +2532,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
          const report = {
             dateStr: start === end ? start : `${start} s/d ${end}`,
-            sbTotal: allSbData.length,
+            sbTotal: sbTotalCount,
             fsTotal: fsSnap.docs.length,
             sbRoles,
             fsRoles,
-            matched: allSbData.length === fsSnap.docs.length
+            matched: sbTotalCount === fsSnap.docs.length
          };
 
          setSyncAuditReport(report);
@@ -2603,75 +2607,83 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             if (!isNaN(parsed)) endTs = parsed;
          }
 
-         let page = 0;
-         const pageSize = 1000;
-         const BATCH_SIZE = 400; // Optimal safe batch size for Firestore
-         let hasMore = true;
+         const BATCH_SIZE = 250; // Optimal safe batch size for Firestore to avoid write exhaustion
          let grandProcessed = 0;
          let batchCurrent = 0;
          const roleBreakdown: Record<string, number> = {};
 
-         while (hasMore) {
-            let query = supabase
-               .from('scanned_items')
-               .select('*')
-               .order('timestamp', { ascending: true })
-               .range(page * pageSize, (page + 1) * pageSize - 1);
+         const rolesToSync = (!syncRole || syncRole === 'SEMUA') ? ALL_SYNC_ROLES : [syncRole];
 
-            if (startTs !== null) query = query.gte('timestamp', startTs);
-            if (endTs !== null) query = query.lte('timestamp', endTs);
-            if (syncRole && syncRole !== 'SEMUA') query = query.eq('role', syncRole);
+         for (const r of rolesToSync) {
+            let offset = 0;
+            const pageSize = 1000;
+            let hasMore = true;
 
-            const { data, error } = await query;
-            if (error) {
-               throw new Error(`Gagal mengambil data dari Supabase: ${error.message}`);
-            }
+            while (hasMore) {
+               let query = supabase
+                  .from('scanned_items')
+                  .select('*')
+                  .eq('role', r)
+                  .order('timestamp', { ascending: true })
+                  .range(offset, offset + pageSize - 1);
 
-            if (!data || data.length === 0) {
-               hasMore = false;
-               break;
-            }
+               if (startTs !== null) query = query.gte('timestamp', startTs);
+               if (endTs !== null) query = query.lte('timestamp', endTs);
 
-            // Update role breakdown
-            data.forEach((item: any) => {
-               const r = (item.role || 'UNKNOWN').toUpperCase();
-               roleBreakdown[r] = (roleBreakdown[r] || 0) + 1;
-            });
-            setSyncRoleBreakdownFs({ ...roleBreakdown });
-
-            // Stream write to Firestore in chunks of BATCH_SIZE (400)
-            const numChunks = Math.ceil(data.length / BATCH_SIZE);
-            for (let c = 0; c < numChunks; c++) {
-               const chunkItems = data.slice(c * BATCH_SIZE, (c + 1) * BATCH_SIZE);
-               const batch = writeBatch(db);
-
-               for (const item of chunkItems) {
-                  const docId = item.id ? String(item.id) : `${item.barcode || 'item'}_${item.role || ''}_${Date.now()}`;
-                  const docRef = doc(db, targetCollection, docId);
-
-                  const cleanItem: Record<string, any> = {};
-                  Object.keys(item).forEach((key) => {
-                     if (item[key] !== undefined) {
-                        cleanItem[key] = item[key];
-                     }
-                  });
-
-                  batch.set(docRef, cleanItem, { merge: true });
+               const { data, error } = await query;
+               if (error) {
+                  throw new Error(`Gagal mengambil data role ${r} dari Supabase: ${error.message}`);
                }
 
-               await batch.commit();
-               grandProcessed += chunkItems.length;
-               batchCurrent++;
+               if (!data || data.length === 0) {
+                  hasMore = false;
+                  break;
+               }
 
-               setSyncProcessedCountFs(grandProcessed);
-               setSyncBatchCurrentFs(batchCurrent);
-               setSyncStatusMsgFs(`Sedang menyinkronkan: ${grandProcessed} data tersimpan di Firestore...`);
-            }
+               // Update role breakdown
+               data.forEach((item: any) => {
+                  const roleName = (item.role || r || 'UNKNOWN').toUpperCase();
+                  roleBreakdown[roleName] = (roleBreakdown[roleName] || 0) + 1;
+               });
+               setSyncRoleBreakdownFs({ ...roleBreakdown });
 
-            if (data.length < pageSize) {
-               hasMore = false;
-            } else {
-               page++;
+               // Stream write to Firestore in chunks of BATCH_SIZE (250)
+               const numChunks = Math.ceil(data.length / BATCH_SIZE);
+               for (let c = 0; c < numChunks; c++) {
+                  const chunkItems = data.slice(c * BATCH_SIZE, (c + 1) * BATCH_SIZE);
+                  const batch = writeBatch(db);
+
+                  for (const item of chunkItems) {
+                     const docId = item.id ? String(item.id) : `${item.barcode || 'item'}_${item.role || ''}_${Date.now()}`;
+                     const docRef = doc(db, targetCollection, docId);
+
+                     const cleanItem: Record<string, any> = {};
+                     Object.keys(item).forEach((key) => {
+                        if (item[key] !== undefined) {
+                           cleanItem[key] = item[key];
+                        }
+                     });
+
+                     batch.set(docRef, cleanItem, { merge: true });
+                  }
+
+                  await batch.commit();
+                  grandProcessed += chunkItems.length;
+                  batchCurrent++;
+
+                  setSyncProcessedCountFs(grandProcessed);
+                  setSyncBatchCurrentFs(batchCurrent);
+                  setSyncStatusMsgFs(`Sedang menyinkronkan: ${grandProcessed} data tersimpan di Firestore...`);
+                  
+                  // Small pause to let Firestore drain the write stream
+                  await new Promise(res => setTimeout(res, 40));
+               }
+
+               if (data.length < pageSize) {
+                  hasMore = false;
+               } else {
+                  offset += pageSize;
+               }
             }
          }
 
@@ -2691,7 +2703,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
    };
 
-   // 13. Day Range Sync with Sequential 400-Doc Commits (Ultra-Stable & Safe)
+   // 13. Day Range Sync with Sequential 250-Doc Commits (Ultra-Stable & Safe)
    const handleSyncSupabaseToFirestoreByDayRange = async () => {
       if (isSyncingFs) return;
       if (!syncStartDate || !syncEndDate) {
@@ -2741,13 +2753,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setSyncStatusMsgFs(`🚀 Memulai Sinkronisasi Rentang (${datesToProcess.length} hari: ${datesToProcess[0].displayStr} s/d ${datesToProcess[datesToProcess.length - 1].displayStr})...`);
 
       let grandTotalProcessed = 0;
+      const rolesToSync = (!syncRole || syncRole === 'SEMUA') ? ALL_SYNC_ROLES : [syncRole];
 
       for (let i = 0; i < datesToProcess.length; i++) {
          const dateInfo = datesToProcess[i];
          let daySuccess = false;
          let retryAttempt = 0;
+         const maxRetries = 3;
 
-         while (!daySuccess) {
+         while (!daySuccess && retryAttempt < maxRetries) {
             try {
                retryAttempt++;
                const statusPrefix = retryAttempt > 1 ? `[Retry #${retryAttempt}] ` : '';
@@ -2756,68 +2770,71 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                const startTs = new Date(`${dateInfo.dateStr}T00:00:00`).getTime();
                const endTs = new Date(`${dateInfo.dateStr}T23:59:59.999`).getTime();
 
-               let page = 0;
-               const pageSize = 1000;
-               const BATCH_SIZE = 400; // Optimal safe batch size for Firestore
-               let hasMore = true;
+               const BATCH_SIZE = 250; // Optimal safe batch size for Firestore
                let dayProcessed = 0;
                let dayBatches = 0;
 
-               while (hasMore) {
-                  let query = supabase
-                     .from('scanned_items')
-                     .select('*')
-                     .gte('timestamp', startTs)
-                     .lte('timestamp', endTs)
-                     .order('timestamp', { ascending: true })
-                     .range(page * pageSize, (page + 1) * pageSize - 1);
+               // Loop through all roles using indexed query
+               for (const r of rolesToSync) {
+                  let offset = 0;
+                  const pageSize = 1000;
+                  let hasMore = true;
 
-                  if (syncRole && syncRole !== 'SEMUA') {
-                     query = query.eq('role', syncRole);
-                  }
+                  while (hasMore) {
+                     const { data, error } = await supabase
+                        .from('scanned_items')
+                        .select('*')
+                        .eq('role', r)
+                        .gte('timestamp', startTs)
+                        .lte('timestamp', endTs)
+                        .order('timestamp', { ascending: true })
+                        .range(offset, offset + pageSize - 1);
 
-                  const { data, error } = await query;
-                  if (error) {
-                     throw new Error(`Gagal mengambil data dari Supabase: ${error.message}`);
-                  }
-
-                  if (!data || data.length === 0) {
-                     hasMore = false;
-                     break;
-                  }
-
-                  // Write to Firestore in batches of BATCH_SIZE (400)
-                  const numChunks = Math.ceil(data.length / BATCH_SIZE);
-                  for (let c = 0; c < numChunks; c++) {
-                     const chunkItems = data.slice(c * BATCH_SIZE, (c + 1) * BATCH_SIZE);
-                     const batch = writeBatch(db);
-
-                     for (const item of chunkItems) {
-                        const docId = item.id ? String(item.id) : `${item.barcode || 'item'}_${item.role || ''}_${Date.now()}`;
-                        const docRef = doc(db, targetCollection, docId);
-
-                        const cleanItem: Record<string, any> = {};
-                        Object.keys(item).forEach((key) => {
-                           if (item[key] !== undefined) {
-                              cleanItem[key] = item[key];
-                           }
-                        });
-
-                        batch.set(docRef, cleanItem, { merge: true });
+                     if (error) {
+                        throw new Error(`Gagal mengambil data role ${r} dari Supabase: ${error.message}`);
                      }
 
-                     await batch.commit();
-                     dayProcessed += chunkItems.length;
-                     dayBatches++;
+                     if (!data || data.length === 0) {
+                        hasMore = false;
+                        break;
+                     }
 
-                     setSyncProcessedCountFs(grandTotalProcessed + dayProcessed);
-                     setSyncStatusMsgFs(`[${dateInfo.displayStr} (${i + 1}/${datesToProcess.length} hari)] Batch ${dayBatches} selesai (+${dayProcessed} data)`);
-                  }
+                     // Write to Firestore in batches of BATCH_SIZE (250)
+                     const numChunks = Math.ceil(data.length / BATCH_SIZE);
+                     for (let c = 0; c < numChunks; c++) {
+                        const chunkItems = data.slice(c * BATCH_SIZE, (c + 1) * BATCH_SIZE);
+                        const batch = writeBatch(db);
 
-                  if (data.length < pageSize) {
-                     hasMore = false;
-                  } else {
-                     page++;
+                        for (const item of chunkItems) {
+                           const docId = item.id ? String(item.id) : `${item.barcode || 'item'}_${item.role || ''}_${Date.now()}`;
+                           const docRef = doc(db, targetCollection, docId);
+
+                           const cleanItem: Record<string, any> = {};
+                           Object.keys(item).forEach((key) => {
+                              if (item[key] !== undefined) {
+                                 cleanItem[key] = item[key];
+                              }
+                           });
+
+                           batch.set(docRef, cleanItem, { merge: true });
+                        }
+
+                        await batch.commit();
+                        dayProcessed += chunkItems.length;
+                        dayBatches++;
+
+                        setSyncProcessedCountFs(grandTotalProcessed + dayProcessed);
+                        setSyncStatusMsgFs(`[${dateInfo.displayStr} (${i + 1}/${datesToProcess.length} hari)] Role ${r} - Batch ${dayBatches} selesai (+${dayProcessed} data)`);
+                        
+                        // Small pause to prevent Firestore write queue exhaustion
+                        await new Promise(res => setTimeout(res, 40));
+                     }
+
+                     if (data.length < pageSize) {
+                        hasMore = false;
+                     } else {
+                        offset += pageSize;
+                     }
                   }
                }
 
@@ -2835,8 +2852,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             } catch (err: any) {
                console.error(`Error sync date ${dateInfo.displayStr}:`, err);
                const errMsg = err?.message || 'timeout/network error';
-               setSyncStatusMsgFs(`⚠️ Gagal Tanggal ${dateInfo.displayStr}: ${errMsg}. Mengulang otomatis dalam 2 detik...`);
-               await new Promise(resolve => setTimeout(resolve, 2000));
+               if (retryAttempt < maxRetries) {
+                  setSyncStatusMsgFs(`⚠️ Gagal Tanggal ${dateInfo.displayStr} (Percobaan ${retryAttempt}/${maxRetries}): ${errMsg}. Mengulang dalam 2 detik...`);
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+               } else {
+                  setSyncStatusMsgFs(`❌ Dilewati Tanggal ${dateInfo.displayStr}: ${errMsg}. Melanjutkan ke tanggal berikutnya...`);
+                  break;
+               }
             }
          }
       }
