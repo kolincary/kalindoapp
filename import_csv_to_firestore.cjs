@@ -1,18 +1,22 @@
 /**
- * Tool Import CSV Supabase -> Cloud Firestore (Ultra Fast Streaming)
+ * Tool Import CSV/Excel Supabase -> Cloud Firestore (Ultra Fast, Multi-File Batch & 100% Robust)
+ * 
+ * Fitur:
+ * 1. Mendukung SATU file maupun BANYAK file CSV/Excel sekaligus secara berurutan.
+ * 2. Mampu memproses ratusan ribu hingga jutaan data dengan aman.
+ * 3. Anti-dobel/duplikasi (menggunakan Document ID asli Supabase dengan merge: true).
  * 
  * Cara Penggunaan:
- * 1. Letakkan file CSV di folder proyek ini (contoh: scanned_items.csv atau backup.csv)
- * 2. Jalankan perintah di Terminal / Command Prompt:
- *    node import_csv_to_firestore.cjs
+ * - Import SEMUA file CSV di folder:
+ *   npm run import-csv
  * 
- * Atau tentukan path file secara langsung:
- *    node import_csv_to_firestore.cjs "C:\path\ke\file_backup.csv"
+ * - Import 1 file tertentu:
+ *   node import_csv_to_firestore.cjs "scanned_agustus.csv"
  */
 
 const fs = require('fs');
 const path = require('path');
-const readline = require('readline');
+const XLSX = require('./node_modules/xlsx');
 
 // Import Firebase Client SDK from local node_modules
 const { initializeApp } = require('./node_modules/firebase/app');
@@ -32,132 +36,102 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app, "project-ks");
 const TARGET_COLLECTION = 'scanned_items';
 const BATCH_SIZE = 250; // Ukuran batch optimal & aman
-const THROTTLE_DELAY_MS = 30; // Jeda mikro agar write stream Firestore stabil
+const THROTTLE_DELAY_MS = 25; // Jeda mikro agar write stream Firestore stabil
 
-// Parser baris CSV yang mendukung koma di dalam tanda kutip ("...")
-function parseCSVLine(text) {
-  const result = [];
-  let curr = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-    if (char === '"') {
-      if (inQuotes && text[i + 1] === '"') {
-        curr += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === ',' && !inQuotes) {
-      result.push(curr.trim());
-      curr = '';
-    } else {
-      curr += char;
-    }
+// Bersihkan Document ID dari karakter terlarang Firestore (terutama '/')
+function sanitizeDocId(rawId, row, index) {
+  let id = rawId ? String(rawId).trim() : '';
+  if (!id || id === 'undefined' || id === 'null') {
+    const b = row.barcode ? String(row.barcode).replace(/[^a-zA-Z0-9_-]/g, '') : 'item';
+    const r = row.role ? String(row.role).replace(/[^a-zA-Z0-9_-]/g, '') : '';
+    const ts = row.timestamp || Date.now();
+    id = `${b}_${r}_${ts}_${index}`;
   }
-  result.push(curr.trim());
-  return result;
+  // Ganti tanda garis miring '/' yang dilarang Firestore
+  id = id.replace(/\//g, '_').replace(/\\/g, '_');
+  return id;
 }
 
-// Cari file CSV jika tidak disertakan argumen
-function findCSVFile() {
+// Cari seluruh file CSV / XLSX di folder
+function getAllDataFiles() {
   const argFile = process.argv[2];
-  if (argFile && fs.existsSync(argFile)) {
-    return path.resolve(argFile);
-  }
-
-  const defaultNames = ['scanned_items.csv', 'backup.csv', 'data.csv', 'export.csv'];
-  for (const name of defaultNames) {
-    const p = path.join(__dirname, name);
-    if (fs.existsSync(p)) return p;
-  }
-
-  // Scan file .csv pertama yang ada di folder
-  const files = fs.readdirSync(__dirname);
-  const found = files.find(f => f.toLowerCase().endsWith('.csv'));
-  if (found) return path.join(__dirname, found);
-
-  return null;
-}
-
-async function runImport() {
-  console.log('\n======================================================');
-  console.log('🚀 KALINDO SCAN: IMPORT CSV SUPABASE -> CLOUD FIRESTORE');
-  console.log('======================================================\n');
-
-  const csvPath = findCSVFile();
-  if (!csvPath) {
-    console.error('❌ File CSV tidak ditemukan!');
-    console.log('\nPetunjuk:');
-    console.log('1. Salin file CSV hasil export Supabase ke folder proyek ini.');
-    console.log('2. Atau jalankan dengan argumen: node import_csv_to_firestore.cjs "nama_file.csv"\n');
+  if (argFile) {
+    const resolved = path.resolve(argFile);
+    if (fs.existsSync(resolved)) return [resolved];
+    console.error(`❌ File '${argFile}' tidak ditemukan!`);
     process.exit(1);
   }
 
-  const fileStats = fs.statSync(csvPath);
+  const files = fs.readdirSync(__dirname);
+  const matched = files
+    .filter(f => {
+      const lower = f.toLowerCase();
+      return (lower.endsWith('.csv') || lower.endsWith('.xlsx')) && !lower.includes('package');
+    })
+    .map(f => path.join(__dirname, f));
+
+  return matched;
+}
+
+async function importSingleFile(filePath, fileIndex, totalFiles) {
+  const fileName = path.basename(filePath);
+  const fileStats = fs.statSync(filePath);
   const fileSizeMB = (fileStats.size / (1024 * 1024)).toFixed(2);
-  console.log(`📁 File Target : ${path.basename(csvPath)} (${fileSizeMB} MB)`);
-  console.log(`🎯 Database    : project-ks (Firestore)`);
-  console.log(`📦 Collection  : ${TARGET_COLLECTION}\n`);
 
-  const fileStream = fs.createReadStream(csvPath);
-  const rl = readline.createInterface({
-    input: fileStream,
-    crlfDelay: Infinity
-  });
+  console.log(`\n------------------------------------------------------`);
+  console.log(`📂 [File ${fileIndex}/${totalFiles}] : ${fileName} (${fileSizeMB} MB)`);
+  console.log(`⏳ Membaca & mem-parsing file...`);
 
-  let headers = [];
-  let isFirstLine = true;
-  let lineCount = 0;
+  const workbook = XLSX.readFile(filePath, { raw: false, cellDates: false });
+  const sheetName = workbook.SheetNames[0];
+  const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: null });
+
+  console.log(`📊 Ditemukan : ${rawRows.length.toLocaleString('id-ID')} baris data`);
+  if (rawRows.length === 0) {
+    console.log(`⚠️ File kosong, lewati.`);
+    return 0;
+  }
+
+  console.log(`⏳ Mengirim data ke Firestore ('${TARGET_COLLECTION}')...`);
+  const startTime = Date.now();
   let successCount = 0;
   let batchItems = [];
   let batchNumber = 0;
-  const startTime = Date.now();
 
-  for await (const line of rl) {
-    if (!line.trim()) continue;
+  for (let i = 0; i < rawRows.length; i++) {
+    const raw = rawRows[i];
+    const item = {};
 
-    if (isFirstLine) {
-      headers = parseCSVLine(line).map(h => h.replace(/^["']|["']$/g, '').trim());
-      console.log(`📋 Header Kolom Ditemukan (${headers.length}):`, headers.join(', '));
-      console.log('\n⏳ Memulai proses import ke Firestore...\n');
-      isFirstLine = false;
-      continue;
-    }
+    for (const key in raw) {
+      let val = raw[key];
+      if (val !== null && val !== undefined && val !== '') {
+        const cleanKey = String(key).trim();
 
-    lineCount++;
-    const values = parseCSVLine(line);
-    const row = {};
-
-    headers.forEach((h, idx) => {
-      let val = values[idx] !== undefined ? values[idx] : null;
-      if (val !== null && val !== '') {
-        // Hilangkan quotes
-        if (typeof val === 'string' && val.startsWith('"') && val.endsWith('"')) {
-          val = val.slice(1, -1);
+        if (typeof val === 'string') {
+          val = val.trim();
         }
 
-        // Parse timestamp menjadi integer number jika memungkinkan
-        if (h === 'timestamp' && val) {
+        if (cleanKey === 'barcode') {
+          val = String(val).trim();
+        }
+
+        if (cleanKey === 'timestamp') {
           const num = Number(val);
-          if (!isNaN(num)) {
+          if (!isNaN(num) && num > 0) {
             val = num;
           } else {
-            const parsedDate = new Date(val).getTime();
-            if (!isNaN(parsedDate)) val = parsedDate;
+            const parsed = new Date(val).getTime();
+            if (!isNaN(parsed)) val = parsed;
           }
         }
 
-        row[h] = val;
+        item[cleanKey] = val;
       }
-    });
-
-    if (Object.keys(row).length > 0) {
-      batchItems.push(row);
     }
 
-    // Commit batch jika mencapai BATCH_SIZE (250)
+    const docId = sanitizeDocId(item.id, item, i);
+    batchItems.push({ docId, data: item });
+
     if (batchItems.length >= BATCH_SIZE) {
       batchNumber++;
       await commitBatch(batchItems);
@@ -166,27 +140,59 @@ async function runImport() {
 
       const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
       const speed = Math.round(successCount / (elapsedSec || 1));
-      process.stdout.write(`\r[Batch #${batchNumber}] Terimport: ${successCount.toLocaleString('id-ID')} baris (${speed} data/detik) | Waktu: ${elapsedSec}s`);
+      const pct = Math.round((successCount / rawRows.length) * 100);
+      process.stdout.write(`\r   [Batch #${batchNumber}] Terimport: ${successCount.toLocaleString('id-ID')} / ${rawRows.length.toLocaleString('id-ID')} (${pct}%) | ${speed} data/dtk | ${elapsedSec}s`);
 
-      // Throttle delay
       if (THROTTLE_DELAY_MS > 0) {
         await new Promise(r => setTimeout(r, THROTTLE_DELAY_MS));
       }
     }
   }
 
-  // Sisa item terakhir
   if (batchItems.length > 0) {
     batchNumber++;
     await commitBatch(batchItems);
     successCount += batchItems.length;
   }
 
-  const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
-  console.log(`\n\n======================================================`);
-  console.log(`✅ IMPORT SELESAI DENGAN SUKSES!`);
-  console.log(`📊 Total Baris Terimport : ${successCount.toLocaleString('id-ID')} data`);
-  console.log(`⏱️ Total Waktu           : ${totalTime} detik`);
+  const fileTime = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`\n   ✅ ${fileName} Selesai: ${successCount.toLocaleString('id-ID')} data terimport (${fileTime}s)`);
+  return successCount;
+}
+
+async function runImport() {
+  console.log('\n======================================================');
+  console.log('🚀 KALINDO SCAN: IMPORT CSV/EXCEL -> CLOUD FIRESTORE');
+  console.log('======================================================');
+  console.log(`🎯 Database Target   : project-ks (Firestore)`);
+  console.log(`📦 Collection Target : ${TARGET_COLLECTION}`);
+
+  const files = getAllDataFiles();
+  if (files.length === 0) {
+    console.error('\n❌ Tidak ada file CSV / Excel yang ditemukan di folder!');
+    console.log('\nPetunjuk:');
+    console.log('1. Letakkan satu atau beberapa file CSV di folder proyek ini.');
+    console.log('2. Atau jalankan: node import_csv_to_firestore.cjs "nama_file.csv"\n');
+    process.exit(1);
+  }
+
+  console.log(`\n📁 Total File Ditemukan : ${files.length} file:`);
+  files.forEach((f, idx) => console.log(`   ${idx + 1}. ${path.basename(f)}`));
+
+  const totalStartTime = Date.now();
+  let grandTotalImported = 0;
+
+  for (let i = 0; i < files.length; i++) {
+    const imported = await importSingleFile(files[i], i + 1, files.length);
+    grandTotalImported += imported;
+  }
+
+  const grandTotalTime = ((Date.now() - totalStartTime) / 1000).toFixed(1);
+  console.log(`\n======================================================`);
+  console.log(`🎉 SEMUA FILE TELAH BERHASIL DIIMPORT!`);
+  console.log(`📁 Total File Diproses   : ${files.length} file`);
+  console.log(`📊 Grand Total Data Masuk: ${grandTotalImported.toLocaleString('id-ID')} data`);
+  console.log(`⏱️ Total Waktu           : ${grandTotalTime} detik`);
   console.log(`🎯 Koleksi Firestore     : '${TARGET_COLLECTION}' (project-ks)`);
   console.log(`======================================================\n`);
   process.exit(0);
@@ -194,18 +200,9 @@ async function runImport() {
 
 async function commitBatch(items) {
   const batch = writeBatch(db);
-  for (const item of items) {
-    const docId = item.id ? String(item.id) : `${item.barcode || 'item'}_${item.role || ''}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  for (const { docId, data } of items) {
     const docRef = doc(db, TARGET_COLLECTION, docId);
-
-    const clean = {};
-    for (const k in item) {
-      if (item[k] !== undefined && item[k] !== null) {
-        clean[k] = item[k];
-      }
-    }
-
-    batch.set(docRef, clean, { merge: true });
+    batch.set(docRef, data, { merge: true });
   }
 
   let retries = 3;

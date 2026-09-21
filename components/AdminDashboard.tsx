@@ -3778,6 +3778,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return true;
    }, []);
 
+   // Universal DevMode Check (devmodenew)
+   const isDevModeNew = Boolean(
+      showSecretMenu ||
+      showFsSyncDevMode ||
+      (typeof window !== 'undefined' && (
+         localStorage.getItem('showSecretMenu') === 'true' ||
+         localStorage.getItem('isDevModeNew') === 'true' ||
+         localStorage.getItem('showFakeReportMenu') === 'true'
+      )) ||
+      (batchSearch && batchSearch.toLowerCase().includes('devmodenew')) ||
+      (packingSearch && packingSearch.toLowerCase().includes('devmodenew')) ||
+      (compLogistikSearch && compLogistikSearch.toLowerCase().includes('devmodenew')) ||
+      (pickerLogistikSearch && pickerLogistikSearch.toLowerCase().includes('devmodenew'))
+   );
+
    // Determine if Admin is Super Admin (Can see everything)
    const isSuperAdmin = useMemo(() => {
       if (!currentAdmin) return false;
@@ -9352,7 +9367,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             query = query.gte('timestamp', start.getTime()).lte('timestamp', end.getTime());
          }
 
-         if (filterPackingRole !== 'ALL') query = query.eq('role', filterPackingRole);
+         let effectiveCopyRole = filterPackingRole;
+         if (activeView === 'LOGISTIK_DATA') effectiveCopyRole = 'LOGISTIK';
+         if (effectiveCopyRole !== 'ALL') query = query.eq('role', effectiveCopyRole);
 if (packingSearch) query = query.or(`barcode.ilike.%${packingSearch}%,employee_name.ilike.%${packingSearch}%`);
          if (filterPackingStaff !== 'ALL') {
             query = query.eq('employee_name', filterPackingStaff);
@@ -11879,7 +11896,7 @@ if (filterPackingShift !== 'ALL') {
                                        )}
 
                                        {/* Buttons for Packing and Gudang */}
-                                       {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'LEADER_PENDING_ADMIN' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING') && currentAdmin?.username !== 'logistik' && (
+                                       {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'LEADER_PENDING_ADMIN' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING' || (activeView === 'LOGISTIK_DATA' && isDevModeNew)) && (
                                           <>
                                              {/* Check Invoice - PACKING ONLY */}
                                              {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') && (
@@ -14907,7 +14924,7 @@ if (filterPackingShift !== 'ALL') {
                                                    <th className="px-4 py-3.5 text-xs font-extrabold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                                       <div className="flex items-center gap-2">
                                                          <span className="min-w-[180px]">Barcode Data</span>
-                                                         {(((activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') && filterPackingStaff !== 'ALL') || activeView === 'GUDANG_REPORT') && (
+                                                         {(((activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') && filterPackingStaff !== 'ALL') || activeView === 'GUDANG_REPORT' || (activeView === 'LOGISTIK_DATA' && isDevModeNew)) && (
                                                             <div className="flex gap-2">
                                                                {activeView === 'GUDANG_REPORT' && (
                                                                   <button
@@ -15012,9 +15029,23 @@ if (filterPackingShift !== 'ALL') {
                                                          {activeView !== 'GUDANG_REPORT' && <td className="px-4 py-3.5 text-xs font-bold text-gray-400 dark:text-gray-500 font-mono">{(page - 1) * rowsPerPage + index + 1}</td>}
                                                          {activeView !== 'GUDANG_REPORT' && <td className="px-4 py-3.5 text-xs text-gray-500 dark:text-gray-400 font-mono">{new Date(item.timestamp).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>}
                                                          <td className="px-4 py-3.5">
-                                                            <span className="font-mono font-bold text-xs sm:text-sm text-gray-900 dark:text-gray-100 tracking-wide select-all bg-gray-100/80 dark:bg-gray-800 px-2.5 py-1 rounded-lg border border-gray-200/70 dark:border-gray-700/70 inline-block shadow-2xs">
-                                                               {item.barcode}
-                                                            </span>
+                                                            <div className="flex items-center gap-1.5">
+                                                               <span className="font-mono font-bold text-xs sm:text-sm text-gray-900 dark:text-gray-100 tracking-wide select-all bg-gray-100/80 dark:bg-gray-800 px-2.5 py-1 rounded-lg border border-gray-200/70 dark:border-gray-700/70 inline-block shadow-2xs">
+                                                                  {item.barcode}
+                                                               </span>
+                                                               {isDevModeNew && (
+                                                                  <button
+                                                                     onClick={async () => {
+                                                                        const ok = await copyToClipboard(item.barcode);
+                                                                        if (ok) setSuccessToast(`Barcode ${item.barcode} disalin!`);
+                                                                     }}
+                                                                     className="p-1 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 hover:text-blue-600 transition-colors cursor-pointer"
+                                                                     title="Salin Barcode Ini"
+                                                                  >
+                                                                     <Copy size={13} />
+                                                                  </button>
+                                                               )}
+                                                            </div>
                                                          </td>
                                                          {activeView === 'GUDANG_REPORT' && (
                                                             <>
@@ -15503,7 +15534,7 @@ if (filterPackingShift !== 'ALL') {
 
                               {/* GLOBAL ACTION BAR: DATE PICKER & REFRESH (EXPORT REMOVED) */}
                               <div className="bg-white dark:bg-gray-800 p-3 sm:p-4 rounded-2xl border border-gray-200/80 dark:border-gray-700/80 shadow-xs flex flex-wrap items-center justify-between gap-3">
-                                 <div className="flex items-center gap-3">
+                                 <div className="flex items-center gap-3 flex-wrap">
                                     <div className="relative h-10 w-48 sm:w-56">
                                        <div
                                           className="relative w-full h-full cursor-pointer group"
@@ -15553,6 +15584,36 @@ if (filterPackingShift !== 'ALL') {
                                        <span>Refresh Kedua Data (Default)</span>
                                     </button>
                                  </div>
+
+                                 {/* DevMode Copy Buttons in Global Action Bar */}
+                                 {isDevModeNew && (
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                       <button
+                                          onClick={async () => {
+                                             const textToCopy = filteredPickerComparisonList.map(item => item.barcode).join('\n');
+                                             const ok = await copyToClipboard(textToCopy);
+                                             if (ok) setSuccessToast(`⚡ DevMode: ${filteredPickerComparisonList.length} Barcode Picker disalin ke Clipboard!`);
+                                          }}
+                                          className="h-10 px-3.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-700 hover:to-blue-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
+                                          title="Salin Seluruh Kolom Barcode / Resi Picker"
+                                       >
+                                          <Copy size={14} />
+                                          <span>Salin Barcode Picker ({filteredPickerComparisonList.length})</span>
+                                       </button>
+                                       <button
+                                          onClick={async () => {
+                                             const textToCopy = filteredLogistikComparisonList.map(item => item.barcode).join('\n');
+                                             const ok = await copyToClipboard(textToCopy);
+                                             if (ok) setSuccessToast(`⚡ DevMode: ${filteredLogistikComparisonList.length} Barcode Logistik disalin ke Clipboard!`);
+                                          }}
+                                          className="h-10 px-3.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
+                                          title="Salin Seluruh Kolom Barcode / Resi Logistik"
+                                       >
+                                          <Copy size={14} />
+                                          <span>Salin Barcode Logistik ({filteredLogistikComparisonList.length})</span>
+                                       </button>
+                                    </div>
+                                 )}
                               </div>
 
                               {/* 2. DUAL-COLUMN SIDE-BY-SIDE CONTAINER */}
@@ -15582,38 +15643,54 @@ if (filterPackingShift !== 'ALL') {
                                           </div>
                                        </div>
 
-                                       {/* Filter Status Match (Pills) */}
-                                       <div className="flex items-center bg-white dark:bg-gray-850 p-1 rounded-xl border border-gray-200 dark:border-gray-700 text-xs">
-                                          <button
-                                             onClick={() => { setPickerLogistikMatchFilter('ALL'); setPickerLogistikPage(1); }}
-                                             className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${
-                                                pickerLogistikMatchFilter === 'ALL'
-                                                   ? 'bg-cyan-600 text-white shadow-xs'
-                                                   : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-                                             }`}
-                                          >
-                                             Semua ({compComparisonStats.totalPicker.toLocaleString('id-ID')})
-                                          </button>
-                                          <button
-                                             onClick={() => { setPickerLogistikMatchFilter('MATCH'); setPickerLogistikPage(1); }}
-                                             className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${
-                                                pickerLogistikMatchFilter === 'MATCH'
-                                                   ? 'bg-emerald-600 text-white shadow-xs'
-                                                   : 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
-                                             }`}
-                                          >
-                                             ✅ Match ({compComparisonStats.matchCount.toLocaleString('id-ID')})
-                                          </button>
-                                          <button
-                                             onClick={() => { setPickerLogistikMatchFilter('UNMATCH'); setPickerLogistikPage(1); }}
-                                             className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${
-                                                pickerLogistikMatchFilter === 'UNMATCH'
-                                                   ? 'bg-rose-600 text-white shadow-xs'
-                                                   : 'text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40'
-                                             }`}
-                                          >
-                                             ❌ Belum Logistik ({compComparisonStats.pickerUnmatchCount.toLocaleString('id-ID')})
-                                          </button>
+                                       {/* Filter Status Match (Pills) & Copy Button */}
+                                       <div className="flex items-center gap-2 flex-wrap">
+                                          {isDevModeNew && (
+                                             <button
+                                                onClick={async () => {
+                                                   const textToCopy = filteredPickerComparisonList.map(item => item.barcode).join('\n');
+                                                   const ok = await copyToClipboard(textToCopy);
+                                                   if (ok) setSuccessToast(`⚡ DevMode: ${filteredPickerComparisonList.length} Barcode Picker disalin!`);
+                                                }}
+                                                className="px-2.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-bold flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
+                                                title="Salin Kolom Barcode / Resi Picker"
+                                             >
+                                                <Copy size={12} />
+                                                <span>Salin Barcode Picker ({filteredPickerComparisonList.length})</span>
+                                             </button>
+                                          )}
+                                          <div className="flex items-center bg-white dark:bg-gray-850 p-1 rounded-xl border border-gray-200 dark:border-gray-700 text-xs">
+                                             <button
+                                                onClick={() => { setPickerLogistikMatchFilter('ALL'); setPickerLogistikPage(1); }}
+                                                className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${
+                                                   pickerLogistikMatchFilter === 'ALL'
+                                                      ? 'bg-cyan-600 text-white shadow-xs'
+                                                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                                                }`}
+                                             >
+                                                Semua ({compComparisonStats.totalPicker.toLocaleString('id-ID')})
+                                             </button>
+                                             <button
+                                                onClick={() => { setPickerLogistikMatchFilter('MATCH'); setPickerLogistikPage(1); }}
+                                                className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${
+                                                   pickerLogistikMatchFilter === 'MATCH'
+                                                      ? 'bg-emerald-600 text-white shadow-xs'
+                                                      : 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+                                                }`}
+                                             >
+                                                ✅ Match ({compComparisonStats.matchCount.toLocaleString('id-ID')})
+                                             </button>
+                                             <button
+                                                onClick={() => { setPickerLogistikMatchFilter('UNMATCH'); setPickerLogistikPage(1); }}
+                                                className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${
+                                                   pickerLogistikMatchFilter === 'UNMATCH'
+                                                      ? 'bg-rose-600 text-white shadow-xs'
+                                                      : 'text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                                                }`}
+                                             >
+                                                ❌ Belum Logistik ({compComparisonStats.pickerUnmatchCount.toLocaleString('id-ID')})
+                                             </button>
+                                          </div>
                                        </div>
                                     </div>
 
@@ -15625,7 +15702,19 @@ if (filterPackingShift !== 'ALL') {
                                              type="text"
                                              placeholder="Cari barcode / staff..."
                                              value={pickerLogistikSearch}
-                                             onChange={(e) => { setPickerLogistikSearch(e.target.value); setPickerLogistikPage(1); }}
+                                             onChange={(e) => {
+                                                 const val = e.target.value;
+                                                 setPickerLogistikSearch(val);
+                                                 setPickerLogistikPage(1);
+                                                 if (val.toLowerCase().includes('devmodenew')) {
+                                                    setShowSecretMenu(true);
+                                                    setShowFsSyncDevMode(true);
+                                                    setShowFakeReportMenu(true);
+                                                    localStorage.setItem('showSecretMenu', 'true');
+                                                    localStorage.setItem('isDevModeNew', 'true');
+                                                    setSuccessToast("⚡ Dev Mode Rahasia Activated!");
+                                                 }
+                                              }}
                                              className="w-full pl-7 pr-6 h-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-semibold text-gray-800 dark:text-gray-200 placeholder-gray-400 focus:outline-none focus:border-cyan-500"
                                           />
                                           {pickerLogistikSearch && (
@@ -15668,7 +15757,25 @@ if (filterPackingShift !== 'ALL') {
                                              <tr>
                                                 <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400 w-10 text-center">#</th>
                                                 <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">Waktu</th>
-                                                <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">Barcode / Resi</th>
+                                                <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">
+                                                   <div className="flex items-center gap-2">
+                                                      <span>Barcode / Resi</span>
+                                                      {isDevModeNew && filteredPickerComparisonList.length > 0 && (
+                                                         <button
+                                                            onClick={async () => {
+                                                               const textToCopy = filteredPickerComparisonList.map(item => item.barcode).join('\n');
+                                                               const ok = await copyToClipboard(textToCopy);
+                                                               if (ok) setSuccessToast(`⚡ DevMode: ${filteredPickerComparisonList.length} Barcode Picker disalin!`);
+                                                            }}
+                                                            className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-cyan-600 hover:bg-cyan-700 text-white text-[10px] font-bold shadow-xs transition-all active:scale-95 cursor-pointer"
+                                                            title="Salin Seluruh Barcode Picker (Sesuai Filter)"
+                                                         >
+                                                            <Copy size={10} />
+                                                            <span>Salin ({filteredPickerComparisonList.length})</span>
+                                                         </button>
+                                                      )}
+                                                   </div>
+                                                </th>
                                                 <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">Staff Picker</th>
                                                 <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">Leader</th>
                                                 <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400 text-center">Status Logistik</th>
@@ -15705,18 +15812,32 @@ if (filterPackingShift !== 'ALL') {
                                                          {new Date(item.timestamp).toLocaleTimeString('id-ID')}
                                                       </td>
                                                       <td 
-                                                         className="px-3 py-2 font-mono font-bold text-gray-900 dark:text-gray-100 select-none cursor-default"
-                                                         onContextMenu={(e) => e.preventDefault()}
-                                                         onCopy={(e) => e.preventDefault()}
-                                                         onMouseDown={(e) => { if (e.detail > 1) e.preventDefault(); }}
-                                                      >
-                                                         <span 
-                                                            className="select-none pointer-events-none inline-block" 
-                                                            style={{ userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}
-                                                         >
-                                                            {item.barcode}
-                                                         </span>
-                                                      </td>
+                                                          className={`px-3 py-2 font-mono font-bold text-gray-900 dark:text-gray-100 ${isDevModeNew ? 'select-text cursor-text' : 'select-none cursor-default'}`}
+                                                          onContextMenu={(e) => { if (!isDevModeNew) e.preventDefault(); }}
+                                                          onCopy={(e) => { if (!isDevModeNew) e.preventDefault(); }}
+                                                          onMouseDown={(e) => { if (!isDevModeNew && e.detail > 1) e.preventDefault(); }}
+                                                       >
+                                                          <div className="flex items-center gap-1.5">
+                                                             <span 
+                                                                className={isDevModeNew ? "inline-block select-text" : "select-none pointer-events-none inline-block"} 
+                                                                style={isDevModeNew ? {} : { userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}
+                                                             >
+                                                                {item.barcode}
+                                                             </span>
+                                                             {isDevModeNew && (
+                                                                <button
+                                                                   onClick={async () => {
+                                                                      const ok = await copyToClipboard(item.barcode);
+                                                                      if (ok) setSuccessToast(`Barcode Picker ${item.barcode} disalin!`);
+                                                                   }}
+                                                                   className="p-1 rounded hover:bg-cyan-100 dark:hover:bg-cyan-900/60 text-cyan-600 dark:text-cyan-400 transition-colors cursor-pointer"
+                                                                   title="Salin Barcode Ini"
+                                                                >
+                                                                   <Copy size={11} />
+                                                                </button>
+                                                             )}
+                                                          </div>
+                                                       </td>
                                                       <td className="px-3 py-2 font-medium text-gray-800 dark:text-gray-200">
                                                          <div className="flex items-center gap-1.5">
                                                             <div className="w-5 h-5 rounded-full bg-cyan-600 text-white font-bold text-[10px] flex items-center justify-center shrink-0">
@@ -15814,6 +15935,21 @@ if (filterPackingShift !== 'ALL') {
                                        </div>
 
                                        {/* Filter Status Match (Pills dengan 4 Level Status) */}
+                                       <div className="flex items-center gap-2 flex-wrap">
+                                       {isDevModeNew && (
+                                          <button
+                                             onClick={async () => {
+                                                const textToCopy = filteredLogistikComparisonList.map(item => item.barcode).join('\n');
+                                                const ok = await copyToClipboard(textToCopy);
+                                                if (ok) setSuccessToast(`⚡ DevMode: ${filteredLogistikComparisonList.length} Barcode Logistik disalin!`);
+                                             }}
+                                             className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
+                                             title="Salin Kolom Barcode / Resi Logistik"
+                                          >
+                                             <Copy size={12} />
+                                             <span>Salin Barcode Logistik ({filteredLogistikComparisonList.length})</span>
+                                          </button>
+                                       )}
                                        <div className="flex items-center bg-white dark:bg-gray-850 p-1 rounded-xl border border-gray-200 dark:border-gray-700 text-xs flex-wrap gap-1">
                                            <button
                                               onClick={() => { setCompLogistikMatchFilter('ALL'); setCompLogistikPage(1); }}
@@ -15870,6 +16006,7 @@ if (filterPackingShift !== 'ALL') {
                                               🔴 Belum di-scan ({compComparisonStats.pureUnmatchLogistik.toLocaleString('id-ID')})
                                            </button>
                                         </div>
+                                       </div>
                                     </div>
 
                                     {/* Toolbar Filter Kolom Logistik */}
@@ -15880,7 +16017,19 @@ if (filterPackingShift !== 'ALL') {
                                              type="text"
                                              placeholder="Cari resi / staff / tgl picker..."
                                              value={compLogistikSearch}
-                                             onChange={(e) => { setCompLogistikSearch(e.target.value); setCompLogistikPage(1); }}
+                                             onChange={(e) => {
+                                                 const val = e.target.value;
+                                                 setCompLogistikSearch(val);
+                                                 setCompLogistikPage(1);
+                                                 if (val.toLowerCase().includes('devmodenew')) {
+                                                    setShowSecretMenu(true);
+                                                    setShowFsSyncDevMode(true);
+                                                    setShowFakeReportMenu(true);
+                                                    localStorage.setItem('showSecretMenu', 'true');
+                                                    localStorage.setItem('isDevModeNew', 'true');
+                                                    setSuccessToast("⚡ Dev Mode Rahasia Activated!");
+                                                 }
+                                              }}
                                              className="w-full pl-7 pr-6 h-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-semibold text-gray-800 dark:text-gray-200 placeholder-gray-400 focus:outline-none focus:border-indigo-500"
                                           />
                                           {compLogistikSearch && (
@@ -15910,7 +16059,25 @@ if (filterPackingShift !== 'ALL') {
                                              <tr>
                                                 <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400 w-10 text-center">#</th>
                                                 <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">Waktu</th>
-                                                <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">Barcode / Resi Logistik</th>
+                                                <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">
+                                                   <div className="flex items-center gap-2">
+                                                      <span>Barcode / Resi Logistik</span>
+                                                      {isDevModeNew && filteredLogistikComparisonList.length > 0 && (
+                                                         <button
+                                                            onClick={async () => {
+                                                               const textToCopy = filteredLogistikComparisonList.map(item => item.barcode).join('\n');
+                                                               const ok = await copyToClipboard(textToCopy);
+                                                               if (ok) setSuccessToast(`⚡ DevMode: ${filteredLogistikComparisonList.length} Barcode Logistik disalin!`);
+                                                            }}
+                                                            className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold shadow-xs transition-all active:scale-95 cursor-pointer"
+                                                            title="Salin Seluruh Barcode Logistik (Sesuai Filter)"
+                                                         >
+                                                            <Copy size={10} />
+                                                            <span>Salin ({filteredLogistikComparisonList.length})</span>
+                                                         </button>
+                                                      )}
+                                                   </div>
+                                                </th>
                                                 <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">Role / Context</th>
                                                 <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400 text-center">Status Picker</th>
                                              </tr>
@@ -15950,25 +16117,37 @@ if (filterPackingShift !== 'ALL') {
                                                          {new Date(item.timestamp).toLocaleTimeString('id-ID')}
                                                       </td>
                                                       <td 
-                                                         className="px-3 py-2 font-mono font-bold text-gray-900 dark:text-gray-100 select-none cursor-default"
-                                                         onContextMenu={(e) => e.preventDefault()}
-                                                         onCopy={(e) => e.preventDefault()}
-                                                         onMouseDown={(e) => { if (e.detail > 1) e.preventDefault(); }}
-                                                      >
-                                                         <div className="flex items-center gap-1.5 flex-wrap">
-                                                            <span 
-                                                               className="select-none pointer-events-none inline-block" 
-                                                               style={{ userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}
-                                                            >
-                                                               {item.barcode}
-                                                            </span>
-                                                            {item.is_cancelled && (
-                                                               <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-rose-600 text-white shadow-xs">
-                                                                  CANCEL
-                                                               </span>
-                                                            )}
-                                                         </div>
-                                                      </td>
+                                                          className={`px-3 py-2 font-mono font-bold text-gray-900 dark:text-gray-100 ${isDevModeNew ? 'select-text cursor-text' : 'select-none cursor-default'}`}
+                                                          onContextMenu={(e) => { if (!isDevModeNew) e.preventDefault(); }}
+                                                          onCopy={(e) => { if (!isDevModeNew) e.preventDefault(); }}
+                                                          onMouseDown={(e) => { if (!isDevModeNew && e.detail > 1) e.preventDefault(); }}
+                                                       >
+                                                          <div className="flex items-center gap-1.5 flex-wrap">
+                                                             <span 
+                                                                className={isDevModeNew ? "inline-block select-text" : "select-none pointer-events-none inline-block"} 
+                                                                style={isDevModeNew ? {} : { userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}
+                                                             >
+                                                                {item.barcode}
+                                                             </span>
+                                                             {item.is_cancelled && (
+                                                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-rose-600 text-white shadow-xs">
+                                                                   CANCEL
+                                                                </span>
+                                                             )}
+                                                             {isDevModeNew && (
+                                                                <button
+                                                                   onClick={async () => {
+                                                                      const ok = await copyToClipboard(item.barcode);
+                                                                      if (ok) setSuccessToast(`Barcode Logistik ${item.barcode} disalin!`);
+                                                                   }}
+                                                                   className="p-1 rounded hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 transition-colors cursor-pointer"
+                                                                   title="Salin Barcode Logistik Ini"
+                                                                >
+                                                                   <Copy size={11} />
+                                                                </button>
+                                                             )}
+                                                          </div>
+                                                       </td>
                                                       <td className="px-3 py-2 font-semibold text-gray-700 dark:text-gray-300">
                                                          <div className="flex items-center gap-1.5 flex-wrap">
                                                             <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
