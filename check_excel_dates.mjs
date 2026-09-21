@@ -55,11 +55,11 @@ function parseAnyDateToStr(item) {
 
 async function test() {
   console.log("Checking dates across Firestore scanned_items...");
-  
+
   // Query role PACKING
   const snap = await getDocs(query(collection(db, 'scanned_items'), where('role', '==', 'PACKING'), limit(2000)));
   console.log(`Fetched ${snap.docs.length} PACKING docs.`);
-  
+
   const dateCounts = {};
   snap.docs.forEach(doc => {
     const d = doc.data();
@@ -68,7 +68,7 @@ async function test() {
   });
 
   console.log("Parsed Date Counts for PACKING in Firestore (sample 2000):", dateCounts);
-  
+
   // Check if any docs match August 2026 or 2026-08-06
   const aug6Docs = snap.docs.filter(doc => parseAnyDateToStr(doc.data()) === '2026-08-06');
   console.log(`Matching 2026-08-06: ${aug6Docs.length} docs`);
