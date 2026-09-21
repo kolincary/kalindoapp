@@ -15778,13 +15778,17 @@ if (filterPackingShift !== 'ALL') {
                                         <div className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white font-mono mt-0.5">
                                            {(compComparisonStats.totalLogistik || 0).toLocaleString('id-ID')}
                                         </div>
-                                        <div className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold truncate">
-                                           Database Logistik
+                                        <div className="text-[10px] text-gray-500 dark:text-gray-400 truncate flex items-center gap-1 font-semibold mt-0.5 flex-wrap">
+                                           <span className="text-emerald-600 dark:text-emerald-400">{(compComparisonStats.matchTodayCount || 0).toLocaleString('id-ID')} Hari Ini</span>
+                                           <span>•</span>
+                                           <span className="text-amber-600 dark:text-amber-400">{(compComparisonStats.matchPrevCount || 0).toLocaleString('id-ID')} Beda Hari</span>
+                                           <span>•</span>
+                                           <span className="text-rose-600 dark:text-rose-400">{(compComparisonStats.cancelLogistikCount || 0).toLocaleString('id-ID')} Cancel</span>
                                         </div>
                                      </div>
                                   </div>
 
-                                  {/* Card 3: Total MATCH (Hari Ini & Beda Hari & Susulan) */}
+                                  {/* Card 3: Total MATCH (Hari Ini & Beda Hari) */}
                                   <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-gray-800 border border-emerald-200/80 dark:border-emerald-800/80 shadow-xs flex items-center gap-3 transition-all hover:shadow-md">
                                      <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-500/20">
                                         <CheckCircle2 size={22} />
@@ -15803,42 +15807,31 @@ if (filterPackingShift !== 'ALL') {
                                            <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{(compComparisonStats.matchTodayCount || 0).toLocaleString('id-ID')} Hari Ini</span>
                                            <span>•</span>
                                            <span className="text-amber-600 dark:text-amber-400 font-semibold">{(compComparisonStats.matchPrevCount || 0).toLocaleString('id-ID')} Beda Hari</span>
-                                           {compComparisonStats.resolvedSusulanCount > 0 && (
-                                              <>
-                                                 <span>•</span>
-                                                 <span className="text-indigo-600 dark:text-indigo-400 font-semibold">{(compComparisonStats.resolvedSusulanCount || 0).toLocaleString('id-ID')} Susulan</span>
-                                              </>
-                                           )}
                                         </div>
                                      </div>
                                   </div>
 
-                                  {/* Card 4: Sisa Belum Match (Murni Belum + Pending LT3 + Cancel) */}
+                                  {/* Card 4: Selisih (Picker - Logistik) */}
                                   <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-gray-800 border border-rose-200/80 dark:border-rose-800/80 shadow-xs flex items-center gap-3 transition-all hover:shadow-md">
                                      <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-rose-500 to-amber-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-rose-500/20">
                                         <AlertTriangle size={22} />
                                      </div>
                                      <div className="min-w-0 flex-1">
-                                        <div className="text-[10px] sm:text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Sisa Belum Match</div>
-                                        <div className="flex items-baseline gap-1 mt-0.5">
-                                           <span className="text-base sm:text-lg font-black text-rose-600 dark:text-rose-400 font-mono">
-                                              {(compComparisonStats.pickerUnmatchCount || 0).toLocaleString('id-ID')}
+                                        <div className="flex items-center justify-between">
+                                           <span className="text-[10px] sm:text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Selisih (Picker - Logistik)</span>
+                                           <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-400 border border-rose-300 dark:border-rose-800 font-mono">
+                                              {((compComparisonStats.totalPicker || 0) - (compComparisonStats.totalLogistik || 0)) >= 0 ? `+${((compComparisonStats.totalPicker || 0) - (compComparisonStats.totalLogistik || 0)).toLocaleString('id-ID')}` : ((compComparisonStats.totalPicker || 0) - (compComparisonStats.totalLogistik || 0)).toLocaleString('id-ID')} Resi
                                            </span>
-                                           <span className="text-[10px] text-gray-400 font-medium">Pckr/Ojol</span>
-                                           <span className="text-gray-300 dark:text-gray-600 mx-0.5">/</span>
-                                           <span className="text-base sm:text-lg font-black text-rose-600 dark:text-rose-400 font-mono">
-                                              {(compComparisonStats.pureUnmatchLogistik || 0).toLocaleString('id-ID')}
-                                           </span>
-                                           <span className="text-[10px] text-gray-400 font-medium">Log (Murni Belum)</span>
                                         </div>
-                                        <div className="text-[10px] text-gray-500 dark:text-gray-400 truncate flex items-center gap-1.5 font-medium flex-wrap">
-                                           <span>{compComparisonStats.pureUnmatchLogistik} Belum di-scan</span>
+                                        <div className="text-xl sm:text-2xl font-black text-rose-600 dark:text-rose-400 font-mono mt-0.5">
+                                           {Math.abs((compComparisonStats.totalPicker || 0) - (compComparisonStats.totalLogistik || 0)).toLocaleString('id-ID')} <span className="text-xs font-bold text-gray-500">Resi Selisih</span>
+                                        </div>
+                                        <div className="text-[10px] text-gray-500 dark:text-gray-400 truncate flex items-center gap-1.5 font-medium flex-wrap mt-0.5">
+                                           <span className="text-rose-600 dark:text-rose-400 font-semibold">{((compComparisonStats.cancelPickerCount || 0) - (compComparisonStats.cancelLogistikCount || 0))} Selisih Cancel</span>
                                            <span>•</span>
-                                           <span className="text-amber-600 dark:text-amber-400 font-semibold">{compComparisonStats.pendingLt3Count} Pending LT3</span>
+                                           <span className="text-orange-600 dark:text-orange-400 font-semibold">{compComparisonStats.pendingLt3PickerCount || 0} Pending LT3</span>
                                            <span>•</span>
-                                           <span className="text-rose-600 dark:text-rose-400 font-semibold">{compComparisonStats.cancelPickerCount || 0} Cancel Pckr</span>
-                                           <span>•</span>
-                                           <span className="text-rose-600 dark:text-rose-400 font-semibold">{compComparisonStats.cancelLogistikCount || 0} Cancel Log</span>
+                                           <span className="text-rose-600 dark:text-rose-400 font-semibold">{compComparisonStats.pickerUnmatchCount || 0} Belum Logistik</span>
                                         </div>
                                      </div>
                                   </div>
@@ -16320,116 +16313,92 @@ if (filterPackingShift !== 'ALL') {
                                                     {(compComparisonStats.totalLogistik || 0).toLocaleString('id-ID')} Resi
                                                  </span>
                                               </div>
-                                              <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 flex items-center gap-1.5 flex-wrap font-medium">
-                                                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Match: {(compComparisonStats.totalMatchLogistik || 0).toLocaleString('id-ID')}</span>
-                                                  <span>•</span>
-                                                  <span className="text-amber-600 dark:text-amber-400 font-semibold">Pending LT3: {(compComparisonStats.pendingLt3Count || 0).toLocaleString('id-ID')}</span>
-                                                  <span>•</span>
-                                                  <span className="text-rose-600 dark:text-rose-400 font-semibold">Cancel: {(compComparisonStats.cancelLogistikCount || 0).toLocaleString('id-ID')}</span>
-                                                  <span>•</span>
-                                                  <span className="text-gray-500 dark:text-gray-400 font-semibold">Murni Belum: {(compComparisonStats.pureUnmatchLogistik || 0).toLocaleString('id-ID')}</span>
-                                               </div>
-                                            </div>
-                                        </div>
-
-                                        {/* Filter Status Match (Pills dengan 6 Level Status: Match Hari Ini, Beda Hari, Pending LT3, Susulan, Cancel, Unmatch) */}
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                        {isDevModeNew && (
-                                           <button
-                                              onClick={async () => {
-                                                 const textToCopy = filteredLogistikComparisonList.map(item => item.barcode).join('\n');
-                                                 const ok = await copyToClipboard(textToCopy);
-                                                 if (ok) setSuccessToast(`⚡ DevMode: ${filteredLogistikComparisonList.length} Barcode Logistik disalin!`);
-                                              }}
-                                              className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
-                                              title="Salin Kolom Barcode / Resi Logistik"
-                                           >
-                                              <Copy size={12} />
-                                              <span>Salin Barcode Logistik ({filteredLogistikComparisonList.length})</span>
-                                           </button>
-                                        )}
-                                        <div className="flex items-center bg-white dark:bg-gray-850 p-1 rounded-xl border border-gray-200 dark:border-gray-700 text-xs flex-wrap gap-1">
-                                            <button
-                                               onClick={() => { setCompLogistikMatchFilter('ALL'); setCompLogistikPage(1); }}
-                                               className={`px-2 py-1 rounded-lg font-bold text-[10px] sm:text-[11px] transition-colors cursor-pointer ${
-                                                  compLogistikMatchFilter === 'ALL'
-                                                     ? 'bg-indigo-600 text-white shadow-xs'
-                                                     : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-                                               }`}
-                                            >
-                                               Semua ({(compComparisonStats.totalLogistik || 0).toLocaleString('id-ID')})
-                                            </button>
-                                            <button
-                                               onClick={() => { setCompLogistikMatchFilter('MATCH_SAME_DAY'); setCompLogistikPage(1); }}
-                                               className={`px-2 py-1 rounded-lg font-bold text-[10px] sm:text-[11px] transition-colors cursor-pointer ${
-                                                  compLogistikMatchFilter === 'MATCH_SAME_DAY'
-                                                     ? 'bg-emerald-600 text-white shadow-xs'
-                                                     : 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
-                                               }`}
-                                               title="Match dengan scan Picker/Ojol hari yang sama"
-                                            >
-                                               🟢 Match Hari Ini ({(compComparisonStats.matchTodayCount || 0).toLocaleString('id-ID')})
-                                            </button>
-                                            <button
-                                               onClick={() => { setCompLogistikMatchFilter('MATCH_PREV_DAY'); setCompLogistikPage(1); }}
-                                               className={`px-2 py-1 rounded-lg font-bold text-[10px] sm:text-[11px] transition-colors cursor-pointer ${
-                                                  compLogistikMatchFilter === 'MATCH_PREV_DAY'
-                                                     ? 'bg-amber-600 text-white shadow-xs'
-                                                     : 'text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40'
-                                               }`}
-                                               title="Match dengan scan Picker/Ojol tanggal sebelumnya / riwayat"
-                                            >
-                                               🟡 Match Beda Hari ({(compComparisonStats.matchPrevCount || 0).toLocaleString('id-ID')})
-                                            </button>
-                                            <button
-                                               onClick={() => { setCompLogistikMatchFilter('PENDING_LT3'); setCompLogistikPage(1); }}
-                                               className={`px-2 py-1 rounded-lg font-bold text-[10px] sm:text-[11px] transition-colors cursor-pointer ${
-                                                  compLogistikMatchFilter === 'PENDING_LT3'
-                                                     ? 'bg-orange-600 text-white shadow-xs'
-                                                     : 'text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/40'
-                                               }`}
-                                               title="Resi tertahan di Pending Scans (LT3)"
-                                            >
-                                               ⏳ Pending LT3 ({(compComparisonStats.pendingLt3Count || 0).toLocaleString('id-ID')})
-                                            </button>
-                                            {compComparisonStats.resolvedSusulanCount > 0 && (
-                                               <button
-                                                  onClick={() => { setCompLogistikMatchFilter('SUSULAN'); setCompLogistikPage(1); }}
-                                                  className={`px-2 py-1 rounded-lg font-bold text-[10px] sm:text-[11px] transition-colors cursor-pointer ${
-                                                     compLogistikMatchFilter === 'SUSULAN'
-                                                        ? 'bg-purple-600 text-white shadow-xs'
-                                                        : 'text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40'
-                                                  }`}
-                                                  title="Resi yang sudah diselesaikan susulan di hari berikutnya (H+1+)"
-                                               >
-                                                  🔄 Susulan ({(compComparisonStats.resolvedSusulanCount || 0).toLocaleString('id-ID')})
-                                               </button>
-                                            )}
-                                            <button
-                                               onClick={() => { setCompLogistikMatchFilter('CANCEL'); setCompLogistikPage(1); }}
-                                               className={`px-2 py-1 rounded-lg font-bold text-[10px] sm:text-[11px] transition-colors cursor-pointer ${
-                                                  compLogistikMatchFilter === 'CANCEL'
-                                                     ? 'bg-rose-600 text-white shadow-xs'
-                                                     : 'text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40'
-                                               }`}
-                                               title="Data Logistik yang terdaftar di menu Data Cancel"
-                                            >
-                                               🚫 Cancel ({(compComparisonStats.cancelLogistikCount || 0).toLocaleString('id-ID')})
-                                            </button>
-                                            <button
-                                               onClick={() => { setCompLogistikMatchFilter('UNMATCH'); setCompLogistikPage(1); }}
-                                               className={`px-2 py-1 rounded-lg font-bold text-[10px] sm:text-[11px] transition-colors cursor-pointer ${
-                                                  compLogistikMatchFilter === 'UNMATCH'
-                                                     ? 'bg-gray-700 text-white shadow-xs'
-                                                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
-                                               }`}
-                                               title="Resi yang murni belum pernah di-scan sama sekali"
-                                            >
-                                               🔴 Belum di-scan ({(compComparisonStats.pureUnmatchLogistik || 0).toLocaleString('id-ID')})
-                                            </button>
+                                               <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 flex items-center gap-1.5 flex-wrap font-medium">
+                                                   <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Match Hari Ini: {(compComparisonStats.matchTodayCount || 0).toLocaleString('id-ID')}</span>
+                                                   <span>•</span>
+                                                   <span className="text-amber-600 dark:text-amber-400 font-semibold">Match Beda Hari: {(compComparisonStats.matchPrevCount || 0).toLocaleString('id-ID')}</span>
+                                                   <span>•</span>
+                                                   <span className="text-rose-600 dark:text-rose-400 font-semibold">Cancel: {(compComparisonStats.cancelLogistikCount || 0).toLocaleString('id-ID')}</span>
+                                                   <span>•</span>
+                                                   <span className="text-gray-500 dark:text-gray-400 font-semibold">Belum di-scan: {(compComparisonStats.pureUnmatchLogistik || 0).toLocaleString('id-ID')}</span>
+                                                </div>
+                                             </div>
                                          </div>
-                                        </div>
-                                     </div>
+
+                                         {/* Filter Status Match (Pills dengan 5 Level Status: Semua, Match Hari Ini, Beda Hari, Cancel, Belum di-scan) */}
+                                         <div className="flex items-center gap-2 flex-wrap">
+                                         {isDevModeNew && (
+                                            <button
+                                               onClick={async () => {
+                                                  const textToCopy = filteredLogistikComparisonList.map(item => item.barcode).join('\n');
+                                                  const ok = await copyToClipboard(textToCopy);
+                                                  if (ok) setSuccessToast(`⚡ DevMode: ${filteredLogistikComparisonList.length} Barcode Logistik disalin!`);
+                                               }}
+                                               className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
+                                               title="Salin Kolom Barcode / Resi Logistik"
+                                            >
+                                               <Copy size={12} />
+                                               <span>Salin Barcode Logistik ({filteredLogistikComparisonList.length})</span>
+                                            </button>
+                                         )}
+                                         <div className="flex items-center bg-white dark:bg-gray-850 p-1 rounded-xl border border-gray-200 dark:border-gray-700 text-xs flex-wrap gap-1">
+                                             <button
+                                                onClick={() => { setCompLogistikMatchFilter('ALL'); setCompLogistikPage(1); }}
+                                                className={`px-2 py-1 rounded-lg font-bold text-[10px] sm:text-[11px] transition-colors cursor-pointer ${
+                                                   compLogistikMatchFilter === 'ALL'
+                                                      ? 'bg-indigo-600 text-white shadow-xs'
+                                                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                                                }`}
+                                             >
+                                                Semua ({(compComparisonStats.totalLogistik || 0).toLocaleString('id-ID')})
+                                             </button>
+                                             <button
+                                                onClick={() => { setCompLogistikMatchFilter('MATCH_SAME_DAY'); setCompLogistikPage(1); }}
+                                                className={`px-2 py-1 rounded-lg font-bold text-[10px] sm:text-[11px] transition-colors cursor-pointer ${
+                                                   compLogistikMatchFilter === 'MATCH_SAME_DAY'
+                                                      ? 'bg-emerald-600 text-white shadow-xs'
+                                                      : 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+                                                }`}
+                                                title="Match dengan scan Picker/Ojol hari yang sama"
+                                             >
+                                                🟢 Match Hari Ini ({(compComparisonStats.matchTodayCount || 0).toLocaleString('id-ID')})
+                                             </button>
+                                             <button
+                                                onClick={() => { setCompLogistikMatchFilter('MATCH_PREV_DAY'); setCompLogistikPage(1); }}
+                                                className={`px-2 py-1 rounded-lg font-bold text-[10px] sm:text-[11px] transition-colors cursor-pointer ${
+                                                   compLogistikMatchFilter === 'MATCH_PREV_DAY'
+                                                      ? 'bg-amber-600 text-white shadow-xs'
+                                                      : 'text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40'
+                                                }`}
+                                                title="Match dengan scan Picker/Ojol tanggal sebelumnya / riwayat"
+                                             >
+                                                🟡 Match Beda Hari ({(compComparisonStats.matchPrevCount || 0).toLocaleString('id-ID')})
+                                             </button>
+                                             <button
+                                                onClick={() => { setCompLogistikMatchFilter('CANCEL'); setCompLogistikPage(1); }}
+                                                className={`px-2 py-1 rounded-lg font-bold text-[10px] sm:text-[11px] transition-colors cursor-pointer ${
+                                                   compLogistikMatchFilter === 'CANCEL'
+                                                      ? 'bg-rose-600 text-white shadow-xs'
+                                                      : 'text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                                                }`}
+                                                title="Data Logistik yang terdaftar di menu Data Cancel"
+                                             >
+                                                🚫 Cancel ({(compComparisonStats.cancelLogistikCount || 0).toLocaleString('id-ID')})
+                                             </button>
+                                             <button
+                                                onClick={() => { setCompLogistikMatchFilter('UNMATCH'); setCompLogistikPage(1); }}
+                                                className={`px-2 py-1 rounded-lg font-bold text-[10px] sm:text-[11px] transition-colors cursor-pointer ${
+                                                   compLogistikMatchFilter === 'UNMATCH'
+                                                      ? 'bg-gray-700 text-white shadow-xs'
+                                                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                                }`}
+                                                title="Resi yang murni belum pernah di-scan sama sekali"
+                                             >
+                                                🔴 Belum di-scan ({(compComparisonStats.pureUnmatchLogistik || 0).toLocaleString('id-ID')})
+                                             </button>
+                                          </div>
+                                         </div>
+                                      </div>
 
                                      {/* Toolbar Filter Kolom Logistik */}
                                      <div className="p-2.5 bg-gray-50/70 dark:bg-gray-850/50 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
@@ -25669,4 +25638,5 @@ LXAD-1234567890`}
       </div >
    );
 };
+
 export default AdminDashboard;
