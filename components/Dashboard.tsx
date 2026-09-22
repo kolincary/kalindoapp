@@ -1511,8 +1511,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
          // 2. Prepare Set for Cancel Validation (Case Insensitive)
          const cancelledSet = new Set(cancelledBarcodes.map(bc => bc.trim().toUpperCase()));
 
-         // 3. Filter out already scanned items (from local state)
-         const scannedBarcodes = new Set(items.map(it => it.barcode.trim().toUpperCase()));
+         // 3. Filter out already scanned items for the current role (from local state)
+         const scannedBarcodes = new Set(
+            items
+               .filter(it => it.role === role)
+               .map(it => it.barcode.trim().toUpperCase())
+         );
          
          let barcodesToExclude = [...triggeringBarcodes];
          // For PICKER/SORTIR_BATCH, the 3rd barcode (triggeringBarcodes[0]) is not yet saved 
