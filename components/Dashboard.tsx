@@ -7,7 +7,7 @@ import { SettingsModal } from './SettingsModal';
 import { RunningTextBanner } from './RunningTextBanner';
 import { supabase, supabaseNew } from '../services/supabaseClient';
 import { supabaseBundling } from '../services/supabaseBundlingClient';
-import { collection, getDocs, query, orderBy } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, where, limit } from 'firebase/firestore';
 import { db } from '../services/firebaseClient';
 import { PinModal } from './PinModal';
 
@@ -1620,8 +1620,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
       result: { barcode: string; description: string; destination: string; priority: 'HIGH' | 'NORMAL' | 'LOW'; report_keterangan?: string; report_msku?: string; report_qty?: string; order_id?: string; },
       tempId?: number
    ) => {
-      // Stripping '@' from barcode globally
-      result.barcode = result.barcode.replace(/@/g, '').trim().toUpperCase();
+       // Stripping '@' from barcode globally & format prefixes
+       let normalizedBc = result.barcode.replace(/@/g, '').trim().toUpperCase();
+       const knownPrefixes = ['LXAD', 'JNEB', 'JNAP'];
+       for (const p of knownPrefixes) {
+          if (normalizedBc.startsWith(`${p}-`)) break;
+          if (normalizedBc.startsWith(p)) {
+             const rest = normalizedBc.slice(p.length);
+             if (rest.length > 0 && !rest.startsWith('-')) {
+                normalizedBc = `${p}-${rest}`;
+                break;
+             }
+          }
+       }
+       if (/^\d{10}$/.test(normalizedBc) && /^[4-9]/.test(normalizedBc)) {
+          normalizedBc = '00' + normalizedBc;
+       }
+       result.barcode = normalizedBc;
 
       // Fetch order_id from batch_items or scanned_items if it exists and we are online
       if (!result.order_id && navigator.onLine) {
@@ -2083,16 +2098,88 @@ export const Dashboard: React.FC<DashboardProps> = ({
                    return;
                 }
 
-                // If not duplicate, check if it is in an active batch
-                const { data: adminData, error: adminErr } = await supabase
+                // If not duplicate, check if it is in an active batch (with robust fallbacks)
+                let isValidInBatch = false;
+                const altBc = cleanBc.startsWith('00') ? cleanBc.slice(2) : ('00' + cleanBc);
+                
+                const { data: adminData } = await supabase
                    .from('batch_items')
                    .select('barcode')
                    .eq('barcode', cleanBc)
                    .limit(1)
                    .maybeSingle();
 
-                if (adminErr) throw adminErr;
-                if (!adminData) {
+                if (adminData) {
+                   isValidInBatch = true;
+                } else {
+                   // Fallback 1: Check alternate zero padding (e.g. without 00 or with 00)
+                   const { data: altAdmin } = await supabase
+                      .from('batch_items')
+                      .select('barcode')
+                      .eq('barcode', altBc)
+                      .limit(1)
+                      .maybeSingle();
+                   if (altAdmin) {
+                      isValidInBatch = true;
+                      result.barcode = altAdmin.barcode;
+                   }
+
+                   // Fallback 2: Check if already auto-moved from batch_items into scanned_items
+                   if (!isValidInBatch) {
+                      const { data: movedScan } = await supabase
+                         .from('scanned_items')
+                         .select('id')
+                         .or(`barcode.eq.${cleanBc},barcode.eq.${altBc}`)
+                         .ilike('description', '%AUTO-BATCH%')
+                         .limit(1)
+                         .maybeSingle();
+                      if (movedScan) {
+                         isValidInBatch = true;
+                      }
+                   }
+
+                   // Fallback 3: Check if it is a Leader assignment / Packing list
+                   if (!isValidInBatch) {
+                      const { data: leaderRow } = await supabase
+                         .from('leader_scan_2')
+                         .select('id')
+                         .or(`barcode.eq.${cleanBc},barcode.eq.${altBc}`)
+                         .limit(1)
+                         .maybeSingle();
+                      if (leaderRow) {
+                         isValidInBatch = true;
+                      }
+                   }
+
+                   // Fallback 4: Check Firestore admin_batch_imports
+                   if (!isValidInBatch) {
+                      try {
+                         const qFs = query(
+                            collection(db, 'admin_batch_imports'),
+                            where('barcodes', 'array-contains', cleanBc),
+                            limit(1)
+                         );
+                         const snapFs = await getDocs(qFs);
+                         if (!snapFs.empty) {
+                            isValidInBatch = true;
+                         } else if (altBc) {
+                            const qFsAlt = query(
+                               collection(db, 'admin_batch_imports'),
+                               where('barcodes', 'array-contains', altBc),
+                               limit(1)
+                            );
+                            const snapFsAlt = await getDocs(qFsAlt);
+                            if (!snapFsAlt.empty) {
+                               isValidInBatch = true;
+                            }
+                         }
+                      } catch (fsErr) {
+                         console.warn("Firestore fallback batch check notice:", fsErr);
+                      }
+                   }
+                }
+
+                if (!isValidInBatch) {
                    playError();
                    const msg = `⛔ DITOLAK!\nResi "${result.barcode}" tidak terdaftar di data Batch.`;
                    await recordFail('FORBIDDEN', `Resi tidak terdaftar di Batch: ${result.barcode}`);
@@ -2107,17 +2194,73 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 }
              }
 
-             // 2. Role: OJOL (Strict Validation: Must exist in Batch Management Admin)
+             // 2. Role: OJOL (Strict Validation: Must exist in Batch Management Admin or Auto-Batch)
              else if (role === UserRole.OJOL) {
-                const { data: adminData, error: adminErr } = await supabase
+                let isValidInBatch = false;
+                const altBc = cleanBc.startsWith('00') ? cleanBc.slice(2) : ('00' + cleanBc);
+
+                const { data: adminData } = await supabase
                    .from('batch_items')
                    .select('barcode')
                    .eq('barcode', cleanBc)
                    .limit(1)
                    .maybeSingle();
 
-                if (adminErr) throw adminErr;
-                if (!adminData) {
+                if (adminData) {
+                   isValidInBatch = true;
+                } else {
+                   const { data: altAdmin } = await supabase
+                      .from('batch_items')
+                      .select('barcode')
+                      .eq('barcode', altBc)
+                      .limit(1)
+                      .maybeSingle();
+                   if (altAdmin) {
+                      isValidInBatch = true;
+                      result.barcode = altAdmin.barcode;
+                   }
+
+                   if (!isValidInBatch) {
+                      const { data: movedScan } = await supabase
+                         .from('scanned_items')
+                         .select('id')
+                         .or(`barcode.eq.${cleanBc},barcode.eq.${altBc}`)
+                         .ilike('description', '%AUTO-BATCH%')
+                         .limit(1)
+                         .maybeSingle();
+                      if (movedScan) {
+                         isValidInBatch = true;
+                      }
+                   }
+
+                   if (!isValidInBatch) {
+                      try {
+                         const qFs = query(
+                            collection(db, 'admin_batch_imports'),
+                            where('barcodes', 'array-contains', cleanBc),
+                            limit(1)
+                         );
+                         const snapFs = await getDocs(qFs);
+                         if (!snapFs.empty) {
+                            isValidInBatch = true;
+                         } else if (altBc) {
+                            const qFsAlt = query(
+                               collection(db, 'admin_batch_imports'),
+                               where('barcodes', 'array-contains', altBc),
+                               limit(1)
+                            );
+                            const snapFsAlt = await getDocs(qFsAlt);
+                            if (!snapFsAlt.empty) {
+                               isValidInBatch = true;
+                            }
+                         }
+                      } catch (fsErr) {
+                         console.warn("Firestore fallback batch check notice (OJOL):", fsErr);
+                      }
+                   }
+                }
+
+                if (!isValidInBatch) {
                    playError();
                    const msg = `⛔ DITOLAK!\nResi "${result.barcode}" tidak terdaftar di Batch Management Admin.`;
                    await recordFail('FORBIDDEN', `Resi tidak terdaftar di Batch Admin: ${result.barcode}`);

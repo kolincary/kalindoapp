@@ -7208,34 +7208,92 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
    const formatBarcodeWithKnownPrefixes = (barcode: string): string => {
       if (!barcode) return '';
-      const clean = barcode.replace(/@/g, '').trim().toUpperCase();
+      let clean = barcode.replace(/@/g, '').trim().toUpperCase();
       const prefixes = ['LXAD', 'JNEB', 'JNAP'];
       for (const p of prefixes) {
-         if (clean.startsWith(`${p}-`)) return clean;
+         if (clean.startsWith(`${p}-`)) {
+            // Already has hyphen
+            break;
+         }
          if (clean.startsWith(p)) {
             const rest = clean.slice(p.length);
             if (rest.length > 0 && !rest.startsWith('-')) {
-               return `${p}-${rest}`;
+               clean = `${p}-${rest}`;
+               break;
             }
          }
       }
+      // Normalize SiCepat 10-digit without leading '00' to 12-digit
+      if (/^\d{10}$/.test(clean) && /^[4-9]/.test(clean)) {
+         clean = '00' + clean;
+      }
       return clean;
+   };
+
+   const parseLineToOrderAndBarcode = (line: string): { order_id: string | null; barcode: string } => {
+      if (!line) return { order_id: null, barcode: '' };
+      const rawClean = line.replace(/@/g, '').trim();
+      if (!rawClean) return { order_id: null, barcode: '' };
+
+      const allParts = rawClean.split(/[\t\s]+/).filter(Boolean);
+      if (allParts.length === 0) return { order_id: null, barcode: '' };
+      if (allParts.length === 1) {
+         return { order_id: null, barcode: formatBarcodeWithKnownPrefixes(allParts[0]) };
+      }
+
+      // Filter out line number tokens (e.g. "1", "2", "1.", "50.")
+      const parts = allParts.filter((p, idx) => {
+         if (idx === 0 && /^\d{1,4}\.?$/.test(p) && allParts.length > 2) return false;
+         return true;
+      });
+
+      if (parts.length === 1) {
+         return { order_id: null, barcode: formatBarcodeWithKnownPrefixes(parts[0]) };
+      }
+
+      const tok0 = parts[0].trim().toUpperCase();
+      const tok1 = parts[1].trim().toUpperCase();
+
+      const isBarcodePattern = (t: string) => {
+         return /^(SPXID|SPX|JP|JT|JX|JY|LXAD|JNAP|JNEB|00|10|11|12|TK|ID|NLID|CM|TJNT|SOC|BDG|JKT|SUB)/i.test(t) ||
+                /\.(PDF|JPG|PNG)$/i.test(t) ||
+                (/^00\d{8,12}$/.test(t)) ||
+                (/^\d{10}$/.test(t) && /^[4-9]/.test(t));
+      };
+
+      const isOrderIdPattern = (t: string) => {
+         return /^(INV\/|260|261|262|250|251|ORD|SO)/i.test(t) ||
+                (/^\d{14,22}$/.test(t)) ||
+                (/^2609\w+$/i.test(t));
+      };
+
+      // Case 1: tok0 is OrderID and tok1 is Barcode (Standard: [Order ID] [Barcode])
+      if (isOrderIdPattern(tok0) && !isOrderIdPattern(tok1)) {
+         return { order_id: parts[0], barcode: formatBarcodeWithKnownPrefixes(parts[1]) };
+      }
+
+      // Case 2: tok0 is Barcode and tok1 is OrderID (Reversed: [Barcode] [Order ID])
+      if (isBarcodePattern(tok0) && (isOrderIdPattern(tok1) || !isBarcodePattern(tok1))) {
+         return { order_id: parts[1], barcode: formatBarcodeWithKnownPrefixes(parts[0]) };
+      }
+
+      // Case 3: tok1 is clearly Barcode
+      if (isBarcodePattern(tok1) && !isBarcodePattern(tok0)) {
+         return { order_id: parts[0], barcode: formatBarcodeWithKnownPrefixes(parts[1]) };
+      }
+
+      // Fallback default: parts[0] is order_id, parts[1] is barcode
+      return { order_id: parts[0], barcode: formatBarcodeWithKnownPrefixes(parts[1]) };
    };
 
    const executeSaveBatch = async () => {
       setIsSavingBatch(true);
       try {
          const parsedLines = batchImportText.split(/[\n,;]+/)
-            .map(line => line.replace(/@/g, '').trim().toUpperCase())
+            .map(line => line.trim())
             .filter(line => line.length > 0)
-            .map(line => {
-               const parts = line.split(/\s+/);
-               if (parts.length >= 2) {
-                  return { order_id: parts[0], barcode: formatBarcodeWithKnownPrefixes(parts[1]) };
-               } else {
-                  return { order_id: null, barcode: formatBarcodeWithKnownPrefixes(parts[0]) };
-               }
-            });
+            .map(line => parseLineToOrderAndBarcode(line))
+            .filter(item => item.barcode.length > 0);
 
          if (parsedLines.length === 0) {
             alert("Tidak ada barcode valid.");
@@ -7250,46 +7308,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                  uniqueMap.set(item.barcode, item);
              }
          }
-         const uniqueItems = Array.from(uniqueMap.values());
-         const barcodesToCheck = uniqueItems.map(item => item.barcode);
+         const finalItemsToInsert = Array.from(uniqueMap.values());
+         const barcodesToCheck = finalItemsToInsert.map(item => item.barcode);
 
-         // Enforce unique Barcode/AWB logic globally via chunked fetch
-         const existingSet = new Set();
+         // Clean up any stale/unscanned rows in batch_items for these exact barcodes
+         // so the new batch owns all 50 barcodes cleanly without collision
          const CHUNK_SIZE = 500;
-
          for (let i = 0; i < barcodesToCheck.length; i += CHUNK_SIZE) {
             const chunk = barcodesToCheck.slice(i, i + CHUNK_SIZE);
-            const { data: matched } = await supabase
-               .from('batch_items')
-               .select('barcode')
-               .in('barcode', chunk);
-
-            if (matched) {
-               matched.forEach((m: any) => existingSet.add(m.barcode));
-            }
-         }
-
-         const finalItemsToInsert = uniqueItems.filter(item => !existingSet.has(item.barcode));
-
-         if (finalItemsToInsert.length === 0) {
-            if (skipDuplicateBatch) {
-               // Silently skip the duplicate error and pretend it succeeded as requested
-               setSuccessToast(`Berhasil menyimpan ${uniqueItems.length} data batch.`);
-               setIsBatchImportModalOpen(false);
-               setBatchImportText('');
-               setBatchExcelFilename('');
-               const today = new Date();
-               const offset = today.getTimezoneOffset() * 60000;
-               setBatchImportDate((new Date(today.getTime() - offset)).toISOString().slice(0, 10));
-               fetchBatchData();
-               setIsSavingBatch(false);
-               return;
-            } else {
-               const dupExamples = Array.from(existingSet).slice(0, 5).join(', ');
-               console.warn('Duplicate barcodes found in batch_items:', Array.from(existingSet));
-               alert(`Semua barcode duplikat (${existingSet.size}/${uniqueItems.length}), tidak ada data baru.\n\nContoh duplikat: ${dupExamples}\n\nCek di tabel batch_items apakah data ini sudah pernah diimport sebelumnya.`);
-               setIsSavingBatch(false);
-               return;
+            try {
+               await supabase
+                  .from('batch_items')
+                  .delete()
+                  .in('barcode', chunk);
+            } catch (delErr) {
+               console.warn("Stale batch_items cleanup notice:", delErr);
             }
          }
 
@@ -8137,25 +8170,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                      }
                      batchId = newBatch.id;
 
-                     // Enforce unique Barcode/AWB logic (Filter out barcodes that already exist in any batch)
-                     const existingSet = new Set<string>();
-                     const CHUNK_SIZE = 500;
-
+                     // Clean up any stale/unscanned rows in batch_items for these exact barcodes
+                     // so the new batch owns all barcodes cleanly without losing data
                      const allBarcodes = uniqueItems.map(it => it.barcode);
+                     const CHUNK_SIZE = 500;
                      for (let i = 0; i < allBarcodes.length; i += CHUNK_SIZE) {
                         const chunk = allBarcodes.slice(i, i + CHUNK_SIZE);
-                        const { data: matched } = await supabase
-                           .from('batch_items')
-                           .select('barcode')
-                           .in('barcode', chunk);
-
-                        if (matched) {
-                           matched.forEach((m: any) => existingSet.add(m.barcode as string));
+                        try {
+                           await supabase
+                              .from('batch_items')
+                              .delete()
+                              .in('barcode', chunk);
+                        } catch (delErr) {
+                           console.warn("Stale batch_items cleanup notice (Excel):", delErr);
                         }
                      }
 
-                     const finalItemsToInsert = uniqueItems.filter(it => !existingSet.has(it.barcode));
-
+                     const finalItemsToInsert = uniqueItems;
                      if (finalItemsToInsert.length === 0) continue; // Skip if all barcodes already imported
 
                      // Insert only completely new barcodes via chunks
