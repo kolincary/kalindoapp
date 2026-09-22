@@ -5647,6 +5647,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                .update(updates)
                .eq('id', itemId);
 
+            try {
+               await supabaseNew
+                  .from('leader_scan_2')
+                  .update(updates)
+                  .eq('id', itemId);
+            } catch (e) {}
+
             if (error) console.error("Error updating leader_scan_2 item " + itemId, error);
          }
 
@@ -5675,6 +5682,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                .from('leader_scan_2')
                .delete()
                .eq('id', itemId);
+
+            try {
+               await supabaseNew
+                  .from('leader_scan_2')
+                  .delete()
+                  .eq('id', itemId);
+            } catch (e) {}
+
             if (error) console.error("Error deleting leader_scan_2 item " + itemId, error);
          }
          setSuccessToast(`Berhasil menghapus ${selectedScanIds.length} data.`);

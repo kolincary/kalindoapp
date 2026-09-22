@@ -2673,19 +2673,29 @@ export const Dashboard: React.FC<DashboardProps> = ({
             date: new Date().toLocaleDateString('id-ID')
          };
 
-         // UPSERT TO MAIN TABLE (leader_scan_2)
-         // Using upsert instead of insert to handle barcodes that appear across multiple days.
-         // The DB has a global unique constraint on 'barcode', so re-scanning a barcode from
-         // a previous day would 409 Conflict with insert. Upsert updates the record instead.
-         const { error } = await supabase
+         // UPSERT TO MAIN TABLE (leader_scan_2) with retry
+         let { error } = await supabase
             .from('leader_scan_2')
             .upsert([payload], { onConflict: 'barcode' });
 
-         // BACKUP: UPSERT TO SECOND SUPABASE ACCOUNT
-         try {
-            await supabaseNew
+         if (error) {
+            // Retry once if network/statement timeout occurred
+            const retryRes = await supabase
                .from('leader_scan_2')
                .upsert([payload], { onConflict: 'barcode' });
+            error = retryRes.error;
+         }
+
+         // BACKUP: UPSERT TO SECOND SUPABASE ACCOUNT (with retry)
+         try {
+            const bRes = await supabaseNew
+               .from('leader_scan_2')
+               .upsert([payload], { onConflict: 'barcode' });
+            if (bRes.error) {
+               await supabaseNew
+                  .from('leader_scan_2')
+                  .upsert([payload], { onConflict: 'barcode' });
+            }
          } catch (backupError) {
             console.error('Backup upsert error (non-blocking):', backupError);
          }
