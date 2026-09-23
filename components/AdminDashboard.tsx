@@ -3033,6 +3033,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [showOnlyCancelImportAdmin, setShowOnlyCancelImportAdmin] = useState(false);
    const [showOnlyReadyAdmin, setShowOnlyReadyAdmin] = useState(false);
    const [showOnlyTerkirimBersih, setShowOnlyTerkirimBersih] = useState(false);
+   const [auditAdminPage, setAuditAdminPage] = useState(1);
+   const [auditRolePage, setAuditRolePage] = useState(1);
+   const [auditPendingPage, setAuditPendingPage] = useState(1);
+   const [auditRowsPerPage, setAuditRowsPerPage] = useState(100);
    const [isStockOpnamePagiExpanded, setIsStockOpnamePagiExpanded] = useState(true);
    const [isImportCancelModalOpen, setIsImportCancelModalOpen] = useState(false);
    const [cancelImportFile, setCancelImportFile] = useState<File | null>(null);
@@ -4270,12 +4274,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (activeView === 'ADMIN_MANAGEMENT') fetchAdmins();
       if (activeView === 'ACCESS') fetchBlockedStatus();
       if (activeView === 'ACCESS') fetchBlockedStatus();
-      if (activeView === 'SYMBOLS') fetchForbiddenSymbols();
-      if (activeView === 'CANCEL_DATA' || (activeView === 'BATCH_DATA' || activeView === 'BATCH_DATA_2' || activeView === 'BATCH_DATA_3')) fetchCancelledOrders();
-      if (activeView === 'FAILED_SCANS') fetchFailedScans();
+      if (activeView === 'CANCEL_DATA' || ((activeView === 'BATCH_DATA' || activeView === 'BATCH_DATA_2' || activeView === 'BATCH_DATA_3') && (activeBatchTab === 'ITEMS' || activeBatchTab === 'AUDIT_KOMPARASI'))) fetchCancelledOrders();
       if (activeView === 'FAILED_SCANS') fetchFailedScans();
       if (activeView === 'FAKE_REPORT') fetchFakeReports();
-      if ((activeView === 'BATCH_DATA' || activeView === 'BATCH_DATA_2' || activeView === 'BATCH_DATA_3')) fetchBatchData();
+      if ((activeView === 'BATCH_DATA' || activeView === 'BATCH_DATA_2' || activeView === 'BATCH_DATA_3') && activeBatchTab === 'ITEMS') fetchBatchData();
 
       // NEW: Auto-Fetch for Compare Logistik if Database Mode
       if (activeView === 'COMPARE_LOGISTIK' && internalSourceMode === 'DATABASE' && activeCompareTab === 'COMPARE') {
@@ -4349,52 +4351,60 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                const summaryData = batches || [];
                
                 // Pre-fill Leader Staff and Auto-Check Progress efficiently
+                // Pre-fill Leader Staff and Auto-Check Progress efficiently
                 if (summaryData.length > 0) {
-                   // 1. Fetch all batch items for these batches in parallel
-                   const itemPromises = summaryData.map((b: any) =>
-                      Promise.resolve(
-                         supabase
-                            .from('batch_items')
-                            .select('barcode, batch_id')
-                            .eq('batch_id', b.id)
-                            .limit(1000)
-                      ).catch(() => ({ data: [] }))
+                   // 1. Fetch all batch items for these batches in chunked batch_id queries (max 50 per query)
+                   const batchIds = summaryData.map((b: any) => b.id);
+                   const batchChunks: string[][] = [];
+                   for (let i = 0; i < batchIds.length; i += 50) {
+                      batchChunks.push(batchIds.slice(i, i + 50));
+                   }
+                   const itemResults = await Promise.all(
+                      batchChunks.map(chunk =>
+                         Promise.resolve(
+                            supabase
+                               .from('batch_items')
+                               .select('barcode, batch_id')
+                               .in('batch_id', chunk)
+                         ).catch(() => ({ data: [] }))
+                      )
                    );
-                   const itemResults = await Promise.all(itemPromises);
                    const allItemsData: any[] = itemResults.flatMap((r: any) => r.data || []);
 
                    let scannedBarcodesMap = new Map();
                    const batchToBarcodes: Record<string, string[]> = {};
 
                    if (allItemsData && allItemsData.length > 0) {
-                      const allBarcodes = allItemsData.map((item: any) => item.barcode).filter(Boolean);
+                      const allBarcodes = Array.from(new Set(allItemsData.map((item: any) => item.barcode).filter(Boolean)));
                       
-                      // 2. Fetch all scans for these barcodes in parallel chunks
-                      const scanPromises = [];
-                      for (let i = 0; i < allBarcodes.length; i += 800) {
-                         const chunk = allBarcodes.slice(i, i + 800);
-                         scanPromises.push(
-                            Promise.resolve(
-                               supabase.from('scanned_items')
-                                  .select('barcode, role')
-                                  .in('barcode', chunk)
-                                  .in('role', ['PICKER', 'PICKER_2', 'SORTIR_BATCH', 'CHECKER', 'OJOL'])
-                            ).catch(() => ({ data: [], error: null }))
-                         );
+                      // 2. Fetch all scans for these barcodes in safe 200 chunks (3 concurrent requests max)
+                      const scanChunks: string[][] = [];
+                      for (let i = 0; i < allBarcodes.length; i += 200) {
+                         scanChunks.push(allBarcodes.slice(i, i + 200));
                       }
                       
-                      for (let i = 0; i < scanPromises.length; i += 10) {
-                          const results = await Promise.all(scanPromises.slice(i, i + 10));
-                          results.forEach(res => {
-                              if (res?.data) {
-                                  res.data.forEach((row: any) => {
-                                      if (!scannedBarcodesMap.has(row.barcode)) {
-                                          scannedBarcodesMap.set(row.barcode, new Set());
-                                      }
-                                      scannedBarcodesMap.get(row.barcode).add(row.role);
-                                  });
-                              }
-                          });
+                      for (let i = 0; i < scanChunks.length; i += 3) {
+                         const slice = scanChunks.slice(i, i + 3);
+                         const results = await Promise.all(
+                            slice.map(chunk =>
+                               Promise.resolve(
+                                  supabase.from('scanned_items')
+                                     .select('barcode, role')
+                                     .in('barcode', chunk)
+                                     .in('role', ['PICKER', 'PICKER_2', 'SORTIR_BATCH', 'CHECKER', 'OJOL'])
+                               ).catch(() => ({ data: [], error: null }))
+                            )
+                         );
+                         results.forEach(res => {
+                            if (res?.data) {
+                               res.data.forEach((row: any) => {
+                                  if (!scannedBarcodesMap.has(row.barcode)) {
+                                     scannedBarcodesMap.set(row.barcode, new Set());
+                                  }
+                                  scannedBarcodesMap.get(row.barcode).add(row.role);
+                               });
+                            }
+                         });
                       }
 
                       // 3. Group barcodes by batch_id
@@ -4428,8 +4438,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                    ).catch(() => ({ data: [] }));
                    const leaderScans = leaderScansData || [];
                    
-                   const autoCompletedBatchIds = new Set();
-                   const progressMapUpdates = {};
+                   const progressMapUpdates: Record<string, any> = {};
 
                    for (const batch of summaryData) {
                       const barcodesInBatch = batchToBarcodes[batch.id] || [];
@@ -4442,95 +4451,88 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                          }
                       });
 
-                      // Auto-complete batches with 3 or more scanned barcodes
-                      if (totalCount > 0 && scannedCount >= 3) {
-                         autoCompletedBatchIds.add(batch.id);
-                         autoCompleteBatchInAdmin(batch.id);
-                      } else {
-                         progressMapUpdates[batch.id] = {
-                            total: totalCount,
-                            scanned: scannedCount,
-                            loading: false
-                         };
-                      }
+                      progressMapUpdates[batch.id] = {
+                         total: totalCount,
+                         scanned: scannedCount,
+                         loading: false
+                      };
                    }
 
-                   // Filter out the autocompleted batches from state list
-                   const remainingSummaryData = summaryData.filter((b: any) => !autoCompletedBatchIds.has(b.id));
-                   
-                                       const normalize = (n: string) => (n || '').toLowerCase().replace(/\.(xlsx|xls|pdf|csv)$/i, '').replace(/\s+/g, '');
+                   const normalize = (n: string) => (n || '').toLowerCase().replace(/\.(xlsx|xls|pdf|csv)$/i, '').replace(/\s+/g, '');
                     
-                    // Pre-build index Map from normalized filename -> unique staff string in O(M)
-                    const leaderStaffMap = new Map<string, string>();
-                    if (leaderScans && leaderScans.length > 0) {
-                       const filenameToStaffSet = new Map<string, Set<string>>();
-                       leaderScans.forEach((s: any) => {
-                          if (s.barcode && s.assignees) {
-                             const normKey = normalize(s.barcode);
-                             if (!filenameToStaffSet.has(normKey)) {
-                                filenameToStaffSet.set(normKey, new Set());
-                             }
-                             const staffSet = filenameToStaffSet.get(normKey)!;
-                             const arr = Array.isArray(s.assignees) ? s.assignees : [s.assignees];
-                             arr.forEach((a: any) => { if (a) staffSet.add(String(a)); });
-                          }
-                       });
-                       filenameToStaffSet.forEach((staffSet, normKey) => {
-                          if (staffSet.size > 0) {
-                             leaderStaffMap.set(normKey, Array.from(staffSet).join(', '));
-                          }
-                       });
-                    }
-                    
-                    setBatchProgressMap(prev => {
-                       const newMap = { ...prev };
-                       remainingSummaryData.forEach((b: any) => {
-                          let staffStr = '-';
-                          if (b.excel_filename) {
-                             const bName = normalize(b.excel_filename);
-                             staffStr = leaderStaffMap.get(bName) || '-';
-                          }
-
-                          if (progressMapUpdates[b.id]) {
-                            newMap[b.id] = {
-                               total: progressMapUpdates[b.id].total,
-                               scanned: progressMapUpdates[b.id].scanned,
-                               staff: staffStr,
-                               loading: false
-                            };
-                         } else {
-                            newMap[b.id] = {
-                               total: 0,
-                               scanned: 0,
-                               staff: staffStr,
-                               loading: false
-                            };
+                   // Pre-build index Map from normalized filename -> unique staff string in O(M)
+                   const leaderStaffMap = new Map<string, string>();
+                   if (leaderScans && leaderScans.length > 0) {
+                      const filenameToStaffSet = new Map<string, Set<string>>();
+                      leaderScans.forEach((s: any) => {
+                         if (s.barcode && s.assignees) {
+                            const normKey = normalize(s.barcode);
+                            if (!filenameToStaffSet.has(normKey)) {
+                               filenameToStaffSet.set(normKey, new Set());
+                            }
+                            const staffSet = filenameToStaffSet.get(normKey)!;
+                            const arr = Array.isArray(s.assignees) ? s.assignees : [s.assignees];
+                            arr.forEach((a: any) => { if (a) staffSet.add(String(a)); });
                          }
                       });
-                      return newMap;
-                   });
+                      filenameToStaffSet.forEach((staffSet, normKey) => {
+                         if (staffSet.size > 0) {
+                            leaderStaffMap.set(normKey, Array.from(staffSet).join(', '));
+                         }
+                      });
+                   }
+                   
+                   setBatchProgressMap(prev => {
+                      const newMap = { ...prev };
+                      summaryData.forEach((b: any) => {
+                         let staffStr = '-';
+                         if (b.excel_filename) {
+                            const bName = normalize(b.excel_filename);
+                            staffStr = leaderStaffMap.get(bName) || '-';
+                         }
 
-                   setBatchSummaryData(remainingSummaryData);
-                } else {
-                   setBatchSummaryData([]);
-                }
-               setBatchSummaryPage(1);
-            } catch (err) {
-               console.error('Error fetching batch summary:', err);
-            } finally {
-               setIsLoadingBatchSummary(false);
-            }
-         };
-         fetchBatchSummaryData();
-      }
-   }, [activeView, activeBatchTab, batchDateFilter, batchTimeFilter, batchSearch, batchSearchMode, batchMassSearchApplied, refreshSummaryTrigger]);
+                         if (progressMapUpdates[b.id]) {
+                           newMap[b.id] = {
+                              total: progressMapUpdates[b.id].total,
+                              scanned: progressMapUpdates[b.id].scanned,
+                              staff: staffStr,
+                              loading: false
+                           };
+                        } else {
+                           newMap[b.id] = {
+                              total: 0,
+                              scanned: 0,
+                              staff: staffStr,
+                              loading: false
+                           };
+                        }
+                     });
+                     return newMap;
+                  });
 
-   useEffect(() => {
-      const delayDebounceFn = setTimeout(() => {
-         if ((activeView === 'BATCH_DATA' || activeView === 'BATCH_DATA_2' || activeView === 'BATCH_DATA_3')) fetchBatchData(batchPage);
-      }, 500);
-      return () => clearTimeout(delayDebounceFn);
-   }, [batchSearch, batchSearchMode, batchMassSearchApplied, batchDateFilter, batchTimeFilter, batchPage, activeView]);
+                  setBatchSummaryData(summaryData);
+               } else {
+                  setBatchSummaryData([]);
+               }
+              setBatchSummaryPage(1);
+           } catch (err) {
+              console.error('Error fetching batch summary:', err);
+           } finally {
+              setIsLoadingBatchSummary(false);
+           }
+        };
+        fetchBatchSummaryData();
+     }
+  }, [activeView, activeBatchTab, batchDateFilter, batchTimeFilter, batchSearch, batchSearchMode, batchMassSearchApplied, refreshSummaryTrigger]);
+
+  useEffect(() => {
+     const delayDebounceFn = setTimeout(() => {
+        if ((activeView === 'BATCH_DATA' || activeView === 'BATCH_DATA_2' || activeView === 'BATCH_DATA_3') && activeBatchTab === 'ITEMS') {
+           fetchBatchData(batchPage);
+        }
+     }, 500);
+     return () => clearTimeout(delayDebounceFn);
+  }, [batchSearch, batchSearchMode, batchMassSearchApplied, batchDateFilter, batchTimeFilter, batchPage, activeView, activeBatchTab]);
 
    // --- DATA LOGISTIK: TAB 2 (DUAL-COLUMN PICKER VS LOGISTIK COMPARISON) FETCHERS ---
    const normalizeBarcodeKey = (raw: string): string => {
@@ -6440,18 +6442,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          const dPrevStr2 = `${String(dPrev.getDate()).padStart(2, '0')}/${String(dPrev.getMonth() + 1).padStart(2, '0')}/${dPrev.getFullYear()}`;
          const leaderDates = Array.from(new Set([dFormatted1, dFormatted2, dPrevStr1, dPrevStr2]));
 
-         // Fetch batch items per batch, leader_scan_2, and Firestore scans in parallel
-         const itemPromises = batches.map(b =>
-            Promise.resolve(
-               supabase
-                  .from('batch_items')
-                  .select('id, barcode, batch_id, created_at, msku, qty, order_id')
-                  .eq('batch_id', b.id)
-                  .limit(1000)
-            ).catch(() => ({ data: [] }))
-         );
+         // Fetch batch items per batch in chunks with created_at range filter to prevent full-table scan timeouts
+         const batchIds = batches.map(b => b.id);
+         const batchMap = new Map(batches.map(b => [b.id, b]));
+         const CHUNK_SIZE = 50;
+         const batchChunks: string[][] = [];
+         for (let i = 0; i < batchIds.length; i += CHUNK_SIZE) {
+            batchChunks.push(batchIds.slice(i, i + CHUNK_SIZE));
+         }
 
-         const [itemResults, leaderRes, fsScannedSnap] = await Promise.all([
+         const itemPromises = batchChunks.map(chunk => {
+            let q = supabase
+               .from('batch_items')
+               .select('id, barcode, batch_id, created_at, msku, qty, order_id')
+               .in('batch_id', chunk);
+
+            if (!batchSearch) {
+               q = q.gte('created_at', startOfDay.toISOString()).lte('created_at', endOfDay.toISOString());
+            }
+            return Promise.resolve(q).catch(() => ({ data: [] }));
+         });
+
+         const [itemResults, leaderRes] = await Promise.all([
             Promise.all(itemPromises),
             Promise.resolve(
                supabase
@@ -6462,21 +6474,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             ).catch(err => {
                console.warn("Notice: leader_scan_2 lookup skipped:", err);
                return { data: [], error: null };
-            }),
-            getDocs(fsQueryScanned).catch(() => ({ docs: [], empty: true }))
+            })
          ]);
 
          let itemsData: any[] = [];
-         itemResults.forEach((res: any, idx: number) => {
+         itemResults.forEach((res: any) => {
             if (res?.data) {
-               const bHeader = batches[idx];
                res.data.forEach((item: any) => {
+                  const bHeader = batchMap.get(item.batch_id);
                   itemsData.push({
                      ...item,
                      batches: {
-                        batch_no: bHeader.batch_no,
-                        excel_filename: bHeader.excel_filename,
-                        created_at: bHeader.created_at
+                        batch_no: bHeader?.batch_no || '',
+                        excel_filename: bHeader?.excel_filename || '',
+                        created_at: bHeader?.created_at || item.created_at
                      }
                   });
                });
@@ -6506,48 +6517,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          // Extract all distinct barcodes from itemsData for accurate cross-matching
          const allBarcodes = Array.from(new Set((itemsData || []).map((i: any) => i.barcode?.trim().toUpperCase()).filter(Boolean)));
 
-         // Build lookup maps in O(1) combining Supabase & Firestore scans
+         // Build lookup maps in O(1) from Supabase scans with safe concurrency
          const scannedBarcodesMap = new Map<string, string>();
 
-         // Query scanned_items directly for active barcodes in safe chunks with error catch
          if (allBarcodes.length > 0) {
-            const CHUNK_SIZE = 500;
-            const scannedPromises = [];
+            const CHUNK_SIZE = 200;
+            const barcodeChunks: string[][] = [];
             for (let i = 0; i < allBarcodes.length; i += CHUNK_SIZE) {
-               const chunk = allBarcodes.slice(i, i + CHUNK_SIZE);
-               scannedPromises.push(
-                  Promise.resolve(
-                     supabase
-                        .from('scanned_items')
-                        .select('barcode, user_email, employee_name, role')
-                        .in('role', ['PICKER', 'PICKER_2', 'OJOL'])
-                        .in('barcode', chunk)
-                  ).catch(() => ({ data: [], error: null }))
-               );
+               barcodeChunks.push(allBarcodes.slice(i, i + CHUNK_SIZE));
             }
-            const scannedResults = await Promise.all(scannedPromises);
-            scannedResults.forEach(res => {
-               if (res?.data) {
-                  res.data.forEach((s: any) => {
-                     if (s.barcode) {
-                        const key = s.barcode.trim().toUpperCase();
-                        const staffName = s.employee_name || s.user_email || 'Scanned';
-                        scannedBarcodesMap.set(key, staffName);
-                     }
-                  });
-               }
-            });
-         }
-
-         // Process Firestore offline scans (filter by role locally)
-         if (fsScannedSnap && !('empty' in fsScannedSnap && fsScannedSnap.empty) && 'docs' in fsScannedSnap) {
-            (fsScannedSnap as any).docs?.forEach((docSnap: any) => {
-               const d = docSnap.data();
-               if (d.barcode && ['PICKER', 'PICKER_2', 'OJOL'].includes(d.role)) {
-                  const key = d.barcode.trim().toUpperCase();
-                  scannedBarcodesMap.set(key, d.employee_name || d.user_email || 'Scanned');
-               }
-            });
+            // 3 concurrent requests max to prevent HTTP/2 overload
+            for (let i = 0; i < barcodeChunks.length; i += 3) {
+               const slice = barcodeChunks.slice(i, i + 3);
+               const scannedResults = await Promise.all(
+                  slice.map(chunk =>
+                     Promise.resolve(
+                        supabase
+                           .from('scanned_items')
+                           .select('barcode, user_email, employee_name, role')
+                           .in('role', ['PICKER', 'PICKER_2', 'OJOL'])
+                           .in('barcode', chunk)
+                     ).catch(() => ({ data: [], error: null }))
+                  )
+               );
+               scannedResults.forEach(res => {
+                  if (res?.data) {
+                     res.data.forEach((s: any) => {
+                        if (s.barcode) {
+                           const key = s.barcode.trim().toUpperCase();
+                           const staffName = s.employee_name || s.user_email || 'Scanned';
+                           scannedBarcodesMap.set(key, staffName);
+                        }
+                     });
+                  }
+               });
+            }
          }
 
          const normalize = (n: string) => (n || '').toLowerCase().replace(/\.(xlsx|xls|pdf|csv)$/i, '').replace(/\s+/g, '');
@@ -6605,47 +6609,49 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          }
          q = fsQuery(q, where('timestamp', '>=', startOfDay.toISOString()), where('timestamp', '<=', endOfDay.toISOString()));
 
-         // Also fetch earlier admin_batch_imports for cross-date matching (up to 30 days before)
+         // Also fetch earlier admin_batch_imports for cross-date matching (up to 7 days before, NON-BLOCKING in background)
          const lookbackCacheKey = batchDateFilter;
          const cachedLookback = earlierLookbackCacheRef.current.get(lookbackCacheKey);
          const now = Date.now();
 
-         const lookbackPromise = (async () => {
-            if (cachedLookback && (now - cachedLookback.timestamp < 5 * 60 * 1000)) {
-               setEarlierAdminResiMap(cachedLookback.map);
-               return;
-            }
-            try {
-               const lookbackStart = new Date(startOfDay.getTime() - 30 * 24 * 60 * 60 * 1000);
-               const lookbackQ = fsQuery(
-                  collection(db, 'admin_batch_imports'),
-                  where('timestamp', '>=', lookbackStart.toISOString()),
-                  where('timestamp', '<', startOfDay.toISOString())
-               );
-               const lookbackSnap = await getDocs(lookbackQ);
-               const eMap = new Map<string, string>();
-               lookbackSnap.forEach(docSnap => {
-                  const data = docSnap.data();
-                  const tsStr = data.timestamp;
-                  if (tsStr && Array.isArray(data.barcodes)) {
-                     const ts = new Date(tsStr);
-                     const dStr = `${String(ts.getDate()).padStart(2, '0')}/${String(ts.getMonth() + 1).padStart(2, '0')}`;
-                     data.barcodes.forEach((b: string) => {
-                        const cleanB = (b || '').toString().trim().toUpperCase();
-                        if (cleanB && !eMap.has(cleanB)) {
-                           eMap.set(cleanB, dStr);
-                        }
-                     });
-                  }
-               });
-               earlierLookbackCacheRef.current.set(lookbackCacheKey, { timestamp: now, map: eMap });
-               setEarlierAdminResiMap(eMap);
-            } catch (pastErr) {
-               console.error("Failed to fetch earlier admin imports:", pastErr);
-            }
-         })();
+         if (cachedLookback && (now - cachedLookback.timestamp < 10 * 60 * 1000)) {
+            setEarlierAdminResiMap(cachedLookback.map);
+         } else {
+            // Asynchronous non-blocking background fetch
+            (async () => {
+               try {
+                  const lookbackStart = new Date(startOfDay.getTime() - 7 * 24 * 60 * 60 * 1000);
+                  const lookbackQ = fsQuery(
+                     collection(db, 'admin_batch_imports'),
+                     where('timestamp', '>=', lookbackStart.toISOString()),
+                     where('timestamp', '<', startOfDay.toISOString())
+                  );
+                  const lookbackSnap = await getDocs(lookbackQ);
+                  const eMap = new Map<string, string>();
+                  lookbackSnap.forEach(docSnap => {
+                     const data = docSnap.data();
+                     const tsStr = data.timestamp;
+                     if (tsStr && Array.isArray(data.barcodes)) {
+                        const ts = new Date(tsStr);
+                        const dStr = `${String(ts.getDate()).padStart(2, '0')}/${String(ts.getMonth() + 1).padStart(2, '0')}`;
+                        data.barcodes.forEach((b: string) => {
+                           const cleanB = (b || '').toString().trim().toUpperCase();
+                           if (cleanB && !eMap.has(cleanB)) {
+                              eMap.set(cleanB, dStr);
+                           }
+                        });
+                     }
+                  });
+                  earlierLookbackCacheRef.current.set(lookbackCacheKey, { timestamp: Date.now(), map: eMap });
+                  setEarlierAdminResiMap(eMap);
+               } catch (pastErr) {
+                  console.error("Failed to fetch earlier admin imports:", pastErr);
+               }
+            })();
+         }
 
-         const [querySnapshot] = await Promise.all([getDocs(q), lookbackPromise]);
+         // Fetch today's snapshot directly without waiting for historical lookback!
+         const querySnapshot = await getDocs(q);
          const fetched: AdminBatchImport[] = [];
          querySnapshot.forEach(docSnap => {
             fetched.push({ id: docSnap.id, ...docSnap.data() } as AdminBatchImport);
@@ -6807,14 +6813,57 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
          const fetchOptimizedData = async (role: string, fetchGudangAudit = false) => {
             if (fetchGudangAudit) {
-               // Direct fast fetch for Gudang status scans (Ready / Cancel / Pending) without expensive count
-               const { data: gudangRows } = await supabase.from('scanned_items')
+               // 1. Direct fast fetch for Gudang status scans on Same-Day (Ready / Cancel / Pending)
+               const { data: sameDayGudangRows } = await supabase.from('scanned_items')
                   .select('id, barcode, timestamp, status, menu_context, role, description')
-                  .or('status.eq.PENDING,menu_context.eq.PENDING,status.eq.READY,menu_context.eq.READY,status.eq.CANCEL,menu_context.eq.CANCEL')
+                  .or('status.eq.PENDING,menu_context.eq.PENDING,status.eq.READY,menu_context.eq.READY,status.eq.CANCEL,menu_context.eq.CANCEL,role.eq.GUDANG,role.eq.LEADER_PENDING')
                   .gte('timestamp', d.startMs)
                   .lte('timestamp', d.endMs)
-                  .limit(3000);
-               return gudangRows || [];
+                  .limit(5000);
+
+               // 2. Identify unscanned admin barcodes to check cross-date Gudang status
+               const sameDayGudangBc = new Set((sameDayGudangRows || []).map(r => (r.barcode || '').toString().trim().toUpperCase()).filter(Boolean));
+               const unscannedAdminBc = adminBarcodes.filter(bc => !sameDayGudangBc.has(bc));
+
+               let crossDateGudangRows: any[] = [];
+               if (unscannedAdminBc.length > 0) {
+                  const chunkSize = 200;
+                  const chunks: string[][] = [];
+                  for (let i = 0; i < unscannedAdminBc.length; i += chunkSize) {
+                     chunks.push(unscannedAdminBc.slice(i, i + chunkSize));
+                  }
+
+                  // Process sequentially in small batches of 3 to prevent HTTP/2 connection overload
+                  const CONCURRENT_LIMIT_G = 3;
+                  for (let b = 0; b < chunks.length; b += CONCURRENT_LIMIT_G) {
+                     const batchSlice = chunks.slice(b, b + CONCURRENT_LIMIT_G);
+                     const batchResults = await Promise.all(
+                        batchSlice.map(chunk =>
+                           supabase.from('scanned_items')
+                              .select('id, barcode, timestamp, status, menu_context, role, description')
+                              .in('barcode', chunk)
+                              .or('status.eq.PENDING,menu_context.eq.PENDING,status.eq.READY,menu_context.eq.READY,status.eq.CANCEL,menu_context.eq.CANCEL,role.eq.GUDANG,role.eq.LEADER_PENDING')
+                        )
+                     );
+                     batchResults.forEach(res => {
+                        if (res.data) crossDateGudangRows.push(...res.data);
+                     });
+                  }
+               }
+
+               // Merge and de-duplicate gudang rows
+               const allGudang = [...(sameDayGudangRows || []), ...crossDateGudangRows];
+               const uniqueGudang = new Map<string, any>();
+               allGudang.forEach(row => {
+                  const bc = (row.barcode || '').toString().trim().toUpperCase();
+                  if (bc) {
+                     const key = `${bc}_${row.status || ''}_${row.menu_context || ''}_${row.timestamp || 0}`;
+                     if (!uniqueGudang.has(key)) {
+                        uniqueGudang.set(key, row);
+                     }
+                  }
+               });
+               return Array.from(uniqueGudang.values());
             }
 
             const roleList = role === 'PICKER' 
@@ -6851,20 +6900,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             if (auditCount && auditCount > 1000) {
                const chunkSize = 1000;
                const totalPages = Math.ceil(auditCount / chunkSize);
-               const concurrency = 6;
-
-               for (let i = 1; i < totalPages; i += concurrency) {
-                  const batchPromises = [];
-                  for (let j = i; j < Math.min(i + concurrency, totalPages); j++) {
-                     const from = j * chunkSize;
-                     const to = from + chunkSize - 1;
-                     batchPromises.push(buildAuditQuery(false).range(from, to));
-                  }
-                  const batchResults = await Promise.all(batchPromises);
-                  batchResults.forEach(r => {
-                     if (r.data) sameDayData.push(...r.data);
-                  });
+               const batchPromises = [];
+               for (let j = 1; j < totalPages; j++) {
+                  const from = j * chunkSize;
+                  const to = from + chunkSize - 1;
+                  batchPromises.push(buildAuditQuery(false).range(from, to));
                }
+               const batchResults = await Promise.all(batchPromises);
+               batchResults.forEach(r => {
+                  if (r.data) sameDayData.push(...r.data);
+               });
             }
 
             // B. Identify remaining admin barcodes not scanned on same day
@@ -6873,28 +6918,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             );
             const remainingBarcodes = adminBarcodes.filter(bc => !sameDayBarcodes.has(bc));
 
-            // C. Fetch Cross-Date Scans (Past & Future) for remaining admin barcodes
+            // C. Fetch Cross-Date Scans (Past & Future) for remaining admin barcodes in parallel
             let crossDateData: any[] = [];
             if (remainingBarcodes.length > 0) {
-               const chunkSize = 500;
+               const chunkSize = 200;
                const chunks: string[][] = [];
                for (let i = 0; i < remainingBarcodes.length; i += chunkSize) {
                   chunks.push(remainingBarcodes.slice(i, i + chunkSize));
                }
 
-               const queryBuilders = chunks.map(chunk => {
-                  let q = supabase.from('scanned_items')
-                     .select('id, barcode, timestamp, status, menu_context, role')
-                     .in('barcode', chunk);
+               // Process sequentially in small batches of 3 to prevent HTTP/2 connection overload
+               const CONCURRENT_LIMIT_R = 3;
+               for (let b = 0; b < chunks.length; b += CONCURRENT_LIMIT_R) {
+                  const batchSlice = chunks.slice(b, b + CONCURRENT_LIMIT_R);
+                  const batchResults = await Promise.all(
+                     batchSlice.map(chunk => {
+                        let q = supabase.from('scanned_items')
+                           .select('id, barcode, timestamp, status, menu_context, role')
+                           .in('barcode', chunk);
 
-                  if (roleList.length > 1) q = q.in('role', roleList);
-                  else q = q.eq('role', role);
-                  return q;
-               });
-
-               for (let i = 0; i < queryBuilders.length; i += 6) {
-                  const results = await Promise.all(queryBuilders.slice(i, i + 6));
-                  results.forEach(res => {
+                        if (roleList.length > 1) q = q.in('role', roleList);
+                        else q = q.eq('role', role);
+                        return q;
+                     })
+                  );
+                  batchResults.forEach(res => {
                      if (res.data) crossDateData.push(...res.data);
                   });
                }
@@ -7101,8 +7149,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       roleResi.forEach(bc => pendingResi.delete(bc));
 
       const crossDateResiMap = new Map<string, string>(); // barcode -> dateStr
+      const crossDateCancelMap = new Map<string, string>(); // barcode -> dateStr
+      const crossDateReadyMap = new Map<string, string>(); // barcode -> dateStr
       const sameDayResiSet = new Set<string>();
       const crossDateResiSet = new Set<string>();
+
+      // Map cancel cross-date info (scanned or imported on H+1+, previous days, etc.)
+      auditPendingData.forEach(d => {
+         const bc = (d.barcode || '').toString().trim().toUpperCase();
+         const isCancel = d.status === 'CANCEL' || d.menu_context === 'CANCEL' || (d.description && d.description.toUpperCase().includes('[CANCEL]'));
+         if (bc && isCancel && d.timestamp && targetEndMs && d.timestamp > targetEndMs) {
+            const dt = new Date(d.timestamp);
+            const dateStr = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}`;
+            crossDateCancelMap.set(bc, dateStr);
+         }
+      });
+      cancelledOrders.forEach(o => {
+         const bc = (o.barcode || '').toString().trim().toUpperCase();
+         if (bc && cancelBarcodeSet.has(bc) && o.cancelled_at) {
+            const ts = new Date(o.cancelled_at).getTime();
+            if (targetEndMs && ts > targetEndMs) {
+               const dt = new Date(ts);
+               const dateStr = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}`;
+               if (!crossDateCancelMap.has(bc)) {
+                  crossDateCancelMap.set(bc, dateStr);
+               }
+            }
+         }
+      });
+
+      // Map ready cross-date info
+      auditPendingData.forEach(d => {
+         const bc = (d.barcode || '').toString().trim().toUpperCase();
+         const isReady = d.status === 'READY' || d.menu_context === 'READY' || (d.description && d.description.toUpperCase().includes('[READY]'));
+         if (bc && isReady && d.timestamp && targetEndMs && d.timestamp > targetEndMs) {
+            const dt = new Date(d.timestamp);
+            const dateStr = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}`;
+            crossDateReadyMap.set(bc, dateStr);
+         }
+      });
 
       adminResiArr.forEach(r => {
          if (roleResiMap.has(r)) {
@@ -7139,6 +7224,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          ojolResiSet,
          pendingResi,
          crossDateResiMap,
+         crossDateCancelMap,
+         crossDateReadyMap,
          sameDayResiSet,
          crossDateResiSet,
          cancelMatchedSet,
@@ -7163,6 +7250,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       ojolResiSet = new Set<string>(),
       pendingResi = new Set<string>(),
       crossDateResiMap = new Map<string, string>(),
+      crossDateCancelMap = new Map<string, string>(),
+      crossDateReadyMap = new Map<string, string>(),
       sameDayResiSet = new Set<string>(),
       crossDateResiSet = new Set<string>(),
       cancelMatchedSet = new Set<string>(),
@@ -20757,435 +20846,588 @@ LXAD-1234567890`}
                                               <div className="flex-1 flex flex-col overflow-hidden">
                                                  {/* TAB: ADMIN */}
                                                  {auditDetailTab === 'ADMIN' && (() => {
-                                                    const adminListToDisplay = showOnlyTerkirimBersih
-                                                       ? Array.from(sameDayResiSet)
-                                                       : showOnlyCancelAdmin
-                                                       ? (showOnlyCancelImportAdmin ? Array.from(cancelMatchedSet).filter(bc => cancelImportOnlySet.has(bc) && !gudangCancelResiSet.has(bc)) : Array.from(cancelMatchedSet))
-                                                       : showOnlyReadyAdmin
-                                                       ? Array.from(readyMatchedSet)
-                                                       : showOnlyCrossDateAdmin
-                                                       ? Array.from(crossDateResiSet)
-                                                       : showOnlyBelumScanAdmin
-                                                       ? belumDiscan
-                                                       : adminResiArr;
+                                                     const rawList = showOnlyTerkirimBersih
+                                                        ? Array.from(sameDayResiSet)
+                                                        : showOnlyCancelAdmin
+                                                        ? (showOnlyCancelImportAdmin ? Array.from(cancelMatchedSet).filter(bc => cancelImportOnlySet.has(bc) && !gudangCancelResiSet.has(bc)) : Array.from(cancelMatchedSet))
+                                                        : showOnlyReadyAdmin
+                                                        ? Array.from(readyMatchedSet)
+                                                        : showOnlyCrossDateAdmin
+                                                        ? Array.from(crossDateResiSet)
+                                                        : showOnlyBelumScanAdmin
+                                                        ? belumDiscan
+                                                        : adminResiArr;
 
-                                                    return (
-                                                       <>
-                                                          <div className="p-3 bg-gray-50 dark:bg-gray-900/30 border-b border-gray-200 dark:border-gray-700 flex flex-col gap-2 shrink-0">
-                                                             <div className="flex justify-between items-center">
-                                                                <div className="flex items-center gap-2">
-                                                                   <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300">Resi Admin (Global)</h3>
-                                                                   {showOnlyTerkirimBersih && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">Filter: Terkirim H+0</span>}
-                                                                   {showOnlyCancelAdmin && <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">Filter: Cancel</span>}
-                                                                   {showOnlyReadyAdmin && <span className="text-[10px] bg-teal-100 text-teal-700 px-2 py-0.5 rounded-full font-bold">Filter: Ready</span>}
-                                                                   {showOnlyCrossDateAdmin && <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold">Filter: Susulan</span>}
-                                                                   {showOnlyBelumScanAdmin && <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-bold">Filter: Belum Scan</span>}
-                                                                </div>
+                                                     let searchFiltered = rawList;
+                                                     if (batchSearchMode === 'MASS' && batchMassSearchApplied.length > 0) {
+                                                        const massSet = new Set(batchMassSearchApplied.map(b => b.trim().toUpperCase()));
+                                                        searchFiltered = searchFiltered.filter(bc => massSet.has(bc.trim().toUpperCase()));
+                                                     } else if (batchSearch.trim()) {
+                                                        const q = batchSearch.trim().toUpperCase();
+                                                        searchFiltered = searchFiltered.filter(bc => bc.toUpperCase().includes(q));
+                                                     }
+
+                                                     const totalCount = searchFiltered.length;
+                                                     const totalPages = Math.ceil(totalCount / auditRowsPerPage) || 1;
+                                                     const currentPage = Math.min(Math.max(1, auditAdminPage), totalPages);
+                                                     const startIndex = (currentPage - 1) * auditRowsPerPage;
+                                                     const paginatedList = searchFiltered.slice(startIndex, startIndex + auditRowsPerPage);
+
+                                                     return (
+                                                        <>
+                                                           <div className="p-3 bg-gray-50 dark:bg-gray-900/30 border-b border-gray-200 dark:border-gray-700 flex flex-col gap-2 shrink-0">
+                                                              <div className="flex justify-between items-center">
                                                                  <div className="flex items-center gap-2">
-                                                                    <button 
-                                                                       onClick={() => {
-                                                                          navigator.clipboard.writeText(adminListToDisplay.join('\n'));
-                                                                          setSuccessToast(`Tersalin ${adminListToDisplay.length} data ${showOnlyTerkirimBersih ? 'Terkirim Bersih H+0' : showOnlyCancelAdmin ? 'Cancel' : showOnlyReadyAdmin ? 'Ready Gudang' : showOnlyCrossDateAdmin ? 'Scan Tanggal Susulan' : showOnlyBelumScanAdmin ? 'Belum Scan' : 'Admin'}!`);
-                                                                       }} 
-                                                                       className="text-xs flex items-center gap-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 px-2.5 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold transition-colors cursor-pointer shadow-sm"
-                                                                       title="Salin semua data sekaligus"
+                                                                    <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300">Resi Admin (Global)</h3>
+                                                                    {showOnlyTerkirimBersih && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">Filter: Terkirim H+0</span>}
+                                                                    {showOnlyCancelAdmin && <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">Filter: Cancel</span>}
+                                                                    {showOnlyReadyAdmin && <span className="text-[10px] bg-teal-100 text-teal-700 px-2 py-0.5 rounded-full font-bold">Filter: Ready</span>}
+                                                                    {showOnlyCrossDateAdmin && <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold">Filter: Susulan</span>}
+                                                                    {showOnlyBelumScanAdmin && <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-bold">Filter: Belum Scan</span>}
+                                                                    {batchSearch.trim() && <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">Cari: "{batchSearch.trim()}"</span>}
+                                                                 </div>
+                                                                  <div className="flex items-center gap-2">
+                                                                     <button 
+                                                                        onClick={() => {
+                                                                           navigator.clipboard.writeText(searchFiltered.join('\n'));
+                                                                           setSuccessToast(`Tersalin ${searchFiltered.length} data ${showOnlyTerkirimBersih ? 'Terkirim Bersih H+0' : showOnlyCancelAdmin ? 'Cancel' : showOnlyReadyAdmin ? 'Ready Gudang' : showOnlyCrossDateAdmin ? 'Scan Tanggal Susulan' : showOnlyBelumScanAdmin ? 'Belum Scan' : 'Admin'}!`);
+                                                                        }} 
+                                                                        className="text-xs flex items-center gap-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 px-2.5 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold transition-colors cursor-pointer shadow-sm"
+                                                                        title="Salin semua data sekaligus"
+                                                                     >
+                                                                        <Copy size={12}/> Salin ({searchFiltered.length.toLocaleString()})
+                                                                     </button>
+                                                                     <button 
+                                                                        onClick={() => {
+                                                                           const filterLabel = showOnlyTerkirimBersih ? 'Admin (Terkirim Bersih H+0)' : showOnlyCancelAdmin ? 'Admin (Cancel)' : showOnlyReadyAdmin ? 'Admin (Ready Gudang)' : showOnlyCrossDateAdmin ? 'Admin (Susulan)' : showOnlyBelumScanAdmin ? 'Admin (Belum Scan)' : 'Resi Admin Global';
+                                                                           openAuditBatchCopyModal(filterLabel, searchFiltered);
+                                                                        }} 
+                                                                        className="text-xs flex items-center gap-1 bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-700 px-2.5 py-1.5 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-800/40 text-indigo-700 dark:text-indigo-300 font-bold transition-colors cursor-pointer shadow-sm"
+                                                                        title="Salin per 500 resi per batch"
+                                                                     >
+                                                                        <Boxes size={12}/> Salin per Batch ({searchFiltered.length.toLocaleString()})
+                                                                     </button>
+                                                                  </div>
+                                                              </div>
+                                                              {/* Filter Checkboxes */}
+                                                              <div className="flex flex-wrap items-center gap-3">
+                                                                 <label className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400 font-bold cursor-pointer">
+                                                                    <input type="checkbox" checked={showOnlyTerkirimBersih} onChange={e => { const c = e.target.checked; setShowOnlyTerkirimBersih(c); setAuditAdminPage(1); if (c) { setShowOnlyBelumScanAdmin(false); setShowOnlyCrossDateAdmin(false); setShowOnlyCancelAdmin(false); }}} className="rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5 cursor-pointer" />
+                                                                    Terkirim ({sameDayResiSet.size})
+                                                                 </label>
+                                                                 <label className="flex items-center gap-1.5 text-xs text-orange-700 dark:text-orange-400 font-bold cursor-pointer">
+                                                                    <input type="checkbox" checked={showOnlyBelumScanAdmin} onChange={e => { const c = e.target.checked; setShowOnlyBelumScanAdmin(c); setAuditAdminPage(1); if (c) { setShowOnlyTerkirimBersih(false); setShowOnlyCrossDateAdmin(false); setShowOnlyCancelAdmin(false); }}} className="rounded text-orange-600 focus:ring-orange-500 w-3.5 h-3.5 cursor-pointer" />
+                                                                    Belum Scan ({belumDiscan.length})
+                                                                 </label>
+                                                                 <label className="flex items-center gap-1.5 text-xs text-indigo-700 dark:text-indigo-400 font-bold cursor-pointer">
+                                                                    <input type="checkbox" checked={showOnlyCrossDateAdmin} onChange={e => { const c = e.target.checked; setShowOnlyCrossDateAdmin(c); setAuditAdminPage(1); if (c) { setShowOnlyTerkirimBersih(false); setShowOnlyBelumScanAdmin(false); setShowOnlyCancelAdmin(false); }}} className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer" />
+                                                                    Susulan ({crossDateResiSet.size})
+                                                                 </label>
+                                                                 <label className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400 font-bold cursor-pointer">
+                                                                    <input type="checkbox" checked={showOnlyCancelAdmin} onChange={e => { const c = e.target.checked; setShowOnlyCancelAdmin(c); setAuditAdminPage(1); if (c) { setShowOnlyTerkirimBersih(false); setShowOnlyBelumScanAdmin(false); setShowOnlyCrossDateAdmin(false); setShowOnlyReadyAdmin(false); } if (!c) { setShowOnlyCancelImportAdmin(false); } }} className="rounded text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer" />
+                                                                    Cancel ({cancelMatchedSet.size})
+                                                                 </label>
+                                                                 {showOnlyCancelAdmin && (
+                                                                    <label className="flex items-center gap-1.5 text-[10px] text-red-600 dark:text-red-400 font-bold cursor-pointer ml-1">
+                                                                       <input type="checkbox" checked={showOnlyCancelImportAdmin} onChange={e => { setShowOnlyCancelImportAdmin(e.target.checked); setAuditAdminPage(1); }} className="rounded text-red-500 focus:ring-red-500 w-3 h-3 cursor-pointer" />
+                                                                       Cancel Import Saja ({Array.from(cancelMatchedSet).filter(bc => cancelImportOnlySet.has(bc) && !gudangCancelResiSet.has(bc)).length})
+                                                                       {showOnlyCancelImportAdmin && (
+                                                                          <span 
+                                                                             onClick={(e) => { e.preventDefault(); setShowOnlyCancelImportAdmin(false); setAuditAdminPage(1); }} 
+                                                                             className="ml-2 text-gray-500 hover:text-gray-700 underline cursor-pointer"
+                                                                          >
+                                                                             Reset
+                                                                          </span>
+                                                                       )}
+                                                                    </label>
+                                                                 )}
+                                                                 <label className="flex items-center gap-1.5 text-xs text-teal-700 dark:text-teal-400 font-bold cursor-pointer">
+                                                                    <input type="checkbox" checked={showOnlyReadyAdmin} onChange={e => { const c = e.target.checked; setShowOnlyReadyAdmin(c); setAuditAdminPage(1); if (c) { setShowOnlyTerkirimBersih(false); setShowOnlyBelumScanAdmin(false); setShowOnlyCrossDateAdmin(false); setShowOnlyCancelAdmin(false); }}} className="rounded text-teal-600 focus:ring-teal-500 w-3.5 h-3.5 cursor-pointer" />
+                                                                    Ready ({readyMatchedSet.size})
+                                                                 </label>
+                                                              </div>
+                                                              {/* DevMode Controls */}
+                                                              {(() => {
+                                                                 const isDevModeNew = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
+                                                                 if (!isDevModeNew) return null;
+                                                                 return (
+                                                                    <div className="flex items-center gap-2 pt-2 border-t border-gray-200 dark:border-gray-700 justify-between">
+                                                                       <label className="flex items-center gap-1.5 text-xs text-purple-700 dark:text-purple-300 font-bold cursor-pointer">
+                                                                          <input 
+                                                                             type="checkbox"
+                                                                             checked={searchFiltered.length > 0 && searchFiltered.every(bc => selectedAdminResi.includes(bc))}
+                                                                             onChange={(e) => {
+                                                                                if (e.target.checked) {
+                                                                                   setSelectedAdminResi(Array.from(new Set([...selectedAdminResi, ...searchFiltered])));
+                                                                                } else {
+                                                                                   setSelectedAdminResi(selectedAdminResi.filter(bc => !searchFiltered.includes(bc)));
+                                                                                }
+                                                                             }}
+                                                                             className="rounded text-purple-600 focus:ring-purple-500 w-3.5 h-3.5 cursor-pointer"
+                                                                          />
+                                                                          Pilih Semua ({searchFiltered.length})
+                                                                       </label>
+                                                                       {selectedAdminResi.length > 0 && (
+                                                                          <button
+                                                                             type="button"
+                                                                             onClick={handleClearSelectedAdminResi}
+                                                                             className="flex items-center gap-1 px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all cursor-pointer animate-pulse"
+                                                                          >
+                                                                             <Trash2 size={12} /> Clear Data Terpilih ({selectedAdminResi.length})
+                                                                          </button>
+                                                                       )}
+                                                                    </div>
+                                                                 );
+                                                              })()}
+                                                           </div>
+                                                           <div className="flex-1 overflow-y-auto p-3">
+                                                              {searchFiltered.length === 0 ? (
+                                                                 <div className="text-center text-sm text-gray-400 py-10 flex flex-col items-center gap-2">
+                                                                    <Database size={32} className="text-gray-300" />
+                                                                    <span>Tidak ada data untuk filter / pencarian ini</span>
+                                                                 </div>
+                                                              ) : (
+                                                                 <div className="flex flex-col gap-1">
+                                                                    {paginatedList.map(bc => {
+                                                                       const isRoleScanned = roleResi.has(bc);
+                                                                       const isCrossDate = crossDateResiMap.has(bc);
+                                                                       const isCancelData = cancelBarcodeSet.has(bc);
+                                                                       const isReadyData = readyResiSet.has(bc);
+                                                                       const isSelected = selectedAdminResi.includes(bc);
+                                                                       return (
+                                                                          <div key={bc} className={`px-3 py-2 rounded-lg text-xs font-mono font-bold flex justify-between items-center border transition-all ${isSelected ? 'ring-2 ring-purple-500 bg-purple-50 dark:bg-purple-900/30 border-purple-300' : isCancelData ? 'bg-amber-50/80 dark:bg-amber-900/20 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300' : isReadyData ? 'bg-teal-50/80 dark:bg-teal-900/20 border-teal-300 dark:border-teal-700 text-teal-800 dark:text-teal-300' : isCrossDate ? 'bg-indigo-50/70 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300' : isRoleScanned ? 'bg-green-50 dark:bg-green-900/10 border-green-200 text-green-700' : 'bg-white dark:bg-gray-800 border-gray-200 text-gray-700'}`}>
+                                                                             <div className="flex items-center gap-2">
+                                                                                {selectedAdminResi.length > 0 && (
+                                                                                   <input 
+                                                                                      type="checkbox"
+                                                                                      checked={isSelected}
+                                                                                      onChange={(e) => {
+                                                                                         if (e.target.checked) {
+                                                                                            setSelectedAdminResi([...selectedAdminResi, bc]);
+                                                                                         } else {
+                                                                                            setSelectedAdminResi(selectedAdminResi.filter(item => item !== bc));
+                                                                                         }
+                                                                                      }}
+                                                                                      className="rounded text-purple-600 focus:ring-purple-500 w-3.5 h-3.5 flex-shrink-0 cursor-pointer"
+                                                                                   />
+                                                                                )}
+                                                                                <span>{bc}</span>
+                                                                             </div>
+                                                                             <div className="flex items-center gap-1">
+                                                                                {isCancelData ? (
+                                                                                   <span className="bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                                                                                      CANCEL {crossDateCancelMap.has(bc) ? `(${crossDateCancelMap.get(bc)})` : ''}
+                                                                                   </span>
+                                                                                ) : isReadyData ? (
+                                                                                   <span className="bg-teal-100 text-teal-800 dark:bg-teal-900/50 dark:text-teal-300 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                                                                                      READY GUDANG {crossDateReadyMap.has(bc) ? `(${crossDateReadyMap.get(bc)})` : ''}
+                                                                                   </span>
+                                                                                ) : isCrossDate ? (
+                                                                                   <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
+                                                                                      <Clock size={10} /> Susulan ({crossDateResiMap.get(bc)})
+                                                                                   </span>
+                                                                                ) : isRoleScanned ? (
+                                                                                   <span className="bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                                                                                      TERKIRIM H+0
+                                                                                   </span>
+                                                                                ) : (
+                                                                                   <span className="bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                                                                                      BELUM SCAN
+                                                                                   </span>
+                                                                                )}
+                                                                             </div>
+                                                                          </div>
+                                                                       );
+                                                                    })}
+                                                                 </div>
+                                                              )}
+                                                           </div>
+                                                           {/* Pagination Toolbar */}
+                                                           {totalCount > 0 && (
+                                                              <div className="p-2.5 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex flex-wrap justify-between items-center gap-2 shrink-0 text-xs">
+                                                                 <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                                                                    <span>Menampilkan <b>{startIndex + 1} - {Math.min(startIndex + auditRowsPerPage, totalCount)}</b> dari <b>{totalCount.toLocaleString()}</b> resi</span>
+                                                                    <select 
+                                                                       value={auditRowsPerPage} 
+                                                                       onChange={(e) => { setAuditRowsPerPage(Number(e.target.value)); setAuditAdminPage(1); }}
+                                                                       className="ml-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-2 py-0.5 text-xs font-bold"
                                                                     >
-                                                                       <Copy size={12}/> Salin ({adminListToDisplay.length})
+                                                                       <option value={50}>50 / hal</option>
+                                                                       <option value={100}>100 / hal</option>
+                                                                       <option value={250}>250 / hal</option>
+                                                                       <option value={500}>500 / hal</option>
+                                                                    </select>
+                                                                 </div>
+                                                                 <div className="flex items-center gap-1.5">
+                                                                    <button 
+                                                                       disabled={currentPage <= 1}
+                                                                       onClick={() => setAuditAdminPage(p => Math.max(1, p - 1))}
+                                                                       className="px-2.5 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded font-bold disabled:opacity-40 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                                                                    >
+                                                                       &larr; Prev
                                                                     </button>
+                                                                    <span className="px-2 font-bold text-gray-700 dark:text-gray-300">Hal {currentPage} / {totalPages}</span>
                                                                     <button 
-                                                                       onClick={() => {
-                                                                          const filterLabel = showOnlyTerkirimBersih ? 'Admin (Terkirim Bersih H+0)' : showOnlyCancelAdmin ? 'Admin (Cancel)' : showOnlyReadyAdmin ? 'Admin (Ready Gudang)' : showOnlyCrossDateAdmin ? 'Admin (Susulan)' : showOnlyBelumScanAdmin ? 'Admin (Belum Scan)' : 'Resi Admin Global';
-                                                                          openAuditBatchCopyModal(filterLabel, adminListToDisplay);
-                                                                       }} 
-                                                                       className="text-xs flex items-center gap-1 bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-700 px-2.5 py-1.5 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-800/40 text-indigo-700 dark:text-indigo-300 font-bold transition-colors cursor-pointer shadow-sm"
-                                                                       title="Salin per 500 resi per batch"
+                                                                       disabled={currentPage >= totalPages}
+                                                                       onClick={() => setAuditAdminPage(p => Math.min(totalPages, p + 1))}
+                                                                       className="px-2.5 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded font-bold disabled:opacity-40 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
                                                                     >
-                                                                       <Boxes size={12}/> Salin per Batch ({adminListToDisplay.length})
+                                                                       Next &rarr;
                                                                     </button>
                                                                  </div>
-                                                             </div>
-                                                             {/* Filter Checkboxes */}
-                                                             <div className="flex flex-wrap items-center gap-3">
-                                                                <label className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400 font-bold cursor-pointer">
-                                                                   <input type="checkbox" checked={showOnlyTerkirimBersih} onChange={e => { const c = e.target.checked; setShowOnlyTerkirimBersih(c); if (c) { setShowOnlyBelumScanAdmin(false); setShowOnlyCrossDateAdmin(false); setShowOnlyCancelAdmin(false); }}} className="rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5 cursor-pointer" />
-                                                                   Terkirim ({sameDayResiSet.size})
-                                                                </label>
-                                                                <label className="flex items-center gap-1.5 text-xs text-orange-700 dark:text-orange-400 font-bold cursor-pointer">
-                                                                   <input type="checkbox" checked={showOnlyBelumScanAdmin} onChange={e => { const c = e.target.checked; setShowOnlyBelumScanAdmin(c); if (c) { setShowOnlyTerkirimBersih(false); setShowOnlyCrossDateAdmin(false); setShowOnlyCancelAdmin(false); }}} className="rounded text-orange-600 focus:ring-orange-500 w-3.5 h-3.5 cursor-pointer" />
-                                                                   Belum Scan ({belumDiscan.length})
-                                                                </label>
-                                                                <label className="flex items-center gap-1.5 text-xs text-indigo-700 dark:text-indigo-400 font-bold cursor-pointer">
-                                                                   <input type="checkbox" checked={showOnlyCrossDateAdmin} onChange={e => { const c = e.target.checked; setShowOnlyCrossDateAdmin(c); if (c) { setShowOnlyTerkirimBersih(false); setShowOnlyBelumScanAdmin(false); setShowOnlyCancelAdmin(false); }}} className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer" />
-                                                                   Susulan ({crossDateResiSet.size})
-                                                                </label>
-                                                                <label className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400 font-bold cursor-pointer">
-                                                                   <input type="checkbox" checked={showOnlyCancelAdmin} onChange={e => { const c = e.target.checked; setShowOnlyCancelAdmin(c); if (c) { setShowOnlyTerkirimBersih(false); setShowOnlyBelumScanAdmin(false); setShowOnlyCrossDateAdmin(false); setShowOnlyReadyAdmin(false); } if (!c) { setShowOnlyCancelImportAdmin(false); } }} className="rounded text-amber-600 focus:ring-amber-500 w-3.5 h-3.5 cursor-pointer" />
-                                                                   Cancel ({cancelMatchedSet.size})
-                                                                </label>
-                                                                {showOnlyCancelAdmin && (
-                                                                   <label className="flex items-center gap-1.5 text-[10px] text-red-600 dark:text-red-400 font-bold cursor-pointer ml-1">
-                                                                      <input type="checkbox" checked={showOnlyCancelImportAdmin} onChange={e => setShowOnlyCancelImportAdmin(e.target.checked)} className="rounded text-red-500 focus:ring-red-500 w-3 h-3 cursor-pointer" />
-                                                                      Cancel Import Saja ({Array.from(cancelMatchedSet).filter(bc => cancelImportOnlySet.has(bc) && !gudangCancelResiSet.has(bc)).length})
-                                                                      {showOnlyCancelImportAdmin && (
-                                                                         <span 
-                                                                            onClick={(e) => { e.preventDefault(); setShowOnlyCancelImportAdmin(false); }} 
-                                                                            className="ml-2 text-gray-500 hover:text-gray-700 underline cursor-pointer"
-                                                                         >
-                                                                            Reset
-                                                                         </span>
-                                                                      )}
-                                                                   </label>
-                                                                )}
-                                                                <label className="flex items-center gap-1.5 text-xs text-teal-700 dark:text-teal-400 font-bold cursor-pointer">
-                                                                   <input type="checkbox" checked={showOnlyReadyAdmin} onChange={e => { const c = e.target.checked; setShowOnlyReadyAdmin(c); if (c) { setShowOnlyTerkirimBersih(false); setShowOnlyBelumScanAdmin(false); setShowOnlyCrossDateAdmin(false); setShowOnlyCancelAdmin(false); }}} className="rounded text-teal-600 focus:ring-teal-500 w-3.5 h-3.5 cursor-pointer" />
-                                                                   Ready ({readyMatchedSet.size})
-                                                                </label>
-                                                             </div>
-                                                             {/* DevMode Controls */}
-                                                             {(() => {
-                                                                const isDevModeNew = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
-                                                                if (!isDevModeNew) return null;
-                                                                return (
-                                                                   <div className="flex items-center gap-2 pt-2 border-t border-gray-200 dark:border-gray-700 justify-between">
-                                                                      <label className="flex items-center gap-1.5 text-xs text-purple-700 dark:text-purple-300 font-bold cursor-pointer">
-                                                                         <input 
-                                                                            type="checkbox"
-                                                                            checked={adminListToDisplay.length > 0 && adminListToDisplay.every(bc => selectedAdminResi.includes(bc))}
-                                                                            onChange={(e) => {
-                                                                               if (e.target.checked) {
-                                                                                  setSelectedAdminResi(Array.from(new Set([...selectedAdminResi, ...adminListToDisplay])));
-                                                                               } else {
-                                                                                  setSelectedAdminResi(selectedAdminResi.filter(bc => !adminListToDisplay.includes(bc)));
-                                                                               }
-                                                                            }}
-                                                                            className="rounded text-purple-600 focus:ring-purple-500 w-3.5 h-3.5 cursor-pointer"
-                                                                         />
-                                                                         Pilih Semua ({adminListToDisplay.length})
-                                                                      </label>
-                                                                      {selectedAdminResi.length > 0 && (
-                                                                         <button
-                                                                            type="button"
-                                                                            onClick={handleClearSelectedAdminResi}
-                                                                            className="flex items-center gap-1 px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all cursor-pointer animate-pulse"
-                                                                         >
-                                                                            <Trash2 size={12} /> Clear Data Terpilih ({selectedAdminResi.length})
-                                                                         </button>
-                                                                      )}
-                                                                   </div>
-                                                                );
-                                                             })()}
-                                                          </div>
-                                                          <div className="flex-1 overflow-y-auto p-3">
-                                                             {adminListToDisplay.length === 0 ? (
-                                                                <div className="text-center text-sm text-gray-400 py-10 flex flex-col items-center gap-2">
-                                                                   <Database size={32} className="text-gray-300" />
-                                                                   <span>Tidak ada data untuk filter ini</span>
-                                                                </div>
-                                                             ) : (
-                                                                <div className="flex flex-col gap-1">
-                                                                   {adminListToDisplay.map(bc => {
-                                                                      const isRoleScanned = roleResi.has(bc);
-                                                                      const isCrossDate = crossDateResiMap.has(bc);
-                                                                      const isPending = pendingResi.has(bc);
-                                                                      const isCancelData = cancelBarcodeSet.has(bc);
-                                                                      const isReadyData = readyResiSet.has(bc);
-                                                                      const isSelected = selectedAdminResi.includes(bc);
-                                                                      const isDevModeNew = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
-                                                                      return (
-                                                                         <div key={bc} className={`px-3 py-2 rounded-lg text-xs font-mono font-bold flex justify-between items-center border transition-all ${isSelected ? 'ring-2 ring-purple-500 bg-purple-50 dark:bg-purple-900/30 border-purple-300' : isCancelData ? 'bg-amber-50/80 dark:bg-amber-900/20 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300' : isReadyData ? 'bg-teal-50/80 dark:bg-teal-900/20 border-teal-300 dark:border-teal-700 text-teal-800 dark:text-teal-300' : isCrossDate ? 'bg-indigo-50/70 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300' : isRoleScanned ? 'bg-green-50 dark:bg-green-900/10 border-green-200 text-green-700' : 'bg-white dark:bg-gray-800 border-gray-200 text-gray-700'}`}>
-                                                                            <div className="flex items-center gap-2">
-                                                                               {isDevModeNew && (
-                                                                                  <input 
-                                                                                     type="checkbox"
-                                                                                     checked={isSelected}
-                                                                                     onChange={(e) => {
-                                                                                        if (e.target.checked) {
-                                                                                           setSelectedAdminResi(prev => [...prev, bc]);
-                                                                                        } else {
-                                                                                           setSelectedAdminResi(prev => prev.filter(item => item !== bc));
-                                                                                        }
-                                                                                     }}
-                                                                                     className="rounded text-purple-600 focus:ring-purple-500 w-3.5 h-3.5 cursor-pointer"
-                                                                                  />
-                                                                               )}
-                                                                               <span>{bc}</span>
-                                                                            </div>
-                                                                            <div className="flex gap-1 items-center">
-                                                                               {isCancelData && (() => {
-                                                                                  const inGudang = gudangCancelResiSet.has(bc);
-                                                                                  const inImport = cancelledOrders.some(o => o.barcode === bc);
-                                                                                  let label = "CANCEL";
-                                                                                  if (inGudang && inImport) label = "CANCEL GDG & IMP";
-                                                                                  else if (inGudang) label = "CANCEL GUDANG";
-                                                                                  else if (inImport) label = "CANCEL IMPORT";
-                                                                                  return (
-                                                                                     <span className="bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
-                                                                                        <Ban size={10} /> {label}
-                                                                                     </span>
-                                                                                  );
-                                                                               })()}
-                                                                               {isReadyData && (
-                                                                                  <span className="bg-teal-100 text-teal-800 dark:bg-teal-900/50 dark:text-teal-300 px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
-                                                                                     <PackageCheck size={10} /> READY
-                                                                                  </span>
-                                                                               )}
-                                                                               {isCrossDate && (
-                                                                                  <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
-                                                                                     <Clock size={10} /> Susulan ({crossDateResiMap.get(bc)})
-                                                                                  </span>
-                                                                               )}
-                                                                               {!isCrossDate && isRoleScanned && <span className="bg-green-100 text-green-600 px-1.5 py-0.5 rounded text-[10px] font-bold">✓ OK</span>}
-                                                                               {isPending && <span className="bg-red-100 text-red-600 px-1.5 py-0.5 rounded text-[10px] font-bold">PENDING</span>}
-                                                                            </div>
-                                                                         </div>
-                                                                      );
-                                                                   })}
-                                                                </div>
-                                                             )}
-                                                          </div>
-                                                       </>
-                                                    );
-                                                 })()}
+                                                              </div>
+                                                           )}
+                                                        </>
+                                                     );
+                                                  })()}
 
-                                                 {/* TAB: ROLE */}
-                                                 {auditDetailTab === 'ROLE' && (() => {
-                                                    const susulanList = Array.from(roleResi).filter(bc => !adminResiSet.has(bc) && earlierAdminResiMap.has(bc));
-                                                    const pureEkstraListLocal = scanEkstra.filter(bc => !earlierAdminResiMap.has(bc));
-                                                    const listToRender = showOnlySusulanRole ? susulanList : showOnlyExtraPicker ? pureEkstraListLocal : Array.from(roleResi);
-                                                    const isDevModeNew = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
+                                                  {auditDetailTab === 'ROLE' && (() => {
+                                                     const susulanList = Array.from(roleResi).filter(bc => !adminResiSet.has(bc) && earlierAdminResiMap.has(bc));
+                                                     const pureEkstraListLocal = scanEkstra.filter(bc => !earlierAdminResiMap.has(bc));
+                                                     const rawList = showOnlySusulanRole ? susulanList : showOnlyExtraPicker ? pureEkstraListLocal : Array.from(roleResi);
+                                                     
+                                                     let searchFiltered = rawList;
+                                                     if (batchSearchMode === 'MASS' && batchMassSearchApplied.length > 0) {
+                                                        const massSet = new Set(batchMassSearchApplied.map(b => b.trim().toUpperCase()));
+                                                        searchFiltered = searchFiltered.filter(bc => massSet.has(bc.trim().toUpperCase()));
+                                                     } else if (batchSearch.trim()) {
+                                                        const q = batchSearch.trim().toUpperCase();
+                                                        searchFiltered = searchFiltered.filter(bc => bc.toUpperCase().includes(q));
+                                                     }
 
-                                                    return (
-                                                       <>
-                                                          <div className="p-3 bg-purple-50 dark:bg-purple-900/20 border-b border-purple-200 dark:border-purple-800 flex flex-col gap-2 shrink-0">
-                                                             <div className="flex justify-between items-center">
-                                                                <h3 className="text-sm font-bold text-purple-700 dark:text-purple-400">Resi {auditRoleFilter}</h3>
-                                                                <div className="flex items-center gap-1.5">
-                                                                   {selectedAuditRoleResi.length > 0 && isDevModeNew && (
-                                                                      <button 
-                                                                         onClick={async () => {
-                                                                            if (!window.confirm(`Yakin ingin menghapus ${selectedAuditRoleResi.length} resi terpilih dari Data ${auditRoleFilter} di database?`)) return;
-                                                                            setIsLoadingAuditData(true);
-                                                                            try {
-                                                                               const rolesToDelete = auditRoleFilter === 'PICKER' 
-                                                                                  ? ['PICKER', 'PICKER_2', 'OJOL'] 
-                                                                                  : auditRoleFilter === 'LOGISTIK'
-                                                                                  ? ['LOGISTIK', 'Logistik']
-                                                                                  : [auditRoleFilter];
-                                                                               const { error } = await supabase
-                                                                                  .from('scanned_items')
-                                                                                  .delete()
-                                                                                  .in('barcode', selectedAuditRoleResi)
-                                                                                  .in('role', rolesToDelete);
-                                                                               if (error) throw error;
-                                                                               setSuccessToast(`Berhasil menghapus ${selectedAuditRoleResi.length} resi terpilih dari Data ${auditRoleFilter}.`);
-                                                                               setSelectedAuditRoleResi([]);
-                                                                               auditRoleCacheRef.current = {};
-                                                                               await fetchAuditData(true);
-                                                                            } catch (err: any) {
-                                                                               alert('Gagal menghapus: ' + err.message);
-                                                                            } finally {
-                                                                               setIsLoadingAuditData(false);
-                                                                            }
-                                                                         }}
-                                                                         className="text-xs flex items-center gap-1 bg-red-600 text-white border border-red-700 px-2 py-1 rounded hover:bg-red-700 font-bold transition-colors shadow-sm cursor-pointer mr-2 animate-pulse"
-                                                                      >
-                                                                         <Trash2 size={12}/> Hapus Terpilih ({selectedAuditRoleResi.length})
-                                                                      </button>
-                                                                   )}
-                                                                   {scanEkstra.length > 0 && isDevModeNew && (
-                                                                      <button 
-                                                                         onClick={async () => {
-                                                                            if (!window.confirm(`Yakin ingin menghapus ${scanEkstra.length} resi ekstra (TIDAK ADA DI ADMIN) dari Data ${auditRoleFilter} di database?`)) return;
-                                                                            setIsLoadingAuditData(true);
-                                                                            try {
-                                                                               const rolesToDelete = auditRoleFilter === 'PICKER' 
-                                                                                  ? ['PICKER', 'PICKER_2', 'OJOL'] 
-                                                                                  : auditRoleFilter === 'LOGISTIK'
-                                                                                  ? ['LOGISTIK', 'Logistik']
-                                                                                  : [auditRoleFilter];
-                                                                               const { error } = await supabase
-                                                                                  .from('scanned_items')
-                                                                                  .delete()
-                                                                                  .in('barcode', scanEkstra)
-                                                                                  .in('role', rolesToDelete);
-                                                                               if (error) throw error;
-                                                                               setSuccessToast(`Berhasil menghapus ${scanEkstra.length} resi ekstra dari Data ${auditRoleFilter}.`);
-                                                                               setSelectedAuditRoleResi([]);
-                                                                               auditRoleCacheRef.current = {};
-                                                                               await fetchAuditData(true);
-                                                                            } catch (err: any) {
-                                                                               alert('Gagal menghapus: ' + err.message);
-                                                                            } finally {
-                                                                               setIsLoadingAuditData(false);
-                                                                            }
-                                                                         }}
-                                                                         className="text-xs flex items-center gap-1 bg-red-50 text-red-600 border border-red-200 px-2 py-1 rounded hover:bg-red-100 font-bold transition-colors shadow-sm cursor-pointer"
-                                                                      >
-                                                                         <Trash2 size={12}/> Hapus Ekstra ({scanEkstra.length})
-                                                                      </button>
-                                                                   )}
-                                                                    <button 
-                                                                       onClick={() => {
-                                                                          navigator.clipboard.writeText(listToRender.join('\n'));
-                                                                          setSuccessToast(`Tersalin ${listToRender.length} data ${showOnlySusulanRole ? 'Susulan Tgl Lalu' : showOnlyExtraPicker ? 'Ekstra' : auditRoleFilter}!`);
-                                                                       }} 
-                                                                       className="text-xs flex items-center gap-1 bg-white dark:bg-gray-800 border border-purple-300 dark:border-purple-600 px-2.5 py-1.5 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-bold transition-colors cursor-pointer shadow-sm"
-                                                                       title="Salin semua data scan role"
-                                                                    >
-                                                                       <Copy size={12}/> Salin ({listToRender.length})
-                                                                    </button>
-                                                                    <button 
-                                                                       onClick={() => {
-                                                                          const roleLabel = `Resi ${auditRoleFilter}${showOnlySusulanRole ? ' (Susulan Tgl Lalu)' : showOnlyExtraPicker ? ' (Ekstra)' : ''}`;
-                                                                          openAuditBatchCopyModal(roleLabel, listToRender);
-                                                                       }} 
-                                                                       className="text-xs flex items-center gap-1 bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-700 px-2.5 py-1.5 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-800/40 text-purple-700 dark:text-purple-300 font-bold transition-colors cursor-pointer shadow-sm"
-                                                                       title="Salin per 500 resi per batch"
-                                                                    >
-                                                                       <Boxes size={12}/> Salin per Batch ({listToRender.length})
-                                                                    </button>
-                                                                </div>
-                                                             </div>
-                                                             <div className="flex flex-wrap items-center gap-3">
-                                                                <label className="flex items-center gap-1.5 text-xs text-purple-700 font-bold cursor-pointer">
-                                                                   <input type="checkbox" checked={showOnlyExtraPicker} onChange={e => { const c = e.target.checked; setShowOnlyExtraPicker(c); if (c) setShowOnlySusulanRole(false); }} className="rounded text-purple-600 focus:ring-purple-500 w-3.5 h-3.5 cursor-pointer" />
-                                                                   Tidak Ada di Admin ({pureEkstraListLocal.length})
-                                                                </label>
-                                                                <label className="flex items-center gap-1.5 text-xs text-indigo-700 dark:text-indigo-400 font-bold cursor-pointer">
-                                                                   <input type="checkbox" checked={showOnlySusulanRole} onChange={e => { const c = e.target.checked; setShowOnlySusulanRole(c); if (c) setShowOnlyExtraPicker(false); }} className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer" />
-                                                                   Susulan Tgl Lalu ({susulanList.length})
-                                                                </label>
-                                                             </div>
-                                                             {/* DevMode select all */}
-                                                             {isDevModeNew && (
-                                                                <div className="flex items-center gap-2 pt-2 border-t border-purple-200/50 justify-between">
-                                                                   <label className="flex items-center gap-1.5 text-xs text-red-700 dark:text-red-400 font-bold cursor-pointer bg-red-50 px-2 py-1 rounded">
-                                                                      <input 
-                                                                         type="checkbox"
-                                                                         checked={listToRender.length > 0 && listToRender.every(bc => selectedAuditRoleResi.includes(bc))}
-                                                                         onChange={(e) => {
-                                                                            if (e.target.checked) {
-                                                                               setSelectedAuditRoleResi(Array.from(new Set([...selectedAuditRoleResi, ...listToRender])));
-                                                                            } else {
-                                                                               setSelectedAuditRoleResi(selectedAuditRoleResi.filter(bc => !listToRender.includes(bc)));
-                                                                            }
-                                                                         }}
-                                                                         className="rounded text-red-600 focus:ring-red-500 w-3.5 h-3.5 cursor-pointer"
-                                                                      />
-                                                                      Pilih Semua untuk Dihapus ({listToRender.length})
-                                                                   </label>
-                                                                </div>
-                                                             )}
-                                                          </div>
-                                                          <div className="flex-1 overflow-y-auto p-3">
-                                                             {isLoadingAuditData ? (
-                                                                <div className="flex justify-center py-10"><Loader2 className="animate-spin text-purple-500" size={24} /></div>
-                                                             ) : auditRoleData.length === 0 ? (
-                                                                <div className="text-center text-sm text-gray-400 py-10 flex flex-col items-center gap-2">
-                                                                   <UserCheck size={32} className="text-gray-300" />
-                                                                   <span>Belum ada data scan {auditRoleFilter}</span>
-                                                                </div>
-                                                             ) : (
-                                                                <div className="flex flex-col gap-1">
-                                                                   {listToRender.map((bc, i) => {
-                                                                      const isEkstra = !adminResiSet.has(bc);
-                                                                      const isOjol = ojolResiSet.has(bc);
-                                                                      const earlierDateStr = earlierAdminResiMap.get(bc);
-                                                                      const isSusulanTglLalu = isEkstra && !!earlierDateStr;
-                                                                      return (
-                                                                         <div key={i} className={`px-3 py-2 rounded-lg text-xs font-mono font-bold flex justify-between items-center border transition-all ${isSusulanTglLalu ? 'bg-indigo-50/80 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300' : isEkstra ? 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 text-blue-700' : 'bg-gray-50 dark:bg-gray-900 border-gray-100 dark:border-gray-800 text-gray-700 dark:text-gray-300'}`}>
-                                                                            <div className="flex items-center gap-2">
-                                                                               {isDevModeNew && (
-                                                                                  <input 
-                                                                                     type="checkbox"
-                                                                                     checked={selectedAuditRoleResi.includes(bc)}
-                                                                                     onChange={(e) => {
-                                                                                        if (e.target.checked) {
-                                                                                           setSelectedAuditRoleResi([...selectedAuditRoleResi, bc]);
-                                                                                        } else {
-                                                                                           setSelectedAuditRoleResi(selectedAuditRoleResi.filter(item => item !== bc));
-                                                                                        }
-                                                                                     }}
-                                                                                     className="rounded text-red-600 focus:ring-red-500 w-3.5 h-3.5 flex-shrink-0 cursor-pointer"
-                                                                                  />
-                                                                               )}
-                                                                               <span>{bc}</span>
-                                                                            </div>
-                                                                            <div className="flex items-center gap-1">
-                                                                               {isOjol && <span className="bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded text-[10px] font-bold">OJOL</span>}
-                                                                               {isSusulanTglLalu ? (
-                                                                                  <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
-                                                                                     <Clock size={10} /> Susulan ({earlierDateStr})
-                                                                                  </span>
-                                                                               ) : isEkstra ? (
-                                                                                  <span className="bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded text-[10px] font-bold">TIDAK ADA DI ADMIN</span>
-                                                                               ) : null}
-                                                                            </div>
-                                                                         </div>
-                                                                      );
-                                                                   })}
-                                                                </div>
-                                                             )}
-                                                          </div>
-                                                       </>
-                                                    );
-                                                 })()}
+                                                     const totalCount = searchFiltered.length;
+                                                     const totalPages = Math.ceil(totalCount / auditRowsPerPage) || 1;
+                                                     const currentPage = Math.min(Math.max(1, auditRolePage), totalPages);
+                                                     const startIndex = (currentPage - 1) * auditRowsPerPage;
+                                                     const paginatedList = searchFiltered.slice(startIndex, startIndex + auditRowsPerPage);
 
-                                                 {/* TAB: PENDING */}
-                                                 {auditDetailTab === 'PENDING' && (
-                                                    <>
-                                                       <div className="p-3 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800 flex justify-between items-center shrink-0">
-                                                          <h3 className="text-sm font-bold text-red-700 dark:text-red-400 flex items-center gap-2"><AlertCircle size={16} /> Pending LT3</h3>
-                                                           <div className="flex items-center gap-2">
-                                                              <button onClick={() => {
-                                                                 navigator.clipboard.writeText(Array.from(pendingResi).join('\n'));
-                                                                 setSuccessToast(`Tersalin ${pendingResi.size} data Pending!`);
-                                                              }} className="text-xs flex items-center gap-1 bg-white dark:bg-gray-800 border border-red-300 dark:border-red-600 px-2.5 py-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-700 dark:text-red-300 font-bold transition-colors cursor-pointer shadow-sm"
-                                                                 title="Salin semua data pending"
-                                                              >
-                                                                 <Copy size={12}/> Salin ({pendingResi.size})
-                                                              </button>
-                                                              <button onClick={() => {
-                                                                 openAuditBatchCopyModal('Pending LT3', Array.from(pendingResi));
-                                                              }} className="text-xs flex items-center gap-1 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 px-2.5 py-1.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-800/40 text-red-700 dark:text-red-300 font-bold transition-colors cursor-pointer shadow-sm"
-                                                                 title="Salin per 500 resi per batch"
-                                                              >
-                                                                 <Boxes size={12}/> Salin per Batch ({pendingResi.size})
-                                                              </button>
+                                                     const isDevModeNew = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
+
+                                                     return (
+                                                        <>
+                                                           <div className="p-3 bg-purple-50 dark:bg-purple-900/20 border-b border-purple-200 dark:border-purple-800 flex flex-col gap-2 shrink-0">
+                                                              <div className="flex justify-between items-center">
+                                                                 <div className="flex items-center gap-2">
+                                                                    <h3 className="text-sm font-bold text-purple-700 dark:text-purple-400">Resi {auditRoleFilter}</h3>
+                                                                    {batchSearch.trim() && <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">Cari: "{batchSearch.trim()}"</span>}
+                                                                 </div>
+                                                                 <div className="flex items-center gap-1.5">
+                                                                    {selectedAuditRoleResi.length > 0 && isDevModeNew && (
+                                                                       <button 
+                                                                          onClick={async () => {
+                                                                             if (!window.confirm(`Yakin ingin menghapus ${selectedAuditRoleResi.length} resi terpilih dari Data ${auditRoleFilter} di database?`)) return;
+                                                                             setIsLoadingAuditData(true);
+                                                                             try {
+                                                                                const rolesToDelete = auditRoleFilter === 'PICKER' 
+                                                                                   ? ['PICKER', 'PICKER_2', 'OJOL'] 
+                                                                                   : auditRoleFilter === 'LOGISTIK'
+                                                                                   ? ['LOGISTIK', 'Logistik']
+                                                                                   : [auditRoleFilter];
+                                                                                const { error } = await supabase
+                                                                                   .from('scanned_items')
+                                                                                   .delete()
+                                                                                   .in('barcode', selectedAuditRoleResi)
+                                                                                   .in('role', rolesToDelete);
+                                                                                if (error) throw error;
+                                                                                setSuccessToast(`Berhasil menghapus ${selectedAuditRoleResi.length} resi terpilih dari Data ${auditRoleFilter}.`);
+                                                                                setSelectedAuditRoleResi([]);
+                                                                                auditRoleCacheRef.current = {};
+                                                                                await fetchAuditData(true);
+                                                                             } catch (err: any) {
+                                                                                alert('Gagal menghapus: ' + err.message);
+                                                                             } finally {
+                                                                                setIsLoadingAuditData(false);
+                                                                             }
+                                                                          }}
+                                                                          className="text-xs flex items-center gap-1 bg-red-600 text-white border border-red-700 px-2 py-1 rounded hover:bg-red-700 font-bold transition-colors shadow-sm cursor-pointer mr-2 animate-pulse"
+                                                                       >
+                                                                          <Trash2 size={12}/> Hapus Terpilih ({selectedAuditRoleResi.length})
+                                                                       </button>
+                                                                    )}
+                                                                    {scanEkstra.length > 0 && isDevModeNew && (
+                                                                       <button 
+                                                                          onClick={async () => {
+                                                                             if (!window.confirm(`Yakin ingin menghapus ${scanEkstra.length} resi ekstra (TIDAK ADA DI ADMIN) dari Data ${auditRoleFilter} di database?`)) return;
+                                                                             setIsLoadingAuditData(true);
+                                                                             try {
+                                                                                const rolesToDelete = auditRoleFilter === 'PICKER' 
+                                                                                   ? ['PICKER', 'PICKER_2', 'OJOL'] 
+                                                                                   : auditRoleFilter === 'LOGISTIK'
+                                                                                   ? ['LOGISTIK', 'Logistik']
+                                                                                   : [auditRoleFilter];
+                                                                                const { error } = await supabase
+                                                                                   .from('scanned_items')
+                                                                                   .delete()
+                                                                                   .in('barcode', scanEkstra)
+                                                                                   .in('role', rolesToDelete);
+                                                                                if (error) throw error;
+                                                                                setSuccessToast(`Berhasil menghapus ${scanEkstra.length} resi ekstra dari Data ${auditRoleFilter}.`);
+                                                                                setSelectedAuditRoleResi([]);
+                                                                                auditRoleCacheRef.current = {};
+                                                                                await fetchAuditData(true);
+                                                                             } catch (err: any) {
+                                                                                alert('Gagal menghapus: ' + err.message);
+                                                                             } finally {
+                                                                                setIsLoadingAuditData(false);
+                                                                             }
+                                                                          }}
+                                                                          className="text-xs flex items-center gap-1 bg-red-50 text-red-600 border border-red-200 px-2 py-1 rounded hover:bg-red-100 font-bold transition-colors shadow-sm cursor-pointer"
+                                                                       >
+                                                                          <Trash2 size={12}/> Hapus Ekstra ({scanEkstra.length})
+                                                                       </button>
+                                                                    )}
+                                                                     <button 
+                                                                        onClick={() => {
+                                                                           navigator.clipboard.writeText(searchFiltered.join('\n'));
+                                                                           setSuccessToast(`Tersalin ${searchFiltered.length} data ${showOnlySusulanRole ? 'Susulan Tgl Lalu' : showOnlyExtraPicker ? 'Ekstra' : auditRoleFilter}!`);
+                                                                        }} 
+                                                                        className="text-xs flex items-center gap-1 bg-white dark:bg-gray-800 border border-purple-300 dark:border-purple-600 px-2.5 py-1.5 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-bold transition-colors cursor-pointer shadow-sm"
+                                                                        title="Salin semua data scan role"
+                                                                     >
+                                                                        <Copy size={12}/> Salin ({searchFiltered.length.toLocaleString()})
+                                                                     </button>
+                                                                     <button 
+                                                                        onClick={() => {
+                                                                           const roleLabel = `Resi ${auditRoleFilter}${showOnlySusulanRole ? ' (Susulan Tgl Lalu)' : showOnlyExtraPicker ? ' (Ekstra)' : ''}`;
+                                                                           openAuditBatchCopyModal(roleLabel, searchFiltered);
+                                                                        }} 
+                                                                        className="text-xs flex items-center gap-1 bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-700 px-2.5 py-1.5 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-800/40 text-purple-700 dark:text-purple-300 font-bold transition-colors cursor-pointer shadow-sm"
+                                                                        title="Salin per 500 resi per batch"
+                                                                     >
+                                                                        <Boxes size={12}/> Salin per Batch ({searchFiltered.length.toLocaleString()})
+                                                                     </button>
+                                                                 </div>
+                                                              </div>
+                                                              <div className="flex flex-wrap items-center gap-3">
+                                                                 <label className="flex items-center gap-1.5 text-xs text-purple-700 font-bold cursor-pointer">
+                                                                    <input type="checkbox" checked={showOnlyExtraPicker} onChange={e => { const c = e.target.checked; setShowOnlyExtraPicker(c); setAuditRolePage(1); if (c) setShowOnlySusulanRole(false); }} className="rounded text-purple-600 focus:ring-purple-500 w-3.5 h-3.5 cursor-pointer" />
+                                                                    Tidak Ada di Admin ({pureEkstraListLocal.length})
+                                                                 </label>
+                                                                 <label className="flex items-center gap-1.5 text-xs text-indigo-700 dark:text-indigo-400 font-bold cursor-pointer">
+                                                                    <input type="checkbox" checked={showOnlySusulanRole} onChange={e => { const c = e.target.checked; setShowOnlySusulanRole(c); setAuditRolePage(1); if (c) setShowOnlyExtraPicker(false); }} className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer" />
+                                                                    Susulan Tgl Lalu ({susulanList.length})
+                                                                 </label>
+                                                              </div>
+                                                              {/* DevMode select all */}
+                                                              {isDevModeNew && (
+                                                                 <div className="flex items-center gap-2 pt-2 border-t border-purple-200/50 justify-between">
+                                                                    <label className="flex items-center gap-1.5 text-xs text-red-700 dark:text-red-400 font-bold cursor-pointer bg-red-50 px-2 py-1 rounded">
+                                                                       <input 
+                                                                          type="checkbox"
+                                                                          checked={searchFiltered.length > 0 && searchFiltered.every(bc => selectedAuditRoleResi.includes(bc))}
+                                                                          onChange={(e) => {
+                                                                             if (e.target.checked) {
+                                                                                setSelectedAuditRoleResi(Array.from(new Set([...selectedAuditRoleResi, ...searchFiltered])));
+                                                                             } else {
+                                                                                setSelectedAuditRoleResi(selectedAuditRoleResi.filter(bc => !searchFiltered.includes(bc)));
+                                                                             }
+                                                                          }}
+                                                                          className="rounded text-red-600 focus:ring-red-500 w-3.5 h-3.5 cursor-pointer"
+                                                                       />
+                                                                       Pilih Semua untuk Dihapus ({searchFiltered.length})
+                                                                    </label>
+                                                                 </div>
+                                                              )}
                                                            </div>
-                                                       </div>
-                                                       <div className="flex-1 overflow-y-auto p-3">
-                                                          {isLoadingAuditData ? (
-                                                             <div className="flex justify-center py-10"><Loader2 className="animate-spin text-red-500" size={24} /></div>
-                                                          ) : pendingResi.size === 0 ? (
-                                                             <div className="text-center text-sm text-gray-400 py-10 flex flex-col items-center gap-2">
-                                                                <AlertCircle size={32} className="text-gray-300" />
-                                                                <span>Tidak ada data pending</span>
-                                                             </div>
-                                                          ) : (
-                                                             <div className="flex flex-col gap-1">
-                                                                {Array.from(pendingResi).map((barcode, i) => (
-                                                                   <div key={i} className="px-3 py-2 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 rounded-lg text-xs font-mono font-bold text-red-700 dark:text-red-400 flex justify-between items-center">
-                                                                      <span>{barcode}</span>
-                                                                      {roleResi.has(barcode) && <span className="bg-green-100 text-green-600 px-1.5 py-0.5 rounded text-[10px] font-bold">SCANNED BY {auditRoleFilter}</span>}
-                                                                   </div>
-                                                                ))}
-                                                             </div>
-                                                          )}
-                                                       </div>
-                                                    </>
-                                                 )}
-                                              </div>
-                                           </div>
-                                         </>
-                                 )}
-                               </div>
-                            ) : null}
-                         </div>
-                      )}
-                   </div>
-                )}
-                 {activeView === 'CHECK_INVOICE' && (
+                                                           <div className="flex-1 overflow-y-auto p-3">
+                                                              {isLoadingAuditData ? (
+                                                                 <div className="flex justify-center py-10"><Loader2 className="animate-spin text-purple-500" size={24} /></div>
+                                                              ) : searchFiltered.length === 0 ? (
+                                                                 <div className="text-center text-sm text-gray-400 py-10 flex flex-col items-center gap-2">
+                                                                    <UserCheck size={32} className="text-gray-300" />
+                                                                    <span>Belum ada data scan {auditRoleFilter} untuk filter / pencarian ini</span>
+                                                                 </div>
+                                                              ) : (
+                                                                 <div className="flex flex-col gap-1">
+                                                                    {paginatedList.map((bc, i) => {
+                                                                       const isEkstra = !adminResiSet.has(bc);
+                                                                       const isOjol = ojolResiSet.has(bc);
+                                                                       const earlierDateStr = earlierAdminResiMap.get(bc);
+                                                                       const isSusulanTglLalu = isEkstra && !!earlierDateStr;
+                                                                       return (
+                                                                          <div key={bc + '_' + i} className={`px-3 py-2 rounded-lg text-xs font-mono font-bold flex justify-between items-center border transition-all ${isSusulanTglLalu ? 'bg-indigo-50/80 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300' : isEkstra ? 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 text-blue-700' : 'bg-gray-50 dark:bg-gray-900 border-gray-100 dark:border-gray-800 text-gray-700 dark:text-gray-300'}`}>
+                                                                             <div className="flex items-center gap-2">
+                                                                                {isDevModeNew && (
+                                                                                   <input 
+                                                                                      type="checkbox"
+                                                                                      checked={selectedAuditRoleResi.includes(bc)}
+                                                                                      onChange={(e) => {
+                                                                                         if (e.target.checked) {
+                                                                                            setSelectedAuditRoleResi([...selectedAuditRoleResi, bc]);
+                                                                                         } else {
+                                                                                            setSelectedAuditRoleResi(selectedAuditRoleResi.filter(item => item !== bc));
+                                                                                         }
+                                                                                      }}
+                                                                                      className="rounded text-red-600 focus:ring-red-500 w-3.5 h-3.5 flex-shrink-0 cursor-pointer"
+                                                                                   />
+                                                                                )}
+                                                                                <span>{bc}</span>
+                                                                             </div>
+                                                                             <div className="flex items-center gap-1">
+                                                                                {isOjol && <span className="bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded text-[10px] font-bold">OJOL</span>}
+                                                                                {isSusulanTglLalu ? (
+                                                                                   <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
+                                                                                      <Clock size={10} /> Susulan ({earlierDateStr})
+                                                                                   </span>
+                                                                                ) : isEkstra ? (
+                                                                                   <span className="bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded text-[10px] font-bold">TIDAK ADA DI ADMIN</span>
+                                                                                ) : null}
+                                                                             </div>
+                                                                          </div>
+                                                                       );
+                                                                    })}
+                                                                 </div>
+                                                              )}
+                                                           </div>
+                                                           {/* Pagination Toolbar */}
+                                                           {totalCount > 0 && (
+                                                              <div className="p-2.5 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex flex-wrap justify-between items-center gap-2 shrink-0 text-xs">
+                                                                 <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                                                                    <span>Menampilkan <b>{startIndex + 1} - {Math.min(startIndex + auditRowsPerPage, totalCount)}</b> dari <b>{totalCount.toLocaleString()}</b> resi</span>
+                                                                    <select 
+                                                                       value={auditRowsPerPage} 
+                                                                       onChange={(e) => { setAuditRowsPerPage(Number(e.target.value)); setAuditRolePage(1); }}
+                                                                       className="ml-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-2 py-0.5 text-xs font-bold"
+                                                                    >
+                                                                       <option value={50}>50 / hal</option>
+                                                                       <option value={100}>100 / hal</option>
+                                                                       <option value={250}>250 / hal</option>
+                                                                       <option value={500}>500 / hal</option>
+                                                                    </select>
+                                                                 </div>
+                                                                 <div className="flex items-center gap-1.5">
+                                                                    <button 
+                                                                       disabled={currentPage <= 1}
+                                                                       onClick={() => setAuditRolePage(p => Math.max(1, p - 1))}
+                                                                       className="px-2.5 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded font-bold disabled:opacity-40 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                                                                    >
+                                                                       &larr; Prev
+                                                                    </button>
+                                                                    <span className="px-2 font-bold text-gray-700 dark:text-gray-300">Hal {currentPage} / {totalPages}</span>
+                                                                    <button 
+                                                                       disabled={currentPage >= totalPages}
+                                                                       onClick={() => setAuditRolePage(p => Math.min(totalPages, p + 1))}
+                                                                       className="px-2.5 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded font-bold disabled:opacity-40 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                                                                    >
+                                                                       Next &rarr;
+                                                                    </button>
+                                                                 </div>
+                                                              </div>
+                                                           )}
+                                                        </>
+                                                     );
+                                                  })()}
+
+                                                  {auditDetailTab === 'PENDING' && (() => {
+                                                     const rawList = Array.from(pendingResi);
+                                                     let searchFiltered = rawList;
+                                                     if (batchSearchMode === 'MASS' && batchMassSearchApplied.length > 0) {
+                                                        const massSet = new Set(batchMassSearchApplied.map(b => b.trim().toUpperCase()));
+                                                        searchFiltered = searchFiltered.filter(bc => massSet.has(bc.trim().toUpperCase()));
+                                                     } else if (batchSearch.trim()) {
+                                                        const q = batchSearch.trim().toUpperCase();
+                                                        searchFiltered = searchFiltered.filter(bc => bc.toUpperCase().includes(q));
+                                                     }
+
+                                                     const totalCount = searchFiltered.length;
+                                                     const totalPages = Math.ceil(totalCount / auditRowsPerPage) || 1;
+                                                     const currentPage = Math.min(Math.max(1, auditPendingPage), totalPages);
+                                                     const startIndex = (currentPage - 1) * auditRowsPerPage;
+                                                     const paginatedList = searchFiltered.slice(startIndex, startIndex + auditRowsPerPage);
+
+                                                     return (
+                                                     <>
+                                                        <div className="p-3 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800 flex justify-between items-center shrink-0">
+                                                           <div className="flex items-center gap-2">
+                                                              <h3 className="text-sm font-bold text-red-700 dark:text-red-400 flex items-center gap-2"><AlertCircle size={16} /> Pending LT3</h3>
+                                                              {batchSearch.trim() && <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">Cari: "{batchSearch.trim()}"</span>}
+                                                           </div>
+                                                            <div className="flex items-center gap-2">
+                                                               <button onClick={() => {
+                                                                  navigator.clipboard.writeText(searchFiltered.join('\n'));
+                                                                  setSuccessToast(`Tersalin ${searchFiltered.length} data Pending!`);
+                                                               }} className="text-xs flex items-center gap-1 bg-white dark:bg-gray-800 border border-red-300 dark:border-red-600 px-2.5 py-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-700 dark:text-red-300 font-bold transition-colors cursor-pointer shadow-sm"
+                                                                  title="Salin semua data pending"
+                                                               >
+                                                                  <Copy size={12}/> Salin ({searchFiltered.length.toLocaleString()})
+                                                               </button>
+                                                               <button onClick={() => {
+                                                                  openAuditBatchCopyModal('Pending LT3', searchFiltered);
+                                                               }} className="text-xs flex items-center gap-1 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 px-2.5 py-1.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-800/40 text-red-700 dark:text-red-300 font-bold transition-colors cursor-pointer shadow-sm"
+                                                                  title="Salin per 500 resi per batch"
+                                                               >
+                                                                  <Boxes size={12}/> Salin per Batch ({searchFiltered.length.toLocaleString()})
+                                                               </button>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex-1 overflow-y-auto p-3">
+                                                           {isLoadingAuditData ? (
+                                                              <div className="flex justify-center py-10"><Loader2 className="animate-spin text-red-500" size={24} /></div>
+                                                           ) : searchFiltered.length === 0 ? (
+                                                              <div className="text-center text-sm text-gray-400 py-10 flex flex-col items-center gap-2">
+                                                                 <AlertCircle size={32} className="text-gray-300" />
+                                                                 <span>Tidak ada data pending untuk filter / pencarian ini</span>
+                                                              </div>
+                                                           ) : (
+                                                              <div className="flex flex-col gap-1">
+                                                                 {paginatedList.map((barcode, i) => (
+                                                                    <div key={barcode + '_' + i} className="px-3 py-2 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 rounded-lg text-xs font-mono font-bold text-red-700 dark:text-red-400 flex justify-between items-center">
+                                                                       <span>{barcode}</span>
+                                                                       {roleResi.has(barcode) && <span className="bg-green-100 text-green-600 px-1.5 py-0.5 rounded text-[10px] font-bold">SCANNED BY {auditRoleFilter}</span>}
+                                                                    </div>
+                                                                 ))}
+                                                              </div>
+                                                           )}
+                                                        </div>
+                                                        {/* Pagination Toolbar */}
+                                                        {totalCount > 0 && (
+                                                           <div className="p-2.5 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex flex-wrap justify-between items-center gap-2 shrink-0 text-xs">
+                                                              <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                                                                 <span>Menampilkan <b>{startIndex + 1} - {Math.min(startIndex + auditRowsPerPage, totalCount)}</b> dari <b>{totalCount.toLocaleString()}</b> resi</span>
+                                                                 <select 
+                                                                    value={auditRowsPerPage} 
+                                                                    onChange={(e) => { setAuditRowsPerPage(Number(e.target.value)); setAuditPendingPage(1); }}
+                                                                    className="ml-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-2 py-0.5 text-xs font-bold"
+                                                                 >
+                                                                    <option value={50}>50 / hal</option>
+                                                                    <option value={100}>100 / hal</option>
+                                                                    <option value={250}>250 / hal</option>
+                                                                    <option value={500}>500 / hal</option>
+                                                                 </select>
+                                                              </div>
+                                                              <div className="flex items-center gap-1.5">
+                                                                 <button 
+                                                                    disabled={currentPage <= 1}
+                                                                    onClick={() => setAuditPendingPage(p => Math.max(1, p - 1))}
+                                                                    className="px-2.5 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded font-bold disabled:opacity-40 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                                                                 >
+                                                                    &larr; Prev
+                                                                 </button>
+                                                                 <span className="px-2 font-bold text-gray-700 dark:text-gray-300">Hal {currentPage} / {totalPages}</span>
+                                                                 <button 
+                                                                    disabled={currentPage >= totalPages}
+                                                                    onClick={() => setAuditPendingPage(p => Math.min(totalPages, p + 1))}
+                                                                    className="px-2.5 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded font-bold disabled:opacity-40 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                                                                 >
+                                                                    Next &rarr;
+                                                                 </button>
+                                                              </div>
+                                                           </div>
+                                                        )}
+                                                     </>
+                                                     );
+                                                  })()}
+                                               </div>
+                                            </div>
+                                          </>
+                                  )}
+                                </div>
+                             ) : null}
+                          </div>
+                       )}
+                    </div>
+                 )}
+                  {activeView === 'CHECK_INVOICE' && (
     <div className="w-full h-full flex flex-col bg-gray-50 dark:bg-gray-900">
        {/* HEADER TOOLBAR */}
        <div className="p-3.5 sm:p-5 lg:p-6 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shrink-0 shadow-xs">

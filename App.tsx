@@ -122,19 +122,8 @@ const App: React.FC = () => {
         // Update timestamp IMMEDIATELY to prevent double-firing (optimistic lock)
         localStorage.setItem(STORAGE_KEY_LAST_BACKUP, now.toString());
 
-        // Fire and Forget - Backup to Google Drive
-        console.log("Triggering Automatic Backup (Traffic Based)...");
-
-        // Use active Supabase URL from environment
-        const primaryUrl = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://nufvlqrtpzfiqghsxsze.supabase.co';
-
-        // No await here on purpose, let it run in background
-        fetch(`${primaryUrl}/functions/v1/backup-to-drive`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        }).catch(err => console.warn("Backup trigger unavailable or failed silently:", err?.message || err));
+        // Fire and Forget via Supabase Functions client (handles auth & CORS safely)
+        supabase.functions.invoke('backup-to-drive').catch(() => {});
       }
     } catch (e) {
       // Silent fail

@@ -1,5 +1,5 @@
-import { initializeApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { initializeFirestore, getFirestore } from 'firebase/firestore';
 
 // Replace with your Firebase project configuration
 const firebaseConfig = {
@@ -12,8 +12,19 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-const app = initializeApp(firebaseConfig);
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 // Initialize Cloud Firestore and get a reference to the specific database 'project-ks'
 const databaseId = (import.meta as any).env?.VITE_FIREBASE_DATABASE_ID || "project-ks";
-export const db = getFirestore(app, databaseId);
+
+let firestoreDb;
+try {
+  firestoreDb = initializeFirestore(app, {
+    experimentalAutoDetectLongPolling: true,
+  }, databaseId);
+} catch (e) {
+  firestoreDb = getFirestore(app, databaseId);
+}
+
+export const db = firestoreDb;
+
