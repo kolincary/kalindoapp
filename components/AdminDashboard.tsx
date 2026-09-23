@@ -3322,6 +3322,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [isBatchImportModalOpen, setIsBatchImportModalOpen] = useState(false);
    const [isExcelImportModalOpen, setIsExcelImportModalOpen] = useState(false);
    const [isLogistikImportModalOpen, setIsLogistikImportModalOpen] = useState(false);
+   // Logistik Multi-Sheet Excel Import States
+   const [isLogistikExcelModalOpen, setIsLogistikExcelModalOpen] = useState(false);
+   const [logistikExcelFile, setLogistikExcelFile] = useState<File | null>(null);
+   const [logistikExcelExtractedRows, setLogistikExcelExtractedRows] = useState<{
+      id: string;
+      barcode: string;
+      sheetName: string;
+      rowNum: number;
+      waktu?: string;
+      tanggal?: string;
+      parsedTimestamp?: number;
+      isDuplicateInDb?: boolean;
+   }[]>([]);
+   const [logistikExcelSheetSummary, setLogistikExcelSheetSummary] = useState<{ sheetName: string; count: number }[]>([]);
+   const [logistikExcelDate, setLogistikExcelDate] = useState(() => {
+      const today = new Date();
+      const offset = today.getTimezoneOffset() * 60000;
+      return (new Date(today.getTime() - offset)).toISOString().slice(0, 10);
+   });
+   const [logistikExcelSearch, setLogistikExcelSearch] = useState('');
+   const [logistikExcelSheetFilter, setLogistikExcelSheetFilter] = useState('ALL');
+   const [logistikExcelPage, setLogistikExcelPage] = useState(1);
+   const [logistikExcelRowsPerPage, setLogistikExcelRowsPerPage] = useState(100);
+   const [isProcessingLogistikExcel, setIsProcessingLogistikExcel] = useState(false);
+   const [isSavingLogistikExcel, setIsSavingLogistikExcel] = useState(false);
+   const [logistikExcelProgress, setLogistikExcelProgress] = useState<{ current: number; total: number; percentage: number }>({ current: 0, total: 0, percentage: 0 });
+   const [logistikExcelDragOver, setLogistikExcelDragOver] = useState(false);
+   const [logistikExcelExistingCount, setLogistikExcelExistingCount] = useState(0);
    const [isLogistikDevToolsOpen, setIsLogistikDevToolsOpen] = useState(false);
    const logistikDevToolsRef = useRef<HTMLDivElement>(null);
 
@@ -8070,6 +8098,212 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
    };
 
+   const handleLogistikExcelFileSelect = async (file: File) => {
+      setLogistikExcelFile(file);
+      setIsProcessingLogistikExcel(true);
+      setLogistikExcelPage(1);
+      setLogistikExcelSearch('');
+      setLogistikExcelSheetFilter('ALL');
+      try {
+         const data = await file.arrayBuffer();
+         const workbook = XLSX.read(new Uint8Array(data), { type: 'array', cellDates: true, cellText: true, raw: false });
+         
+         const extracted: {
+            id: string;
+            barcode: string;
+            sheetName: string;
+            rowNum: number;
+            waktu?: string;
+            tanggal?: string;
+            parsedTimestamp?: number;
+         }[] = [];
+
+         const sheetCounts: Record<string, number> = {};
+
+         workbook.SheetNames.forEach(sheetName => {
+            const worksheet = workbook.Sheets[sheetName];
+            if (!worksheet) return;
+
+            const rows: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: false });
+            if (rows.length === 0) return;
+
+            let countForThisSheet = 0;
+            // Row 0 is header, iterate from row 1 (B2:B)
+            for (let r = 1; r < rows.length; r++) {
+               const row = rows[r];
+               if (!row || !Array.isArray(row)) continue;
+
+               // Column B is index 1
+               const rawBarcode = row[1] !== undefined && row[1] !== null ? String(row[1]).trim() : '';
+               if (!rawBarcode) continue;
+
+               // Sanitize and pad barcode
+               const cleanBarcode = sanitizeAndPadBarcode(rawBarcode);
+               if (!cleanBarcode) continue;
+
+               // Parse Column C (WAKTU) & Column D (TANGGAL) if present
+               const rawWaktu = row[2] !== undefined && row[2] !== null ? String(row[2]).trim() : '';
+               const rawTanggal = row[3] !== undefined && row[3] !== null ? String(row[3]).trim() : '';
+
+               let rowTimestamp: number | undefined = undefined;
+               if (rawTanggal) {
+                  try {
+                     let datePart = rawTanggal;
+                     let timePart = rawWaktu ? rawWaktu.replace(/\./g, ':') : '12:00:00';
+                     if (datePart.includes('/')) {
+                        const parts = datePart.split('/');
+                        if (parts.length === 3) {
+                           if (parts[2].length === 4) {
+                              datePart = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+                           }
+                        }
+                     }
+                     const combinedStr = `${datePart}T${timePart}`;
+                     const parsedDate = new Date(combinedStr);
+                     if (!isNaN(parsedDate.getTime())) {
+                        rowTimestamp = parsedDate.getTime();
+                     }
+                  } catch (e) {}
+               }
+
+               extracted.push({
+                  id: `${sheetName}_${r}_${cleanBarcode}`,
+                  barcode: cleanBarcode,
+                  sheetName,
+                  rowNum: r + 1,
+                  waktu: rawWaktu,
+                  tanggal: rawTanggal,
+                  parsedTimestamp: rowTimestamp
+               });
+               countForThisSheet++;
+            }
+
+            if (countForThisSheet > 0) {
+               sheetCounts[sheetName] = countForThisSheet;
+            }
+         });
+
+         const summaryArr = Object.entries(sheetCounts).map(([sheetName, count]) => ({ sheetName, count }));
+         setLogistikExcelSheetSummary(summaryArr);
+
+         // Check database to identify existing barcodes in Role Logistik
+         const distinctBarcodes = Array.from(new Set(extracted.map(x => x.barcode)));
+         const existingSet = new Set<string>();
+
+         if (distinctBarcodes.length > 0) {
+            const checkChunkSize = 200;
+            for (let i = 0; i < distinctBarcodes.length; i += checkChunkSize) {
+               const chunk = distinctBarcodes.slice(i, i + checkChunkSize);
+               const { data: existingRows } = await supabase
+                  .from('scanned_items')
+                  .select('barcode')
+                  .in('barcode', chunk)
+                  .eq('role', 'LOGISTIK');
+               (existingRows || []).forEach((r: any) => {
+                  if (r.barcode) existingSet.add(r.barcode.trim().toUpperCase());
+               });
+            }
+         }
+
+         setLogistikExcelExistingCount(existingSet.size);
+
+         const annotatedRows = extracted.map(row => ({
+            ...row,
+            isDuplicateInDb: existingSet.has(row.barcode.toUpperCase())
+         }));
+
+         setLogistikExcelExtractedRows(annotatedRows);
+         if (annotatedRows.length === 0) {
+            alert("Tidak ditemukan data resi di Kolom B (B2:B) pada file Excel ini.");
+         }
+      } catch (err: any) {
+         console.error("Error reading Logistik Excel file:", err);
+         alert("Gagal membaca file Excel: " + err.message);
+      } finally {
+         setIsProcessingLogistikExcel(false);
+      }
+   };
+
+   const handleSaveLogistikExcelImport = async () => {
+      if (logistikExcelExtractedRows.length === 0) {
+         alert("Tidak ada data untuk diimpor.");
+         return;
+      }
+
+      // Filter out duplicates (auto-skip)
+      const seen = new Set<string>();
+      const rowsToInsert = logistikExcelExtractedRows.filter(row => {
+         if (row.isDuplicateInDb) return false;
+         const upper = row.barcode.toUpperCase();
+         if (seen.has(upper)) return false;
+         seen.add(upper);
+         return true;
+      });
+
+      if (rowsToInsert.length === 0) {
+         alert("Semua data pada file Excel ini sudah ada di database (Role Logistik) atau merupakan duplikat.");
+         return;
+      }
+
+      setIsSavingLogistikExcel(true);
+      setLogistikExcelProgress({ current: 0, total: rowsToInsert.length, percentage: 0 });
+
+      try {
+         const defaultTimestamp = logistikExcelDate ? (() => {
+            const [y, m, d] = logistikExcelDate.split('-').map(Number);
+            const dateObj = new Date();
+            dateObj.setFullYear(y, m - 1, d);
+            const now = new Date();
+            dateObj.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+            return dateObj.getTime();
+         })() : Date.now();
+
+         const insertChunkSize = 500;
+         let insertedCount = 0;
+
+         for (let i = 0; i < rowsToInsert.length; i += insertChunkSize) {
+            const chunk = rowsToInsert.slice(i, i + insertChunkSize);
+            const insertData = chunk.map(row => {
+               const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+               return {
+                  id: uniqueId,
+                  barcode: row.barcode,
+                  timestamp: row.parsedTimestamp || defaultTimestamp,
+                  status: 'OK',
+                  menu_context: 'LOGISTIK',
+                  role: 'LOGISTIK',
+                  employee_name: 'LOGISTIK',
+                  user_email: currentAdmin?.username || 'admin@kalindo.com',
+                  description: row.sheetName ? `[Sheet: ${row.sheetName}]` : undefined
+               };
+            });
+
+            const { error } = await supabase.from('scanned_items').insert(insertData);
+            if (error) throw error;
+
+            insertedCount += chunk.length;
+            const pct = Math.round((insertedCount / rowsToInsert.length) * 100);
+            setLogistikExcelProgress({ current: insertedCount, total: rowsToInsert.length, percentage: pct });
+         }
+
+         setSuccessToast(`Berhasil mengimpor ${rowsToInsert.length.toLocaleString()} data Logistik (${logistikExcelExtractedRows.length - rowsToInsert.length} data duplikat di-skip).`);
+         setIsLogistikExcelModalOpen(false);
+         setLogistikExcelFile(null);
+         setLogistikExcelExtractedRows([]);
+         setLogistikExcelSheetSummary([]);
+         
+         // Refresh Logistik Data view
+         if (activeView === 'LOGISTIK_DATA') {
+            fetchPackingData(1);
+         }
+      } catch (err: any) {
+         console.error("Gagal import data excel logistik:", err);
+         alert("Gagal mengimpor data Logistik: " + err.message);
+      } finally {
+         setIsSavingLogistikExcel(false);
+      }
+   };
+
    const handleSaveLogistikImport = async () => {
       if (!logistikImportText.trim()) {
          alert("Masukkan atau paste data resi Logistik.");
@@ -11604,13 +11838,30 @@ if (filterPackingShift !== 'ALL') {
                                     </div>
                                  )}
                                  {logistikActiveTab === 'LOGISTIK' ? (
-                                     <button
-                                        onClick={() => setIsLogistikImportModalOpen(true)}
-                                        className="flex items-center justify-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 dark:shadow-none transition-all active:scale-95 sm:w-auto w-full border border-indigo-500/20 cursor-pointer text-xs sm:text-sm"
-                                     >
-                                        <Plus size={18} /> Import Text (Cepat)
-                                     </button>
-                                  ) : (
+                                      <div className="flex flex-wrap items-center gap-2 sm:w-auto w-full">
+                                         <button
+                                            onClick={() => {
+                                               setIsLogistikExcelModalOpen(true);
+                                               setLogistikExcelFile(null);
+                                               setLogistikExcelExtractedRows([]);
+                                               setLogistikExcelSheetSummary([]);
+                                               setLogistikExcelProgress({ current: 0, total: 0, percentage: 0 });
+                                            }}
+                                            className="flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-lg shadow-emerald-200 dark:shadow-none transition-all active:scale-95 sm:w-auto w-full border border-emerald-500/20 cursor-pointer text-xs sm:text-sm"
+                                            title="Import file Excel dengan banyak sheet (mengambil kolom B2:B)"
+                                         >
+                                            <FileSpreadsheet size={17} />
+                                            <span>Import Excel</span>
+                                         </button>
+                                         <button
+                                            onClick={() => setIsLogistikImportModalOpen(true)}
+                                            className="flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 dark:shadow-none transition-all active:scale-95 sm:w-auto w-full border border-indigo-500/20 cursor-pointer text-xs sm:text-sm"
+                                         >
+                                            <Plus size={17} />
+                                            <span>Import Text (Cepat)</span>
+                                         </button>
+                                      </div>
+                                   ) : (
                                      <div className="flex items-center gap-2 sm:w-auto w-full">
                                         <button
                                            onClick={() => {
@@ -23982,6 +24233,332 @@ LXAD-1234567890`}
             </div>
          )}
 
+         {/* LOGISTIK MULTI-SHEET EXCEL IMPORT MODAL */}
+         {isLogistikExcelModalOpen && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center px-3 sm:px-4">
+               <div className="absolute inset-0 bg-black/60 backdrop-blur-sm shadow-2xl" onClick={() => !isSavingLogistikExcel && !isProcessingLogistikExcel && setIsLogistikExcelModalOpen(false)}></div>
+               <div className="bg-white dark:bg-gray-800 w-full max-w-4xl rounded-3xl shadow-2xl relative z-10 p-5 sm:p-7 border border-white/20 animate-[popIn_0.3s_ease-out] flex flex-col gap-5 max-h-[92vh] overflow-hidden">
+                  
+                  {/* Modal Header */}
+                  <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-700 pb-4 shrink-0">
+                     <div className="flex items-center gap-3.5">
+                        <div className="w-12 h-12 bg-emerald-50 dark:bg-emerald-900/30 rounded-2xl flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-sm border border-emerald-100 dark:border-emerald-800 shrink-0">
+                           <FileSpreadsheet size={28} />
+                        </div>
+                        <div>
+                           <h3 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent">Import Excel Logistik (Multi-Sheet)</h3>
+                           <p className="text-gray-500 text-xs sm:text-sm font-medium">Ekstrak otomatis kolom B (B2:B) dari semua sheet & gabung jadi satu data.</p>
+                        </div>
+                     </div>
+                     <button
+                        disabled={isSavingLogistikExcel || isProcessingLogistikExcel}
+                        onClick={() => setIsLogistikExcelModalOpen(false)}
+                        className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 cursor-pointer"
+                     >
+                        <X size={20} />
+                     </button>
+                  </div>
+
+                  {/* Modal Body Scrollable Container */}
+                  <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-4">
+                     
+                     {/* Upload Box & Target Date Selector */}
+                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="md:col-span-2">
+                           <div
+                              onDragOver={(e) => { e.preventDefault(); setLogistikExcelDragOver(true); }}
+                              onDragLeave={() => setLogistikExcelDragOver(false)}
+                              onDrop={(e) => {
+                                 e.preventDefault();
+                                 setLogistikExcelDragOver(false);
+                                 if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                                    handleLogistikExcelFileSelect(e.dataTransfer.files[0]);
+                                 }
+                              }}
+                              className={`border-2 border-dashed rounded-2xl p-4 sm:p-5 flex flex-col items-center justify-center text-center transition-all cursor-pointer ${
+                                 logistikExcelDragOver
+                                    ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-900/20'
+                                    : logistikExcelFile
+                                    ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50/20 dark:bg-emerald-950/10'
+                                    : 'border-gray-300 dark:border-gray-600 hover:border-emerald-400 dark:hover:border-emerald-500 bg-gray-50/50 dark:bg-gray-900/40'
+                              }`}
+                              onClick={() => {
+                                 if (!isSavingLogistikExcel && !isProcessingLogistikExcel) {
+                                    const input = document.createElement('input');
+                                    input.type = 'file';
+                                    input.accept = '.xlsx, .xls, .csv';
+                                    input.onchange = (ev: any) => {
+                                       if (ev.target.files && ev.target.files[0]) {
+                                          handleLogistikExcelFileSelect(ev.target.files[0]);
+                                       }
+                                    };
+                                    input.click();
+                                 }
+                              }}
+                           >
+                              {isProcessingLogistikExcel ? (
+                                 <div className="flex flex-col items-center gap-2 py-3">
+                                    <Loader2 size={32} className="animate-spin text-emerald-600 dark:text-emerald-400" />
+                                    <span className="text-xs font-bold text-gray-600 dark:text-gray-300">Membaca dan memproses semua sheet Excel...</span>
+                                 </div>
+                              ) : logistikExcelFile ? (
+                                 <div className="flex items-center gap-3 py-1">
+                                    <FileSpreadsheet className="text-emerald-600 shrink-0" size={28} />
+                                    <div className="text-left">
+                                       <div className="text-xs sm:text-sm font-bold text-gray-900 dark:text-white line-clamp-1">{logistikExcelFile.name}</div>
+                                       <div className="text-[11px] text-gray-500">{(logistikExcelFile.size / 1024).toFixed(1)} KB • Klik untuk ganti file</div>
+                                    </div>
+                                 </div>
+                              ) : (
+                                 <div className="flex flex-col items-center gap-1.5 py-2">
+                                    <Upload size={24} className="text-gray-400" />
+                                    <span className="text-xs sm:text-sm font-bold text-gray-700 dark:text-gray-200">Pilih atau Drag File Excel (.xlsx, .xls, .csv)</span>
+                                    <span className="text-[11px] text-gray-400">Otomatis membaca kolom B2:B di seluruh sheet yang ada</span>
+                                 </div>
+                              )}
+                           </div>
+                        </div>
+
+                        <div>
+                           <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">Tanggal Import Default</label>
+                           <input
+                              type="date"
+                              value={logistikExcelDate}
+                              onChange={(e) => setLogistikExcelDate(e.target.value)}
+                              disabled={isSavingLogistikExcel}
+                              className="w-full p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-mono text-xs sm:text-sm dark:text-gray-200 cursor-pointer"
+                           />
+                           <p className="text-[10px] text-gray-400 mt-1">Jika kolom WAKTU/TANGGAL di Excel terisi, waktu otomatis diambil presisi per resi.</p>
+                        </div>
+                     </div>
+
+                     {/* Summary Cards */}
+                     {logistikExcelExtractedRows.length > 0 && (
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                           <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/60 p-3 rounded-2xl flex flex-col">
+                              <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">Total di Excel</span>
+                              <span className="text-xl sm:text-2xl font-black text-emerald-700 dark:text-emerald-300 mt-0.5">{logistikExcelExtractedRows.length.toLocaleString()}</span>
+                              <span className="text-[10px] text-emerald-600/80">Seluruh Sheet</span>
+                           </div>
+                           <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800/60 p-3 rounded-2xl flex flex-col">
+                              <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">Total Sheet</span>
+                              <span className="text-xl sm:text-2xl font-black text-indigo-700 dark:text-indigo-300 mt-0.5">{logistikExcelSheetSummary.length}</span>
+                              <span className="text-[10px] text-indigo-600/80">Sheet Terdeteksi</span>
+                           </div>
+                           <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/60 p-3 rounded-2xl flex flex-col">
+                              <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">Sudah Ada di DB</span>
+                              <span className="text-xl sm:text-2xl font-black text-amber-700 dark:text-amber-300 mt-0.5">{logistikExcelExistingCount.toLocaleString()}</span>
+                              <span className="text-[10px] text-amber-600/80">Otomatis di-skip</span>
+                           </div>
+                           <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/60 p-3 rounded-2xl flex flex-col">
+                              <span className="text-[11px] text-blue-600 dark:text-blue-400 font-medium">Siap Diimpor</span>
+                              <span className="text-xl sm:text-2xl font-black text-blue-700 dark:text-blue-300 mt-0.5">{(logistikExcelExtractedRows.length - logistikExcelExistingCount).toLocaleString()}</span>
+                              <span className="text-[10px] text-blue-600/80">Data Baru</span>
+                           </div>
+                        </div>
+                     )}
+
+                     {/* Sheet Breakdown Chips */}
+                     {logistikExcelSheetSummary.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 p-2.5 bg-gray-50 dark:bg-gray-900/40 rounded-xl border border-gray-200 dark:border-gray-700">
+                           <span className="text-xs font-bold text-gray-500 mr-1">Rincian Sheet:</span>
+                           <button
+                              onClick={() => { setLogistikExcelSheetFilter('ALL'); setLogistikExcelPage(1); }}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                 logistikExcelSheetFilter === 'ALL'
+                                    ? 'bg-emerald-600 text-white shadow-xs'
+                                    : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100'
+                              }`}
+                           >
+                              Semua Sheet ({logistikExcelExtractedRows.length})
+                           </button>
+                           {logistikExcelSheetSummary.map(s => (
+                              <button
+                                 key={s.sheetName}
+                                 onClick={() => { setLogistikExcelSheetFilter(s.sheetName); setLogistikExcelPage(1); }}
+                                 className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                    logistikExcelSheetFilter === s.sheetName
+                                       ? 'bg-emerald-600 text-white shadow-xs'
+                                       : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100'
+                                 }`}
+                              >
+                                 {s.sheetName} <span className="opacity-80 font-mono">({s.count})</span>
+                              </button>
+                           ))}
+                        </div>
+                     )}
+
+                     {/* Progress Bar while saving */}
+                     {isSavingLogistikExcel && (
+                        <div className="p-4 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-2xl flex flex-col gap-2 animate-pulse">
+                           <div className="flex justify-between items-center text-xs font-bold text-emerald-800 dark:text-emerald-300">
+                              <span>Mengimpor data ke database Logistik...</span>
+                              <span>{logistikExcelProgress.current.toLocaleString()} / {logistikExcelProgress.total.toLocaleString()} ({logistikExcelProgress.percentage}%)</span>
+                           </div>
+                           <div className="w-full h-3 bg-emerald-100 dark:bg-emerald-900 rounded-full overflow-hidden">
+                              <div
+                                 className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-200"
+                                 style={{ width: `${logistikExcelProgress.percentage}%` }}
+                              ></div>
+                           </div>
+                        </div>
+                     )}
+
+                     {/* Table Preview with Search & Pagination */}
+                     {logistikExcelExtractedRows.length > 0 && (() => {
+                        let filtered = logistikExcelExtractedRows;
+                        if (logistikExcelSheetFilter !== 'ALL') {
+                           filtered = filtered.filter(r => r.sheetName === logistikExcelSheetFilter);
+                        }
+                        if (logistikExcelSearch.trim()) {
+                           const q = logistikExcelSearch.trim().toUpperCase();
+                           filtered = filtered.filter(r => r.barcode.toUpperCase().includes(q) || r.sheetName.toUpperCase().includes(q));
+                        }
+
+                        const totalFiltered = filtered.length;
+                        const totalPages = Math.ceil(totalFiltered / logistikExcelRowsPerPage) || 1;
+                        const currentPage = Math.min(Math.max(1, logistikExcelPage), totalPages);
+                        const startIndex = (currentPage - 1) * logistikExcelRowsPerPage;
+                        const pageItems = filtered.slice(startIndex, startIndex + logistikExcelRowsPerPage);
+
+                        return (
+                           <div className="flex flex-col border border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden bg-white dark:bg-gray-850">
+                              {/* Search Toolbar */}
+                              <div className="p-3 bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                                 <div className="relative w-full sm:w-72">
+                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                    <input
+                                       type="text"
+                                       placeholder="Cari barcode / nomor resi..."
+                                       value={logistikExcelSearch}
+                                       onChange={(e) => { setLogistikExcelSearch(e.target.value); setLogistikExcelPage(1); }}
+                                       className="w-full pl-8 pr-7 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500"
+                                    />
+                                    {logistikExcelSearch && (
+                                       <button onClick={() => { setLogistikExcelSearch(''); setLogistikExcelPage(1); }} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                          <X size={12} />
+                                       </button>
+                                    )}
+                                 </div>
+                                 <div className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+                                    Total Preview: <b>{totalFiltered.toLocaleString()}</b> resi
+                                 </div>
+                              </div>
+
+                              {/* Table Body */}
+                              <div className="max-h-72 overflow-y-auto">
+                                 <table className="w-full text-left border-collapse text-xs">
+                                    <thead className="bg-gray-100 dark:bg-gray-800 sticky top-0 z-10 text-gray-600 dark:text-gray-300 font-bold border-b border-gray-200 dark:border-gray-700">
+                                       <tr>
+                                          <th className="p-2.5 pl-3 w-12 text-center">#</th>
+                                          <th className="p-2.5 w-32">Sheet Asal</th>
+                                          <th className="p-2.5">Barcode / Nomor Resi (B2:B)</th>
+                                          <th className="p-2.5 w-24">Waktu</th>
+                                          <th className="p-2.5 w-28">Tanggal</th>
+                                          <th className="p-2.5 w-32 text-right pr-3">Status</th>
+                                       </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                                       {pageItems.length === 0 ? (
+                                          <tr>
+                                             <td colSpan={6} className="text-center py-8 text-gray-400">
+                                                Tidak ada data yang cocok dengan pencarian.
+                                             </td>
+                                          </tr>
+                                       ) : (
+                                          pageItems.map((row, idx) => (
+                                             <tr key={row.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                                                <td className="p-2.5 pl-3 text-center text-gray-400 font-mono text-[11px]">{startIndex + idx + 1}</td>
+                                                <td className="p-2.5">
+                                                   <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 font-bold text-[11px]">
+                                                      {row.sheetName} (B{row.rowNum})
+                                                   </span>
+                                                </td>
+                                                <td className="p-2.5 font-mono font-bold text-gray-800 dark:text-gray-200">
+                                                   {row.barcode}
+                                                </td>
+                                                <td className="p-2.5 font-mono text-gray-500 text-[11px]">{row.waktu || '-'}</td>
+                                                <td className="p-2.5 font-mono text-gray-500 text-[11px]">{row.tanggal || '-'}</td>
+                                                <td className="p-2.5 text-right pr-3">
+                                                   {row.isDuplicateInDb ? (
+                                                      <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded font-bold text-[10px]">
+                                                         Sudah Ada (Skip)
+                                                      </span>
+                                                   ) : (
+                                                      <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded font-bold text-[10px]">
+                                                         Siap Import
+                                                      </span>
+                                                   )}
+                                                </td>
+                                             </tr>
+                                          ))
+                                       )}
+                                    </tbody>
+                                 </table>
+                              </div>
+
+                              {/* Pagination Footer */}
+                              {totalFiltered > 0 && (
+                                 <div className="p-2.5 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex flex-wrap justify-between items-center gap-2 text-xs">
+                                    <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                                       <span>Menampilkan <b>{startIndex + 1} - {Math.min(startIndex + logistikExcelRowsPerPage, totalFiltered)}</b> dari <b>{totalFiltered.toLocaleString()}</b> data</span>
+                                       <select 
+                                          value={logistikExcelRowsPerPage} 
+                                          onChange={(e) => { setLogistikExcelRowsPerPage(Number(e.target.value)); setLogistikExcelPage(1); }}
+                                          className="ml-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-2 py-0.5 text-xs font-bold"
+                                       >
+                                          <option value={50}>50 / hal</option>
+                                          <option value={100}>100 / hal</option>
+                                          <option value={250}>250 / hal</option>
+                                          <option value={500}>500 / hal</option>
+                                       </select>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                       <button 
+                                          disabled={currentPage <= 1}
+                                          onClick={() => setLogistikExcelPage(p => Math.max(1, p - 1))}
+                                          className="px-2.5 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded font-bold disabled:opacity-40 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                                       >
+                                          &larr; Prev
+                                       </button>
+                                       <span className="px-2 font-bold text-gray-700 dark:text-gray-300">Hal {currentPage} / {totalPages}</span>
+                                       <button 
+                                          disabled={currentPage >= totalPages}
+                                          onClick={() => setLogistikExcelPage(p => Math.min(totalPages, p + 1))}
+                                          className="px-2.5 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded font-bold disabled:opacity-40 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                                       >
+                                          Next &rarr;
+                                       </button>
+                                    </div>
+                                 </div>
+                              )}
+                           </div>
+                        );
+                     })()}
+                  </div>
+
+                  {/* Modal Footer Actions */}
+                  <div className="flex items-center justify-between gap-3 pt-3 border-t border-gray-100 dark:border-gray-700 shrink-0">
+                     <button
+                        disabled={isSavingLogistikExcel || isProcessingLogistikExcel}
+                        onClick={() => setIsLogistikExcelModalOpen(false)}
+                        className="px-5 py-2.5 text-xs sm:text-sm font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
+                     >
+                        Tutup
+                     </button>
+                     <button
+                        onClick={handleSaveLogistikExcelImport}
+                        disabled={isSavingLogistikExcel || isProcessingLogistikExcel || logistikExcelExtractedRows.length === 0 || (logistikExcelExtractedRows.length - logistikExcelExistingCount) === 0}
+                        className="px-6 sm:px-8 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl font-bold text-xs sm:text-sm shadow-md shadow-emerald-200 dark:shadow-none hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer"
+                     >
+                        {isSavingLogistikExcel ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                        <span>Kirim / Import {(logistikExcelExtractedRows.length - logistikExcelExistingCount).toLocaleString()} Data Baru</span>
+                     </button>
+                  </div>
+               </div>
+            </div>
+         )}
+         
          {/* BATCH IMPORT MODAL */}
          {isLogistikImportModalOpen && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center px-4">
