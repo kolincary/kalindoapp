@@ -3350,6 +3350,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [logistikExcelProgress, setLogistikExcelProgress] = useState<{ current: number; total: number; percentage: number }>({ current: 0, total: 0, percentage: 0 });
    const [logistikExcelDragOver, setLogistikExcelDragOver] = useState(false);
    const [logistikExcelExistingCount, setLogistikExcelExistingCount] = useState(0);
+   // Logistik Duplicate Cleanup State
+   const [isLogistikDupeModalOpen, setIsLogistikDupeModalOpen] = useState(false);
+   const [isScanningLogistikDupes, setIsScanningLogistikDupes] = useState(false);
+   const [isDeletingLogistikDupes, setIsDeletingLogistikDupes] = useState(false);
+   const [logistikDupeGroups, setLogistikDupeGroups] = useState<{
+      normalizedKey: string;
+      items: {
+         id: string;
+         barcode: string;
+         timestamp: number;
+         role: string;
+         user_email?: string;
+         isKeep: boolean;
+      }[];
+   }[]>([]);
+   const [selectedLogistikDupeDeleteIds, setSelectedLogistikDupeDeleteIds] = useState<string[]>([]);
+   const [logistikDupeSearch, setLogistikDupeSearch] = useState('');
+   const [logistikDupePage, setLogistikDupePage] = useState(1);
+   const [logistikDupeRowsPerPage, setLogistikDupeRowsPerPage] = useState(50);
    const [isLogistikDevToolsOpen, setIsLogistikDevToolsOpen] = useState(false);
    const logistikDevToolsRef = useRef<HTMLDivElement>(null);
 
@@ -4253,6 +4272,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          } catch (e) { }
       };
       fetchConfig();
+      fetchForbiddenSymbols();
    }, []);
 
 
@@ -4305,6 +4325,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (activeView === 'CANCEL_DATA' || ((activeView === 'BATCH_DATA' || activeView === 'BATCH_DATA_2' || activeView === 'BATCH_DATA_3') && (activeBatchTab === 'ITEMS' || activeBatchTab === 'AUDIT_KOMPARASI'))) fetchCancelledOrders();
       if (activeView === 'FAILED_SCANS') fetchFailedScans();
       if (activeView === 'FAKE_REPORT') fetchFakeReports();
+      if (activeView === 'SYMBOLS') fetchForbiddenSymbols();
       if ((activeView === 'BATCH_DATA' || activeView === 'BATCH_DATA_2' || activeView === 'BATCH_DATA_3') && activeBatchTab === 'ITEMS') fetchBatchData();
 
       // NEW: Auto-Fetch for Compare Logistik if Database Mode
@@ -7821,6 +7842,169 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          setIsManualCleaningDevModeLogistik(false);
       }
    };
+   // Function to scan and group duplicates in Logistik
+   const handleScanLogistikDuplicates = async (customBarcodesInput?: string[]) => {
+      setIsScanningLogistikDupes(true);
+      try {
+         let allRecords: { id: string; barcode: string; timestamp: number; role: string; user_email?: string }[] = [];
+
+         if (customBarcodesInput && customBarcodesInput.length > 0) {
+            // Scan based on provided barcode list
+            for (let i = 0; i < customBarcodesInput.length; i += 500) {
+               const chunk = customBarcodesInput.slice(i, i + 500);
+               const searchChunk = Array.from(new Set(chunk.flatMap(b => [b, '00' + b, b.replace(/^00/, '')])));
+               const { data, error } = await supabase
+                  .from('scanned_items')
+                  .select('id, barcode, timestamp, role, user_email')
+                  .eq('role', 'LOGISTIK')
+                  .in('barcode', searchChunk);
+               if (error) throw error;
+               if (data) allRecords.push(...data);
+            }
+         } else {
+            // Scan based on date filter (or all)
+            const startOfDay = filterDate ? new Date(filterDate + 'T00:00:00.000').getTime() : 0;
+            const endOfDay = filterDate ? new Date(filterDate + 'T23:59:59.999').getTime() : 0;
+            let offset = 0;
+            const limit = 1000;
+
+            while (true) {
+               let q = supabase
+                  .from('scanned_items')
+                  .select('id, barcode, timestamp, role, user_email')
+                  .eq('role', 'LOGISTIK');
+               if (startOfDay && endOfDay) {
+                  q = q.gte('timestamp', startOfDay).lte('timestamp', endOfDay);
+               }
+               q = q.order('timestamp', { ascending: true }).range(offset, offset + limit - 1);
+               const { data: pageData, error } = await q;
+               if (error) throw error;
+               if (!pageData || pageData.length === 0) break;
+               allRecords.push(...pageData);
+               if (pageData.length < limit) break;
+               offset += limit;
+            }
+         }
+
+         if (allRecords.length === 0) {
+            alert("Tidak ada data Logistik yang ditemukan untuk dipindai.");
+            return;
+         }
+
+         // Group by normalized barcode
+         const groupMap = new Map<string, typeof allRecords>();
+         allRecords.forEach(r => {
+            const raw = (r.barcode || '').toString().trim();
+            if (!raw) return;
+            let norm = sanitizeAndPadBarcode(raw);
+            if (!norm.startsWith('00') && (norm.startsWith('4') || norm.startsWith('2') || norm.startsWith('6'))) {
+               norm = '00' + norm;
+            }
+            norm = norm.toUpperCase();
+            if (!groupMap.has(norm)) {
+               groupMap.set(norm, []);
+            }
+            groupMap.get(norm)!.push(r);
+         });
+
+         // Filter groups with > 1 item (actual duplicates)
+         const detectedGroups: {
+            normalizedKey: string;
+            items: {
+               id: string;
+               barcode: string;
+               timestamp: number;
+               role: string;
+               user_email?: string;
+               isKeep: boolean;
+            }[];
+         }[] = [];
+
+         const defaultDeleteIds: string[] = [];
+
+         groupMap.forEach((items, normKey) => {
+            if (items.length > 1) {
+               // Sort items: prefer formatted '00' first, then earliest timestamp
+               const sorted = [...items].sort((a, b) => {
+                  const aHas00 = (a.barcode || '').startsWith('00') ? 1 : 0;
+                  const bHas00 = (b.barcode || '').startsWith('00') ? 1 : 0;
+                  if (aHas00 !== bHas00) return bHas00 - aHas00;
+                  return (a.timestamp || 0) - (b.timestamp || 0);
+               });
+
+               const groupItems = sorted.map((item, idx) => {
+                  const isKeep = idx === 0;
+                  if (!isKeep) {
+                     defaultDeleteIds.push(item.id);
+                  }
+                  return {
+                     ...item,
+                     isKeep
+                  };
+               });
+
+               detectedGroups.push({
+                  normalizedKey: normKey,
+                  items: groupItems
+               });
+            }
+         });
+
+         if (detectedGroups.length === 0) {
+            alert("✅ Hebat! Tidak ditemukan data duplikat/ganda pada data Logistik yang diperiksa.");
+            return;
+         }
+
+         setLogistikDupeGroups(detectedGroups);
+         setSelectedLogistikDupeDeleteIds(defaultDeleteIds);
+         setLogistikDupeSearch('');
+         setLogistikDupePage(1);
+         setIsLogistikDupeModalOpen(true);
+      } catch (err: any) {
+         console.error("Error scanning logistik duplicates:", err);
+         alert("Gagal memindai data duplikat: " + (err.message || 'Error tidak diketahui'));
+      } finally {
+         setIsScanningLogistikDupes(false);
+      }
+   };
+
+   const handleExecuteDeleteLogistikDuplicates = async () => {
+      if (selectedLogistikDupeDeleteIds.length === 0) {
+         alert("Pilih setidaknya 1 data duplikat yang ingin dihapus.");
+         return;
+      }
+
+      if (!window.confirm(`Apakah Anda yakin ingin menghapus ${selectedLogistikDupeDeleteIds.length} data duplikat Logistik ini dari database?
+
+Data yang dihapus tidak dapat dipulihkan.`)) {
+         return;
+      }
+
+      setIsDeletingLogistikDupes(true);
+      try {
+         const chunkSize = 100;
+         for (let i = 0; i < selectedLogistikDupeDeleteIds.length; i += chunkSize) {
+            const chunk = selectedLogistikDupeDeleteIds.slice(i, i + chunkSize);
+            const { error } = await supabase.from('scanned_items').delete().in('id', chunk);
+            if (error) throw error;
+         }
+
+         setSuccessToast(`🧹 Berhasil menghapus ${selectedLogistikDupeDeleteIds.length} data duplikat Logistik!`);
+         setIsLogistikDupeModalOpen(false);
+         setLogistikDupeGroups([]);
+         setSelectedLogistikDupeDeleteIds([]);
+         
+         if (activeView === 'LOGISTIK_DATA') {
+            fetchPackingData(1);
+         }
+      } catch (err: any) {
+         console.error("Error deleting duplicates:", err);
+         alert("Gagal menghapus data duplikat: " + (err.message || 'Error tidak diketahui'));
+      } finally {
+         setIsDeletingLogistikDupes(false);
+      }
+   };
+
    const handleCleanDevModeLogistikData = async () => {
       const confirmClean = window.confirm(
          "🧹 DevMode Barcode Cleaner (LOGISTIK):\n\nApakah Anda yakin ingin membersihkan data resi LOGISTIK (menambahkan prefix 00 untuk resi diawali 4 atau 2) di database?\n\nFitur ini HANYA memproses data dengan role LOGISTIK."
@@ -9042,9 +9226,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setIsLoadingSymbols(true);
       try {
          const { data, error } = await supabase.from('app_forbidden_symbols').select('*').order('id', { ascending: true });
-         if (error) throw error;
+         if (error) {
+            console.error("Gagal mengambil data app_forbidden_symbols dari Supabase:", error);
+            // If table doesn't exist, we don't throw to prevent breaking dashboard, but log warning
+            if (error.code === 'PGRST205' || error.message?.includes('Could not find the table')) {
+               console.warn("Tabel 'app_forbidden_symbols' belum ada di project Supabase aktif ini.");
+            }
+            throw error;
+         }
          setForbiddenSymbols(data || []);
-      } catch (err) { } finally { setIsLoadingSymbols(false); }
+      } catch (err: any) {
+         console.error("Error fetchForbiddenSymbols:", err);
+      } finally {
+         setIsLoadingSymbols(false);
+      }
    };
 
    // --- CANCEL DATA FUNCTIONS ---
@@ -10958,8 +11153,33 @@ if (filterPackingShift !== 'ALL') {
    };
 
    const handleDeleteAdmin = useCallback(async (id: number) => { if (window.confirm("Delete?")) { await supabase.from('admin_users').delete().eq('id', id); setAdminUsers(prev => prev.filter(a => a.id !== id)); } }, []);
-   const handleAddSymbol = async () => { if (!newSymbolInput) return; await supabase.from('app_forbidden_symbols').insert([{ symbol: newSymbolInput }]); setForbiddenSymbols(prev => [...prev, { id: Date.now(), symbol: newSymbolInput }]); setNewSymbolInput(''); fetchForbiddenSymbols(); };
-   const handleDeleteSymbol = async (id: number) => { await supabase.from('app_forbidden_symbols').delete().eq('id', id); setForbiddenSymbols(prev => prev.filter(s => s.id !== id)); };
+   const handleAddSymbol = async () => {
+      if (!newSymbolInput.trim()) return;
+      const symbolToAdd = newSymbolInput.trim();
+      try {
+         const { error } = await supabase.from('app_forbidden_symbols').insert([{ symbol: symbolToAdd }]);
+         if (error) throw error;
+         setNewSymbolInput('');
+         await fetchForbiddenSymbols();
+         setSuccessToast(`Berhasil menambahkan simbol "${symbolToAdd}"`);
+      } catch (err: any) {
+         console.error("Error adding forbidden symbol:", err);
+         alert("Gagal menambahkan simbol terlarang: " + (err.message || 'Error tidak diketahui'));
+      }
+   };
+
+   const handleDeleteSymbol = async (id: number) => {
+      if (!window.confirm("Hapus simbol ini dari daftar simbol terlarang?")) return;
+      try {
+         const { error } = await supabase.from('app_forbidden_symbols').delete().eq('id', id);
+         if (error) throw error;
+         setForbiddenSymbols(prev => prev.filter(s => s.id !== id));
+         setSuccessToast("Simbol berhasil dihapus.");
+      } catch (err: any) {
+         console.error("Error deleting forbidden symbol:", err);
+         alert("Gagal menghapus simbol: " + (err.message || 'Error tidak diketahui'));
+      }
+   };
 
    const triggerSelectAllAccess = () => selectedAccessEmails.length !== filteredUsers.length ? setSelectedAccessEmails(filteredUsers) : setSelectedAccessEmails([]);
    const handleSelectAccessRow = useCallback((email: string, checked: boolean) => checked ? setSelectedAccessEmails(prev => [...prev, email]) : setSelectedAccessEmails(prev => prev.filter(e => e !== email)), []);
@@ -11717,7 +11937,26 @@ if (filterPackingShift !== 'ALL') {
                                                       Khusus Role Logistik
                                                    </div>
                                                    
-                                                   {/* 1. Bersihkan Logistik 00 */}
+                                                   {/* 0. Hapus Duplikat Logistik (Dengan Preview) */}
+                                                    <button
+                                                       onClick={() => { setIsLogistikDevToolsOpen(false); handleScanLogistikDuplicates(); }}
+                                                       disabled={isScanningLogistikDupes}
+                                                       className="w-full flex items-start gap-3 p-2.5 text-left rounded-xl hover:bg-purple-50 dark:hover:bg-purple-950/40 text-gray-700 dark:text-gray-200 transition-colors group cursor-pointer border border-transparent hover:border-purple-200 dark:hover:border-purple-800/60 disabled:opacity-50"
+                                                       title="Pindai dan bersihkan resi ganda/duplikat pada data Logistik (dengan preview tabel interaktif)"
+                                                    >
+                                                       <div className="w-8 h-8 rounded-lg bg-purple-500/10 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                                                          {isScanningLogistikDupes ? <Loader2 size={16} className="animate-spin" /> : <Copy size={16} />}
+                                                       </div>
+                                                       <div className="flex-1 min-w-0">
+                                                          <div className="text-xs font-bold text-gray-900 dark:text-white flex items-center justify-between">
+                                                             <span>Hapus Duplikat Logistik</span>
+                                                             <span className="text-[10px] font-bold text-purple-600 dark:text-purple-400 bg-purple-100 dark:bg-purple-900/50 px-1.5 py-0.5 rounded">Preview</span>
+                                                          </div>
+                                                          <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">Deteksi &amp; bersihkan resi ganda/sama</p>
+                                                       </div>
+                                                    </button>
+
+                                                    {/* 1. Bersihkan Logistik 00 */}
                                                    <button
                                                       onClick={() => { setIsLogistikDevToolsOpen(false); handleCleanDevModeLogistikData(); }}
                                                       disabled={isCleaningDevModeLogistik}
@@ -22030,7 +22269,22 @@ LXAD-1234567890`}
                                        <p className="text-xs text-gray-400 italic">*Masukkan satu karakter atau rangkaian kata. Besar kecil huruf diperhatikan.</p>
                                     </div>
                                     <div className="flex flex-col bg-gray-50 dark:bg-gray-900/30 h-full">
-                                       <div className="p-4 border-b border-gray-100 dark:border-gray-700 bg-gray-100 dark:bg-gray-900 flex justify-between items-center"><h4 className="font-bold text-gray-700 dark:text-gray-200 flex items-center gap-2"><Slash size={16} /> Daftar Simbol ({forbiddenSymbols.length})</h4>{isLoadingSymbols && <Loader2 size={16} className="animate-spin text-gray-400" />}</div>
+                                       <div className="p-4 border-b border-gray-100 dark:border-gray-700 bg-gray-100 dark:bg-gray-900 flex justify-between items-center">
+                                          <h4 className="font-bold text-gray-700 dark:text-gray-200 flex items-center gap-2">
+                                             <Slash size={16} /> Daftar Simbol ({forbiddenSymbols.length})
+                                          </h4>
+                                          <div className="flex items-center gap-2">
+                                             {isLoadingSymbols && <Loader2 size={16} className="animate-spin text-gray-400" />}
+                                             <button
+                                                onClick={fetchForbiddenSymbols}
+                                                disabled={isLoadingSymbols}
+                                                className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-800 rounded-lg text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors cursor-pointer"
+                                                title="Refresh Daftar Simbol"
+                                             >
+                                                <RefreshCw size={14} className={isLoadingSymbols ? 'animate-spin' : ''} />
+                                             </button>
+                                          </div>
+                                       </div>
                                        <div className="flex-1 overflow-y-auto p-4">{forbiddenSymbols.length === 0 ? (<div className="p-8 text-center text-gray-400 flex flex-col items-center"><CheckCircle size={32} className="mb-2 opacity-30" /><p className="text-sm">Belum ada simbol terlarang.</p></div>) : (<div className="grid grid-cols-1 gap-2">{forbiddenSymbols.map((item) => (<div key={item.id} className="flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 group hover:border-red-200 dark:hover:border-red-900/50 transition-colors"><div className="flex items-center gap-3"><div className="w-8 h-8 rounded bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 flex items-center justify-center font-mono font-bold text-lg">{item.symbol}</div><span className="text-gray-600 dark:text-gray-300 text-sm font-mono">"{item.symbol}"</span></div><button onClick={() => handleDeleteSymbol(item.id)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"><Trash2 size={16} /></button></div>))}</div>)}</div>
                                     </div>
                                  </div>
@@ -24634,6 +24888,265 @@ LXAD-1234567890`}
             </div>
          )}
          
+         {/* LOGISTIK DUPLICATE CLEANER PREVIEW MODAL */}
+         {isLogistikDupeModalOpen && (
+            <div className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-5">
+               <div className="absolute inset-0 bg-black/60 backdrop-blur-sm shadow-2xl" onClick={() => !isDeletingLogistikDupes && setIsLogistikDupeModalOpen(false)}></div>
+               <div className="bg-white dark:bg-gray-800 w-full max-w-5xl rounded-3xl shadow-2xl relative z-10 p-5 sm:p-7 border border-white/20 animate-[popIn_0.3s_ease-out] flex flex-col gap-4 max-h-[92vh] overflow-hidden">
+                  
+                  {/* Modal Header */}
+                  <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-700 pb-3 shrink-0">
+                     <div className="flex items-center gap-3.5">
+                        <div className="w-12 h-12 bg-purple-50 dark:bg-purple-900/30 rounded-2xl flex items-center justify-center text-purple-600 dark:text-purple-400 shadow-sm border border-purple-100 dark:border-purple-800 shrink-0">
+                           <Copy size={26} />
+                        </div>
+                        <div>
+                           <h3 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">Preview &amp; Hapus Duplikat Logistik</h3>
+                           <p className="text-gray-500 text-xs sm:text-sm font-medium">Ditemukan data resi ganda (identik atau beda awalan 00). Pilih record yang ingin dihapus.</p>
+                        </div>
+                     </div>
+                     <button
+                        disabled={isDeletingLogistikDupes}
+                        onClick={() => setIsLogistikDupeModalOpen(false)}
+                        className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 cursor-pointer"
+                     >
+                        <X size={20} />
+                     </button>
+                  </div>
+
+                  {/* Summary Cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 shrink-0">
+                     <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800/60 p-3 rounded-2xl flex flex-col">
+                        <span className="text-[11px] text-purple-600 dark:text-purple-400 font-medium">Grup Resi Ganda</span>
+                        <span className="text-xl sm:text-2xl font-black text-purple-700 dark:text-purple-300 mt-0.5">{logistikDupeGroups.length.toLocaleString()}</span>
+                        <span className="text-[10px] text-purple-600/80">Nomor Resi Unik</span>
+                     </div>
+                     <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/60 p-3 rounded-2xl flex flex-col">
+                        <span className="text-[11px] text-blue-600 dark:text-blue-400 font-medium">Total Record Ditemukan</span>
+                        <span className="text-xl sm:text-2xl font-black text-blue-700 dark:text-blue-300 mt-0.5">
+                           {logistikDupeGroups.reduce((acc, g) => acc + g.items.length, 0).toLocaleString()}
+                        </span>
+                        <span className="text-[10px] text-blue-600/80">Termasuk Asli + Ganda</span>
+                     </div>
+                     <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/60 p-3 rounded-2xl flex flex-col">
+                        <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">Disimpan (Master)</span>
+                        <span className="text-xl sm:text-2xl font-black text-emerald-700 dark:text-emerald-300 mt-0.5">{logistikDupeGroups.length.toLocaleString()}</span>
+                        <span className="text-[10px] text-emerald-600/80">1 per resi dipertahankan</span>
+                     </div>
+                     <div className="bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800/60 p-3 rounded-2xl flex flex-col">
+                        <span className="text-[11px] text-rose-600 dark:text-rose-400 font-medium">Akan Dihapus</span>
+                        <span className="text-xl sm:text-2xl font-black text-rose-700 dark:text-rose-300 mt-0.5">{selectedLogistikDupeDeleteIds.length.toLocaleString()}</span>
+                        <span className="text-[10px] text-rose-600/80">Data Duplikat Dipilih</span>
+                     </div>
+                  </div>
+
+                  {/* Search & Selection Controls */}
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 p-3 bg-gray-50 dark:bg-gray-900/40 rounded-xl border border-gray-200 dark:border-gray-700 shrink-0">
+                     <div className="relative w-full sm:w-80">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                           type="text"
+                           placeholder="Cari barcode duplikat..."
+                           value={logistikDupeSearch}
+                           onChange={(e) => { setLogistikDupeSearch(e.target.value); setLogistikDupePage(1); }}
+                           className="w-full pl-8 pr-7 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg outline-none focus:ring-2 focus:ring-purple-500 font-mono"
+                        />
+                        {logistikDupeSearch && (
+                           <button onClick={() => { setLogistikDupeSearch(''); setLogistikDupePage(1); }} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                              <X size={12} />
+                           </button>
+                        )}
+                     </div>
+
+                     <div className="flex items-center gap-2">
+                        <button
+                           onClick={() => {
+                              const allDeletableIds = logistikDupeGroups.flatMap(g => g.items.filter(i => !i.isKeep).map(i => i.id));
+                              setSelectedLogistikDupeDeleteIds(allDeletableIds);
+                           }}
+                           className="px-3 py-1.5 bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 hover:bg-rose-200 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                        >
+                           Pilih Semua Duplikat
+                        </button>
+                        <button
+                           onClick={() => setSelectedLogistikDupeDeleteIds([])}
+                           className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                        >
+                           Kosongkan Pilihan
+                        </button>
+                     </div>
+                  </div>
+
+                  {/* Duplicate Groups Scrollable Paginated Container */}
+                  <div className="flex-1 min-h-0 overflow-y-auto pr-1 flex flex-col gap-3.5">
+                     {(() => {
+                        const q = logistikDupeSearch.trim().toUpperCase();
+                        const filteredGroups = logistikDupeGroups.filter(g => {
+                           if (!q) return true;
+                           return g.normalizedKey.includes(q) || g.items.some(i => (i.barcode || '').toUpperCase().includes(q));
+                        });
+
+                        const totalFiltered = filteredGroups.length;
+                        const totalPages = Math.ceil(totalFiltered / logistikDupeRowsPerPage) || 1;
+                        const currentPage = Math.min(Math.max(1, logistikDupePage), totalPages);
+                        const startIndex = (currentPage - 1) * logistikDupeRowsPerPage;
+                        const pageGroups = filteredGroups.slice(startIndex, startIndex + logistikDupeRowsPerPage);
+
+                        if (filteredGroups.length === 0) {
+                           return (
+                              <div className="p-12 text-center text-gray-400 bg-gray-50 dark:bg-gray-900/20 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700">
+                                 Tidak ada resi duplikat yang cocok dengan pencarian "{logistikDupeSearch}".
+                              </div>
+                           );
+                        }
+
+                        return (
+                           <>
+                              {pageGroups.map((group, gIdx) => (
+                                 <div key={group.normalizedKey} className="shrink-0 border border-purple-200 dark:border-purple-900/60 rounded-2xl overflow-hidden bg-white dark:bg-gray-850 shadow-sm">
+                                    {/* Group Header */}
+                                    <div className="p-2.5 px-4 bg-purple-50/90 dark:bg-purple-950/40 border-b border-purple-100 dark:border-purple-900/40 flex items-center justify-between">
+                                       <div className="flex items-center gap-2.5">
+                                          <span className="w-5 h-5 rounded-full bg-purple-600 text-white text-[10px] font-black flex items-center justify-center">
+                                             {startIndex + gIdx + 1}
+                                          </span>
+                                          <span className="font-mono font-bold text-xs sm:text-sm text-purple-950 dark:text-purple-100">
+                                             Resi Normal: <b className="text-purple-700 dark:text-purple-300 font-extrabold">{group.normalizedKey}</b>
+                                          </span>
+                                       </div>
+                                       <span className="text-[11px] font-bold text-purple-600 dark:text-purple-400 bg-purple-100 dark:bg-purple-900/60 px-2.5 py-0.5 rounded-md">
+                                          {group.items.length} Data Record di DB
+                                       </span>
+                                    </div>
+
+                                    {/* Items Table */}
+                                    <div className="overflow-x-auto">
+                                       <table className="w-full text-left border-collapse text-xs">
+                                          <thead>
+                                             <tr className="bg-gray-50/60 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-800 text-gray-500 dark:text-gray-400 text-[11px] font-bold">
+                                                <th className="p-2.5 pl-4 w-12 text-center">Pilih</th>
+                                                <th className="p-2.5">Barcode di Database</th>
+                                                <th className="p-2.5 w-44">Waktu Scan</th>
+                                                <th className="p-2.5 w-36">ID Record</th>
+                                                <th className="p-2.5 text-right pr-4 w-44">Status</th>
+                                             </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                                             {group.items.map((item) => {
+                                                const isSelected = selectedLogistikDupeDeleteIds.includes(item.id);
+                                                return (
+                                                   <tr key={item.id} className={`transition-colors ${item.isKeep ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : isSelected ? 'bg-rose-50/50 dark:bg-rose-950/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
+                                                      <td className="p-2.5 pl-4 text-center">
+                                                         {!item.isKeep && (
+                                                            <input
+                                                               type="checkbox"
+                                                               checked={isSelected}
+                                                               onChange={(e) => {
+                                                                  if (e.target.checked) {
+                                                                     setSelectedLogistikDupeDeleteIds(prev => [...prev, item.id]);
+                                                                  } else {
+                                                                     setSelectedLogistikDupeDeleteIds(prev => prev.filter(id => id !== item.id));
+                                                                  }
+                                                               }}
+                                                               className="w-4 h-4 text-rose-600 rounded focus:ring-rose-500 cursor-pointer"
+                                                            />
+                                                         )}
+                                                      </td>
+                                                      <td className="p-2.5 font-mono font-bold text-xs sm:text-sm text-gray-900 dark:text-white">
+                                                         {item.barcode}
+                                                      </td>
+                                                      <td className="p-2.5 text-gray-600 dark:text-gray-300 font-mono text-[11px]">
+                                                         {item.timestamp ? new Date(item.timestamp).toLocaleString('id-ID') : '-'}
+                                                      </td>
+                                                      <td className="p-2.5 text-gray-400 font-mono text-[10px]">
+                                                         {item.id.slice(0, 14)}...
+                                                      </td>
+                                                      <td className="p-2.5 text-right pr-4">
+                                                         {item.isKeep ? (
+                                                            <span className="px-2.5 py-1 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 rounded-lg font-bold text-[10px] inline-flex items-center gap-1">
+                                                               <Check size={12} /> DISIMPAN (MASTER)
+                                                            </span>
+                                                         ) : (
+                                                            <span className={`px-2.5 py-1 rounded-lg font-bold text-[10px] inline-flex items-center gap-1 ${
+                                                               isSelected
+                                                                  ? 'bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-300'
+                                                                  : 'bg-gray-100 dark:bg-gray-700 text-gray-500'
+                                                            }`}>
+                                                               <Trash2 size={12} /> {isSelected ? 'AKAN DIHAPUS' : 'DILEWATI'}
+                                                            </span>
+                                                         )}
+                                                      </td>
+                                                   </tr>
+                                                );
+                                             })}
+                                          </tbody>
+                                       </table>
+                                    </div>
+                                 </div>
+                              ))}
+
+                              {/* Pagination Footer */}
+                              {totalFiltered > 0 && (
+                                 <div className="shrink-0 p-3 bg-gray-50 dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700 rounded-xl flex flex-wrap justify-between items-center gap-2 text-xs">
+                                    <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                                       <span>Menampilkan <b>{startIndex + 1} - {Math.min(startIndex + logistikDupeRowsPerPage, totalFiltered)}</b> dari <b>{totalFiltered.toLocaleString()}</b> grup resi</span>
+                                       <select 
+                                          value={logistikDupeRowsPerPage} 
+                                          onChange={(e) => { setLogistikDupeRowsPerPage(Number(e.target.value)); setLogistikDupePage(1); }}
+                                          className="ml-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-xs font-bold"
+                                       >
+                                          <option value={25}>25 grup / hal</option>
+                                          <option value={50}>50 grup / hal</option>
+                                          <option value={100}>100 grup / hal</option>
+                                          <option value={200}>200 grup / hal</option>
+                                       </select>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                       <button 
+                                          disabled={currentPage <= 1}
+                                          onClick={() => setLogistikDupePage(p => Math.max(1, p - 1))}
+                                          className="px-3 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded font-bold disabled:opacity-40 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                                       >
+                                          &larr; Prev
+                                       </button>
+                                       <span className="px-2 font-bold text-gray-700 dark:text-gray-300">Hal {currentPage} / {totalPages}</span>
+                                       <button 
+                                          disabled={currentPage >= totalPages}
+                                          onClick={() => setLogistikDupePage(p => Math.min(totalPages, p + 1))}
+                                          className="px-3 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded font-bold disabled:opacity-40 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                                       >
+                                          Next &rarr;
+                                       </button>
+                                    </div>
+                                 </div>
+                              )}
+                           </>
+                        );
+                     })()}
+                  </div>
+
+                  {/* Modal Footer Actions */}
+                  <div className="flex items-center justify-between gap-3 pt-3 border-t border-gray-100 dark:border-gray-700 shrink-0">
+                     <button
+                        disabled={isDeletingLogistikDupes}
+                        onClick={() => setIsLogistikDupeModalOpen(false)}
+                        className="px-5 py-2.5 text-xs sm:text-sm font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
+                     >
+                        Batal
+                     </button>
+                     <button
+                        onClick={handleExecuteDeleteLogistikDuplicates}
+                        disabled={isDeletingLogistikDupes || selectedLogistikDupeDeleteIds.length === 0}
+                        className="px-6 sm:px-8 py-2.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-700 hover:to-red-700 text-white rounded-xl font-bold text-xs sm:text-sm shadow-md shadow-rose-200 dark:shadow-none hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer"
+                     >
+                        {isDeletingLogistikDupes ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
+                        <span>Hapus ({selectedLogistikDupeDeleteIds.length.toLocaleString()}) Data Duplikat</span>
+                     </button>
+                  </div>
+               </div>
+            </div>
+         )}
+
          {/* DEVMODE LOGISTIK CLEANER MODAL */}
          {devModeModalConfig.isOpen && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center px-4">
@@ -24699,22 +25212,55 @@ LXAD-1234567890`}
                         className="w-full h-64 p-4 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-900 focus:ring-2 focus:ring-orange-500 focus:border-orange-500 resize-none font-mono text-sm shadow-inner disabled:opacity-70 dark:text-gray-200 transition-shadow"
                      ></textarea>
                   </div>
-                  <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100 dark:border-gray-700">
-                     <button
-                        disabled={isManualCleaningDevModeLogistik}
-                        onClick={() => setDevModeModalConfig({ isOpen: false, type: 'NORMAL' })}
-                        className="px-6 py-2.5 text-sm font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors disabled:opacity-50"
-                     >
-                        Batal
-                     </button>
-                     <button
-                        onClick={handleProcessDevModeModal}
-                        disabled={isManualCleaningDevModeLogistik || !devModeModalText.trim()}
-                        className={`px-8 py-2.5 bg-gradient-to-r ${devModeModalConfig.type === 'EXCEL' ? 'from-yellow-600 to-amber-600 hover:from-yellow-700 hover:to-amber-700' : devModeModalConfig.type === 'REMOVE_00' ? 'from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700' : 'from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700'} text-white rounded-xl font-bold text-sm shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2`}
-                     >
-                        {isManualCleaningDevModeLogistik ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                        Proses Resi
-                     </button>
+                  <div className="flex items-center justify-between gap-3 pt-4 border-t border-gray-100 dark:border-gray-700">
+                     <div>
+                        {devModeModalConfig.type !== 'REMOVE_00' && (
+                           <button
+                              type="button"
+                              disabled={isManualCleaningDevModeLogistik || !devModeModalText.trim()}
+                              onClick={() => {
+                                 const rawLines = devModeModalText.split(/[\n\r,;]+/).map(b => b.trim()).filter(Boolean);
+                                 if (rawLines.length === 0) {
+                                    alert("Masukkan daftar resi terlebih dahulu untuk dipindai duplikatnya.");
+                                    return;
+                                 }
+                                 let extractedBarcodes = rawLines;
+                                 if (devModeModalConfig.type === 'EXCEL') {
+                                    extractedBarcodes = rawLines.map(line => {
+                                       const parts = line.split(/[\t]+/).map(p => p.trim()).filter(Boolean);
+                                       return parts.length >= 2 ? parts[1] : line;
+                                    });
+                                 }
+                                 const cleaned = extractedBarcodes.map(b => sanitizeAndPadBarcode(b)).filter(Boolean);
+                                 setDevModeModalConfig({ isOpen: false, type: 'NORMAL' });
+                                 handleScanLogistikDuplicates(cleaned);
+                              }}
+                              className="px-4 py-2 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 dark:hover:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded-xl font-bold text-xs border border-purple-200 dark:border-purple-800/60 transition-colors disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                              title="Pindai apakah resi yang Anda paste memiliki data kembar/duplikat di database"
+                           >
+                              <Copy size={14} />
+                              <span>🔍 Cek &amp; Hapus Duplikat</span>
+                           </button>
+                        )}
+                     </div>
+
+                     <div className="flex items-center gap-3">
+                        <button
+                           disabled={isManualCleaningDevModeLogistik}
+                           onClick={() => setDevModeModalConfig({ isOpen: false, type: 'NORMAL' })}
+                           className="px-6 py-2.5 text-sm font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
+                        >
+                           Batal
+                        </button>
+                        <button
+                           onClick={handleProcessDevModeModal}
+                           disabled={isManualCleaningDevModeLogistik || !devModeModalText.trim()}
+                           className={`px-8 py-2.5 bg-gradient-to-r ${devModeModalConfig.type === 'EXCEL' ? 'from-yellow-600 to-amber-600 hover:from-yellow-700 hover:to-amber-700' : devModeModalConfig.type === 'REMOVE_00' ? 'from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700' : 'from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700'} text-white rounded-xl font-bold text-sm shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer`}
+                        >
+                           {isManualCleaningDevModeLogistik ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                           Proses Resi
+                        </button>
+                     </div>
                   </div>
                </div>
             </div>
