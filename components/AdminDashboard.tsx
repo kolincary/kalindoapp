@@ -2252,6 +2252,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
    };
 
+   // In-memory cache for full day Firestore scans: dateStr -> items[]
+   const firestoreDayDataCache = useRef<Map<string, any[]>>(new Map()).current;
+
    // 4. Modal States
    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
    const [isQuickAddModalOpen, setIsQuickAddModalOpen] = useState(false);
@@ -2286,6 +2289,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
    // 6. Packing/Sortir View State
    const [packingData, setPackingData] = useState<any[]>([]);
+   const [activeDataSource, setActiveDataSource] = useState<'SUPABASE' | 'FIRESTORE'>('SUPABASE');
+   const [forcedDataSource, setForcedDataSource] = useState<'AUTO' | 'SUPABASE' | 'FIRESTORE'>('AUTO');
+   const [firestoreLoadingText, setFirestoreLoadingText] = useState<string>('');
    const [packingStaffList, setPackingStaffList] = useState<string[]>([]);
    const [packing2OverallTotal, setPacking2OverallTotal] = useState<number>(0);
    const [isHalfCountMode, setIsHalfCountMode] = useState(false);
@@ -5970,7 +5976,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
    };
 
-   const fetchPackingData = async (targetPage = page) => {
+   const fetchPackingData = async (targetPage = page, forceSource?: 'AUTO' | 'SUPABASE' | 'FIRESTORE') => {
       // Permission guards for different views
       if (activeView === 'PACKING_DATA' && !hasPermission('view_packing')) return;
       if (activeView === 'PACKING_2_DATA' && !hasPermission('view_packing_2')) return;
@@ -6018,22 +6024,220 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             else leaderBarcodes = ['NO_MATCH_XYZ_123']; // Prevent empty array from fetching all
          }
 
-         const query = buildPackingQuery(shiftToNamesMap, 'exact', { leaderBarcodes });
-         const from = (targetPage - 1) * rowsPerPage;
-         const to = from + rowsPerPage - 1;
+         const targetDateStr = effectiveDate;
+         const startMs = new Date(`${targetDateStr}T00:00:00`).getTime();
+         const endMs = new Date(`${targetDateStr}T23:59:59.999`).getTime();
 
-         const { data, error, count } = await query.range(from, to);
-         if (error) throw error;
+         const effectiveSource = forceSource || forcedDataSource;
 
-         let enrichedData = (data || []).map((item: any) => {
+         const supportedFallbackViews = [
+            'PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 
+            'CHECKER_DATA', 'LOGISTIK_DATA', 'OJOL_DATA', 'GUDANG_PENDING', 
+            'GUDANG_READY', 'GUDANG_REPORT', 'GUDANG_BUNDLING'
+         ];
+
+         // 1. Fetch Supabase Data
+         let sbData: any[] = [];
+         let sbCount = 0;
+         if (effectiveSource !== 'FIRESTORE') {
+            try {
+               const query = buildPackingQuery(shiftToNamesMap, 'exact', { leaderBarcodes });
+               const from = (targetPage - 1) * rowsPerPage;
+               const to = from + rowsPerPage - 1;
+               const res = await query.range(from, to);
+               if (!res.error) {
+                  sbData = res.data || [];
+                  sbCount = res.count || 0;
+               }
+            } catch (sbErr) {
+               console.warn("Supabase query warning:", sbErr);
+            }
+         }
+
+         // 2. Decide whether to use Firestore
+         // Firestore is used if:
+         // a) User forced Firestore source ('FIRESTORE')
+         // b) activeView is in supportedFallbackViews AND (Supabase count is 0 or low < 500 or cache exists)
+         const isSupportedView = supportedFallbackViews.includes(activeView);
+         const shouldCheckFirestore = isSupportedView && (
+            effectiveSource === 'FIRESTORE' ||
+            sbCount === 0 ||
+            sbCount < 500 ||
+            firestoreDayDataCache.has(targetDateStr)
+         );
+
+         if (shouldCheckFirestore) {
+            try {
+               let targetRole = 'PACKING';
+               if (activeView === 'PACKING_2_DATA') targetRole = 'PACKING_2';
+               else if (activeView === 'SORTIR_DATA') targetRole = 'SORTIR';
+               else if (activeView === 'PICKER_DATA') targetRole = 'PICKER';
+               else if (activeView === 'CHECKER_DATA') targetRole = 'CHECKER';
+               else if (activeView === 'LOGISTIK_DATA') targetRole = 'LOGISTIK';
+               else if (activeView === 'OJOL_DATA') targetRole = 'OJOL';
+               else if (activeView.startsWith('GUDANG')) targetRole = 'GUDANG';
+
+               let dayDocs: any[] = [];
+               if (firestoreDayDataCache.has(targetDateStr)) {
+                  dayDocs = firestoreDayDataCache.get(targetDateStr)!;
+               } else {
+                  setFirestoreLoadingText('Mengambil data dari Firestore...');
+                  const activeFsQuery = fsQuery(
+                     collection(db, 'scanned_items'),
+                     where('timestamp', '>=', startMs),
+                     where('timestamp', '<=', endMs)
+                  );
+                  const fsSnap = await getDocs(activeFsQuery);
+                  dayDocs = fsSnap.docs.map(docSnap => ({
+                     id: docSnap.id,
+                     ...(docSnap.data() as Record<string, any>)
+                  }));
+                  firestoreDayDataCache.set(targetDateStr, dayDocs);
+                  setFirestoreLoadingText('');
+               }
+
+               let fsRoleItems: any[] = [];
+               dayDocs.forEach(d => {
+                  const r = (d.role || '').toUpperCase();
+                  let isMatch = false;
+                  if (targetRole === 'PACKING_2') {
+                     isMatch = (r === 'PACKING_2' || r === 'PACKING_2_DATA');
+                  } else if (targetRole === 'PACKING') {
+                     isMatch = (r === 'PACKING' || r === 'PACKING_DATA' || (r.includes('PACK') && r !== 'PACKING_2'));
+                  } else if (targetRole === 'SORTIR') {
+                     isMatch = (r === 'SORTIR' || r === 'SORTIR_DATA');
+                  } else if (targetRole === 'PICKER') {
+                     isMatch = (r === 'PICKER' || r === 'PICKER_DATA');
+                  } else if (targetRole === 'CHECKER') {
+                     isMatch = (r === 'CHECKER' || r === 'CHECKER_DATA');
+                  } else if (targetRole === 'LOGISTIK') {
+                     isMatch = (r === 'LOGISTIK' || r === 'LOGISTIK_DATA');
+                  } else if (targetRole === 'OJOL') {
+                     isMatch = (r === 'OJOL' || r === 'OJOL_DATA');
+                  } else if (targetRole === 'GUDANG') {
+                     isMatch = (r === 'GUDANG' || r.includes('GUDANG'));
+                  }
+
+                  if (isMatch) {
+                     let rawBarcode = (d.barcode || '').toString().trim();
+                     if (rawBarcode && targetRole !== 'LOGISTIK' && rawBarcode.startsWith('0026')) {
+                        rawBarcode = rawBarcode.slice(2);
+                     }
+                     if (/^LXAD[^-]/i.test(rawBarcode)) rawBarcode = 'LXAD-' + rawBarcode.substring(4);
+                     if (/^JNAP[^-]/i.test(rawBarcode)) rawBarcode = 'JNAP-' + rawBarcode.substring(4);
+                     if (/^JNEB[^-]/i.test(rawBarcode)) rawBarcode = 'JNEB-' + rawBarcode.substring(4);
+
+                     const empName = d.employee_name || d.admin_name || d.leader_name || '-';
+                     fsRoleItems.push({
+                        ...d,
+                        barcode: rawBarcode,
+                        employee_name: empName,
+                        shift: shiftMap.get(empName) || 'Unknown',
+                        is_from_firestore: true
+                     });
+                  }
+               });
+
+               // Gunakan data Firestore jika Supabase 0 data ATAU data Firestore lebih lengkap
+               if (effectiveSource === 'FIRESTORE' || (fsRoleItems.length > sbCount && fsRoleItems.length > 0) || (sbCount === 0 && fsRoleItems.length > 0)) {
+                  let filteredFs = fsRoleItems;
+                  if (filterPackingStaff && filterPackingStaff !== 'ALL') {
+                     filteredFs = filteredFs.filter(item => item.employee_name === filterPackingStaff || item.admin_name === filterPackingStaff);
+                  }
+                  if (filterPackingShift && filterPackingShift !== 'ALL') {
+                     const validNames = new Set(shiftToNamesMap[filterPackingShift] || []);
+                     filteredFs = filteredFs.filter(item => validNames.has(item.employee_name));
+                  }
+                  if (packingSearch) {
+                     const term = packingSearch.toLowerCase();
+                     filteredFs = filteredFs.filter(item =>
+                        (item.barcode && item.barcode.toLowerCase().includes(term)) ||
+                        (item.employee_name && item.employee_name.toLowerCase().includes(term)) ||
+                        (item.admin_name && item.admin_name.toLowerCase().includes(term))
+                     );
+                  }
+
+                  filteredFs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+                  const totalFsCount = filteredFs.length;
+                  const from = (targetPage - 1) * rowsPerPage;
+                  const to = from + rowsPerPage - 1;
+                  const pageItems = filteredFs.slice(from, to + 1);
+
+                  setPackingData(pageItems);
+                  setTotalRows(totalFsCount);
+                  setActiveDataSource('FIRESTORE');
+                  setIsLoadingPacking(false);
+                  return;
+               }
+            } catch (fsErr) {
+               console.error("Error fetching fallback data from Firestore:", fsErr);
+            }
+         }
+
+         // FALLBACK / SINKRONISASI FIRESTORE KHUSUS MENU LEADER_PENDING_ADMIN
+         if (activeView === 'LEADER_PENDING_ADMIN') {
+            try {
+               const activeFsQuery = fsQuery(
+                  collection(db, 'leader_pending_scans'),
+                  where('timestamp', '>=', startMs),
+                  where('timestamp', '<=', endMs)
+               );
+
+               const fsSnap = await getDocs(activeFsQuery);
+               let fsItems: any[] = [];
+               fsSnap.docs.forEach(docSnap => {
+                  const d = docSnap.data() as Record<string, any>;
+                  fsItems.push({
+                     id: docSnap.id,
+                     ...d,
+                     barcode: (d.barcode || '').toString().trim(),
+                     employee_name: d.leader_name || d.leader_profile || 'LEADER',
+                     shift: shiftMap.get(d.leader_name) || 'Unknown',
+                     role: 'LEADER_PENDING',
+                     is_from_firestore: true
+                  });
+               });
+
+               if ((sbCount === 0 || effectiveSource === 'FIRESTORE') && fsItems.length > 0) {
+                  if (filterPackingStaff && filterPackingStaff !== 'ALL') {
+                     fsItems = fsItems.filter(item => item.leader_name === filterPackingStaff || item.leader_profile === filterPackingStaff || item.employee_name === filterPackingStaff);
+                  }
+                  if (packingSearch) {
+                     const term = packingSearch.toLowerCase();
+                     fsItems = fsItems.filter(item =>
+                        (item.barcode && item.barcode.toLowerCase().includes(term)) ||
+                        (item.leader_name && item.leader_name.toLowerCase().includes(term)) ||
+                        (item.leader_profile && item.leader_profile.toLowerCase().includes(term))
+                     );
+                  }
+
+                  fsItems.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+                  const totalFsCount = fsItems.length;
+                  const from = (targetPage - 1) * rowsPerPage;
+                  const to = from + rowsPerPage - 1;
+                  const pageItems = fsItems.slice(from, to + 1);
+
+                  setPackingData(pageItems);
+                  setTotalRows(totalFsCount);
+                  setActiveDataSource('FIRESTORE');
+                  setIsLoadingPacking(false);
+                  return;
+               }
+            } catch (fsErr) {
+               console.error("Error fetching fallback leader pending data from Firestore:", fsErr);
+            }
+         }
+
+         // Default to Supabase data
+         let enrichedData = (sbData || []).map((item: any) => {
             let rawBarcode = (item.barcode || '').toString().trim();
             const isLogistik = activeView === 'LOGISTIK_DATA' || item.role === 'LOGISTIK';
 
             if (rawBarcode && !isLogistik && rawBarcode.startsWith('0026')) {
                rawBarcode = rawBarcode.slice(2);
             }
-
-            // Format LXAD, JNAP & JNEB barcodes without hyphen: LXADxxxxxxxx -> LXAD-xxxxxxxxx, JNAPxxxxxxxx -> JNAP-xxxxxxxxx, JNEBxxxxxxxx -> JNEB-xxxxxxxxx across all roles
             if (/^LXAD[^-]/i.test(rawBarcode)) {
                rawBarcode = 'LXAD-' + rawBarcode.substring(4);
             }
@@ -6077,124 +6281,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             };
          });
 
-         // FALLBACK / SINKRONISASI FIRESTORE KHUSUS MENU PACKING_DATA & PACKING_2_DATA JIKA SUPABASE KOSONG ATAU DATA FIRESTORE LEBIH LENGKAP
-         if (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') {
-            try {
-               const targetRoleName = 'PACKING';
-               const targetDateStr = canManageDate ? filterDate : getTodayString();
-               const startMs = new Date(`${targetDateStr}T00:00:00`).getTime();
-               const endMs = new Date(`${targetDateStr}T23:59:59.999`).getTime();
-
-               // Kueri Firestore presisi tanggal yang dipilih
-               const activeFsQuery = fsQuery(
-                  collection(db, 'scanned_items'),
-                  where('timestamp', '>=', startMs),
-                  where('timestamp', '<=', endMs)
-               );
-
-               const fsSnap = await getDocs(activeFsQuery);
-
-               let fsItems: any[] = [];
-               fsSnap.docs.forEach(docSnap => {
-                  const d = docSnap.data() as Record<string, any>;
-                  const r = (d.role || '').toUpperCase();
-                  // Role matching for Packing & Packing 2
-                  if (targetRoleName === 'PACKING_2' ? (r === 'PACKING_2' || r === 'PACKING_2_DATA') : (r === 'PACKING' || r === 'PACKING_DATA' || r.includes('PACK'))) {
-                     fsItems.push({
-                        id: docSnap.id,
-                        ...d,
-                        employee_name: d.employee_name || d.admin_name || '-',
-                        shift: shiftMap.get(d.employee_name || d.admin_name) || 'Unknown',
-                        is_from_firestore: true
-                     });
-                  }
-               });
-
-               // Gunakan data Firestore hanya jika Supabase 0 data (kosong) dan Firestore memiliki data
-               if ((count || 0) === 0 && fsItems.length > 0) {
-                  if (filterPackingStaff && filterPackingStaff !== 'ALL') {
-                     fsItems = fsItems.filter(item => item.employee_name === filterPackingStaff || item.admin_name === filterPackingStaff);
-                  }
-                  if (packingSearch) {
-                     const term = packingSearch.toLowerCase();
-                     fsItems = fsItems.filter(item =>
-                        (item.barcode && item.barcode.toLowerCase().includes(term)) ||
-                        (item.employee_name && item.employee_name.toLowerCase().includes(term)) ||
-                        (item.admin_name && item.admin_name.toLowerCase().includes(term))
-                     );
-                  }
-
-                  fsItems.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-
-                  const totalFsCount = fsItems.length;
-                  const pageItems = fsItems.slice(from, to + 1);
-
-                  setPackingData(pageItems);
-                  setTotalRows(totalFsCount);
-                  setIsLoadingPacking(false);
-                  return;
-               }
-            } catch (fsErr) {
-               console.error("Error fetching fallback packing data from Firestore:", fsErr);
-            }
-         }
-
-         // FALLBACK / SINKRONISASI FIRESTORE KHUSUS MENU LEADER_PENDING_ADMIN
-         if (activeView === 'LEADER_PENDING_ADMIN') {
-            try {
-               const targetDateStr = canManageDate ? filterDate : getTodayString();
-               const startMs = new Date(`${targetDateStr}T00:00:00`).getTime();
-               const endMs = new Date(`${targetDateStr}T23:59:59.999`).getTime();
-
-               const activeFsQuery = fsQuery(
-                  collection(db, 'leader_pending_scans'),
-                  where('timestamp', '>=', startMs),
-                  where('timestamp', '<=', endMs)
-               );
-
-               const fsSnap = await getDocs(activeFsQuery);
-               let fsItems: any[] = [];
-               fsSnap.docs.forEach(docSnap => {
-                  const d = docSnap.data() as Record<string, any>;
-                  fsItems.push({
-                     id: docSnap.id,
-                     ...d,
-                     barcode: (d.barcode || '').toString().trim(),
-                     employee_name: d.leader_name || d.leader_profile || 'LEADER',
-                     shift: shiftMap.get(d.leader_name) || 'Unknown',
-                     role: 'LEADER_PENDING',
-                     is_from_firestore: true
-                  });
-               });
-
-               if ((count || 0) === 0 && fsItems.length > 0) {
-                  if (filterPackingStaff && filterPackingStaff !== 'ALL') {
-                     fsItems = fsItems.filter(item => item.leader_name === filterPackingStaff || item.leader_profile === filterPackingStaff || item.employee_name === filterPackingStaff);
-                  }
-                  if (packingSearch) {
-                     const term = packingSearch.toLowerCase();
-                     fsItems = fsItems.filter(item =>
-                        (item.barcode && item.barcode.toLowerCase().includes(term)) ||
-                        (item.leader_name && item.leader_name.toLowerCase().includes(term)) ||
-                        (item.leader_profile && item.leader_profile.toLowerCase().includes(term))
-                     );
-                  }
-
-                  fsItems.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-
-                  const totalFsCount = fsItems.length;
-                  const pageItems = fsItems.slice(from, to + 1);
-
-                  setPackingData(pageItems);
-                  setTotalRows(totalFsCount);
-                  setIsLoadingPacking(false);
-                  return;
-               }
-            } catch (fsErr) {
-               console.error("Error fetching fallback leader pending data from Firestore:", fsErr);
-            }
-         }
-
          // FETCH LEADER PROFILE IF PICKER
          if ((activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') && enrichedData.length > 0) {
             const barcodes = enrichedData.map((d: any) => d.barcode);
@@ -6215,7 +6301,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          }
 
          setPackingData(enrichedData);
-         setTotalRows(count || 0);
+         setTotalRows(sbCount || 0);
+         setActiveDataSource('SUPABASE');
       } catch (err: any) {
          if (!err.message?.includes("Failed to fetch")) console.error("Fetch packing data error:", err.message);
       } finally {
@@ -10054,6 +10141,89 @@ Data yang dihapus tidak dapat dipulihkan.`)) {
                }
             });
          }
+
+         const targetDateStr = canManageDate ? filterDate : getTodayString();
+
+         // Direct Export from Firestore if active
+         if (activeDataSource === 'FIRESTORE' && firestoreDayDataCache.has(targetDateStr)) {
+            const allDayDocs = firestoreDayDataCache.get(targetDateStr) || [];
+            let targetRole = 'PACKING';
+            if (activeView === 'PACKING_2_DATA') targetRole = 'PACKING_2';
+            else if (activeView === 'SORTIR_DATA') targetRole = 'SORTIR';
+            else if (activeView === 'PICKER_DATA') targetRole = 'PICKER';
+            else if (activeView === 'CHECKER_DATA') targetRole = 'CHECKER';
+            else if (activeView === 'LOGISTIK_DATA') targetRole = 'LOGISTIK';
+            else if (activeView === 'OJOL_DATA') targetRole = 'OJOL';
+            else if (activeView.startsWith('GUDANG')) targetRole = 'GUDANG';
+
+            let fsRoleItems: any[] = [];
+            allDayDocs.forEach(d => {
+               const r = (d.role || '').toUpperCase();
+               let isMatch = false;
+               if (targetRole === 'PACKING_2') isMatch = (r === 'PACKING_2' || r === 'PACKING_2_DATA');
+               else if (targetRole === 'PACKING') isMatch = (r === 'PACKING' || r === 'PACKING_DATA' || (r.includes('PACK') && r !== 'PACKING_2'));
+               else if (targetRole === 'SORTIR') isMatch = (r === 'SORTIR' || r === 'SORTIR_DATA');
+               else if (targetRole === 'PICKER') isMatch = (r === 'PICKER' || r === 'PICKER_DATA');
+               else if (targetRole === 'CHECKER') isMatch = (r === 'CHECKER' || r === 'CHECKER_DATA');
+               else if (targetRole === 'LOGISTIK') isMatch = (r === 'LOGISTIK' || r === 'LOGISTIK_DATA');
+               else if (targetRole === 'OJOL') isMatch = (r === 'OJOL' || r === 'OJOL_DATA');
+               else if (targetRole === 'GUDANG') isMatch = (r === 'GUDANG' || r.includes('GUDANG'));
+
+               if (isMatch) {
+                  let rawBarcode = (d.barcode || '').toString().trim();
+                  if (rawBarcode && targetRole !== 'LOGISTIK' && rawBarcode.startsWith('0026')) rawBarcode = rawBarcode.slice(2);
+                  if (/^LXAD[^-]/i.test(rawBarcode)) rawBarcode = 'LXAD-' + rawBarcode.substring(4);
+                  if (/^JNAP[^-]/i.test(rawBarcode)) rawBarcode = 'JNAP-' + rawBarcode.substring(4);
+                  if (/^JNEB[^-]/i.test(rawBarcode)) rawBarcode = 'JNEB-' + rawBarcode.substring(4);
+
+                  const empName = d.employee_name || d.admin_name || d.leader_name || '-';
+                  fsRoleItems.push({
+                     ...d,
+                     barcode: rawBarcode,
+                     employee_name: empName,
+                     shift: shiftMap.get(empName) || 'Unknown'
+                  });
+               }
+            });
+
+            if (filterPackingStaff && filterPackingStaff !== 'ALL') {
+               fsRoleItems = fsRoleItems.filter(item => item.employee_name === filterPackingStaff || item.admin_name === filterPackingStaff);
+            }
+            if (filterPackingShift && filterPackingShift !== 'ALL') {
+               const validNames = new Set(shiftToNamesMap[filterPackingShift] || []);
+               fsRoleItems = fsRoleItems.filter(item => validNames.has(item.employee_name));
+            }
+            if (packingSearch) {
+               const term = packingSearch.toLowerCase();
+               fsRoleItems = fsRoleItems.filter(item =>
+                  (item.barcode && item.barcode.toLowerCase().includes(term)) ||
+                  (item.employee_name && item.employee_name.toLowerCase().includes(term)) ||
+                  (item.admin_name && item.admin_name.toLowerCase().includes(term))
+               );
+            }
+
+            fsRoleItems.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+            const headers = "No,Timestamp,ID Pesanan,Barcode,File Excel,Employee,Shift,Role,Status,Destination,Description";
+            const rows = fsRoleItems.map((item: any, idx: number) => {
+               const dateStr = item.timestamp ? new Date(item.timestamp).toLocaleString('id-ID') : '-';
+               return `${idx + 1},"${dateStr}","=""${item.order_id || ''}""","=""${item.barcode}""","${item.excel_filename || ''}","${item.employee_name}","${item.shift}","${item.role || targetRole}","${item.status || ''}","${item.destination || ''}","${item.description || ''}"`;
+            }).join('\n');
+
+            const blob = new Blob([headers + "\n" + rows], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `${label}_${filterDate}_FIRESTORE.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            setSuccessToast(`Export ${label} (Firestore) Berhasil! Total ${fsRoleItems.length} baris.`);
+            setIsExportingPacking(false);
+            return;
+         }
+
          const countQuery = buildPackingQuery(shiftToNamesMap, 'exact');
          const { count, error: countError } = await countQuery.range(0, 1);
          if (countError) throw countError;
@@ -16136,6 +16306,44 @@ if (filterPackingShift !== 'ALL') {
                                                 Halaman <strong className="font-bold text-gray-800 dark:text-gray-200">{page}</strong> dari <strong className="font-bold text-gray-800 dark:text-gray-200">{Math.ceil(totalRows / rowsPerPage) || 1}</strong>
                                                 <span className="mx-2 text-gray-300 dark:text-gray-700">•</span>
                                                 Total <strong className="font-bold text-gray-800 dark:text-gray-200">{totalRows.toLocaleString('id-ID')}</strong> data
+                                                {firestoreLoadingText && (
+                                                   <span className="ml-2 text-xs font-semibold text-amber-600 dark:text-amber-400 animate-pulse flex items-center gap-1">
+                                                      <Loader2 size={12} className="animate-spin" /> {firestoreLoadingText}
+                                                   </span>
+                                                )}
+                                                {activeDataSource === 'FIRESTORE' ? (
+                                                   <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 shadow-2xs">
+                                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                                      Firestore
+                                                      <button
+                                                         type="button"
+                                                         onClick={() => {
+                                                            setForcedDataSource('SUPABASE');
+                                                            fetchPackingData(1, 'SUPABASE');
+                                                         }}
+                                                         className="ml-1 text-[10px] font-normal underline hover:text-emerald-950 dark:hover:text-white cursor-pointer"
+                                                         title="Klik untuk paksa beralih ke sumber Supabase"
+                                                      >
+                                                         (Ke Supabase)
+                                                      </button>
+                                                   </span>
+                                                ) : (
+                                                   <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-300 dark:border-blue-800 shadow-2xs">
+                                                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                                                      Supabase
+                                                      <button
+                                                         type="button"
+                                                         onClick={() => {
+                                                            setForcedDataSource('FIRESTORE');
+                                                            fetchPackingData(1, 'FIRESTORE');
+                                                         }}
+                                                         className="ml-1 text-[10px] font-normal underline hover:text-blue-950 dark:hover:text-white cursor-pointer"
+                                                         title="Klik untuk paksa beralih ke sumber Firestore"
+                                                      >
+                                                         (Ke Firestore)
+                                                      </button>
+                                                   </span>
+                                                )}
                                              </span>
                                              <div className="flex items-center gap-1">
                                                 <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-700/80 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 disabled:opacity-40 disabled:cursor-not-allowed text-gray-600 dark:text-gray-300 transition-colors shadow-2xs" title="Halaman Sebelumnya">
