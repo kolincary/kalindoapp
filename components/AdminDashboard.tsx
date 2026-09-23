@@ -11700,7 +11700,26 @@ if (filterPackingShift !== 'ALL') {
                                     <div className={`col-span-12 sm:col-span-12 ${activeView === 'SCAN_ALL' ? 'md:col-span-6 lg:col-span-6' : (activeView.startsWith('GUDANG_') ? 'md:col-span-9 lg:col-span-9' : 'md:col-span-6 lg:col-span-6')} relative h-10`}>
                                        <SearchInput
                                           value={activeView === 'OJOL_DATA' ? ojolSearch : packingSearch}
-                                          onChange={activeView === 'OJOL_DATA' ? setOjolSearch : setPackingSearch}
+                                          onChange={(val) => {
+                                             if (activeView === 'OJOL_DATA') {
+                                                setOjolSearch(val);
+                                             } else {
+                                                if (val.toLowerCase().includes('devmodenew')) {
+                                                   const isCurrentlyOn = localStorage.getItem('isDevModeNew') === 'true' || showSecretMenu;
+                                                   const newState = !isCurrentlyOn;
+                                                   setShowSecretMenu(newState);
+                                                   setShowFsSyncDevMode(newState);
+                                                   setShowFakeReportMenu(newState);
+                                                   localStorage.setItem('showSecretMenu', String(newState));
+                                                   localStorage.setItem('isDevModeNew', String(newState));
+                                                   localStorage.setItem('showFakeReportMenu', String(newState));
+                                                   setSuccessToast(newState ? "⚡ Dev Mode Secret Unlocked! (Fitur Checkbox & Hapus Aktif)" : "Dev Mode Deactivated");
+                                                   setPackingSearch(val.replace(/devmodenew/gi, '').trim());
+                                                } else {
+                                                   setPackingSearch(val);
+                                                }
+                                             }
+                                          }}
                                           placeholder={`Search ${activeView === 'OJOL_DATA' ? 'Ojol' : (activeView === 'SORTIR_DATA' ? 'Sortir' : (activeView === 'LOGISTIK_DATA' ? 'Logistik' : (activeView === 'GUDANG_PENDING' ? 'Pending Scans' : (activeView === 'GUDANG_READY' ? 'Resi Ready' : (activeView === 'GUDANG_REPORT' ? 'Gudang Report' : (activeView === 'GUDANG_BUNDLING' ? 'Bundling' : (activeView === 'SCAN_ALL' ? 'All Data' : ((activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') ? 'Picker' : (activeView === 'LEADER_2_DATA' ? 'Rekap Detail Leader' : (activeView === 'LEADER_PENDING_ADMIN' ? 'Pending Leader' : 'Packing'))))))))))}...`}
                                           className="w-full h-full"
                                        />
@@ -15231,7 +15250,7 @@ if (filterPackingShift !== 'ALL') {
                                           <table className="w-full text-left whitespace-nowrap">
                                              <thead className="bg-gray-50/90 dark:bg-gray-900/90 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
                                                 <tr>
-                                                   {(activeView === 'SCAN_ALL' || activeView === 'LEADER_2_DATA' || (activeView === 'LOGISTIK_DATA' && (showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || packingSearch.toLowerCase().includes('devmodenew'))) || ((activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING') && isDevMode)) && (
+                                                    {(activeView === 'SCAN_ALL' || activeView === 'LEADER_2_DATA' || ((activeView === 'LOGISTIK_DATA' || activeView === 'LEADER_PENDING_ADMIN') && isDevModeNew) || ((activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'GUDANG_BUNDLING') && isDevMode)) && (
                                                       <th className="px-4 py-3.5 w-12 bg-gray-50/90 dark:bg-gray-900/90">
                                                          <button
                                                             onClick={() => {
@@ -15298,6 +15317,37 @@ if (filterPackingShift !== 'ALL') {
                                                                Delete ({selectedGudangIds.length})
                                                             </button>
                                                          )}
+                                                          {isDevModeNew && activeView === 'LEADER_PENDING_ADMIN' && selectedScanIds.length > 0 && (
+                                                             <button
+                                                                onClick={async () => {
+                                                                   if (selectedScanIds.length === 0) return;
+                                                                   if (!window.confirm(`WARNING: Anda akan menghapus ${selectedScanIds.length} data Pending Leader (LT3) secara permanen dari database. Lanjutkan?`)) return;
+                                                                   setIsDeletingGudang(true);
+                                                                   try {
+                                                                      const { error } = await supabase.from('leader_pending_scans').delete().in('id', selectedScanIds);
+                                                                      if (error) throw error;
+                                                                      try { await supabaseNew.from('leader_pending_scans').delete().in('id', selectedScanIds); } catch(e) {}
+                                                                      try {
+                                                                         const { doc: fsDoc, deleteDoc: fsDelDoc } = await import('firebase/firestore');
+                                                                         const { db: fsDb } = await import('../services/firebaseClient');
+                                                                         await Promise.all(selectedScanIds.map(sId => fsDelDoc(fsDoc(fsDb, 'leader_pending_scans', sId)).catch(() => {})));
+                                                                      } catch(e) {}
+                                                                      setSuccessToast(`Berhasil menghapus ${selectedScanIds.length} data Pending Leader (LT3).`);
+                                                                      setSelectedScanIds([]);
+                                                                      fetchPackingData();
+                                                                   } catch (err: any) {
+                                                                      alert("Gagal menghapus data: " + (err.message || err));
+                                                                   } finally {
+                                                                      setIsDeletingGudang(false);
+                                                                   }
+                                                                }}
+                                                                disabled={isDeletingGudang}
+                                                                className="ml-2 px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-2xs cursor-pointer"
+                                                             >
+                                                                {isDeletingGudang ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                                                                Delete ({selectedScanIds.length})
+                                                             </button>
+                                                          )}
                                                       </div>
                                                    </th>
                                                    {activeView === 'GUDANG_REPORT' && (
@@ -15343,7 +15393,7 @@ if (filterPackingShift !== 'ALL') {
                                                 ) : (
                                                    packingData.map((item, index) => (
                                                       <tr key={item.id} className={`transition-colors duration-150 ${(isDevMode ? selectedGudangIds.includes(item.id) : selectedScanIds.includes(item.id)) ? 'bg-blue-50/80 dark:bg-blue-900/30' : 'hover:bg-slate-50 dark:hover:bg-gray-750/50'}`}>
-                                                         {(activeView === 'SCAN_ALL' || activeView === 'LEADER_2_DATA' || (activeView === 'LOGISTIK_DATA' && (showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || packingSearch.toLowerCase().includes('devmodenew'))) || ((activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT') && isDevMode)) && (
+                                                         {(activeView === 'SCAN_ALL' || activeView === 'LEADER_2_DATA' || ((activeView === 'LOGISTIK_DATA' || activeView === 'LEADER_PENDING_ADMIN') && isDevModeNew) || ((activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT') && isDevMode)) && (
                                                             <td className="px-4 py-3.5">
                                                                <button
                                                                   onClick={() => {
@@ -23400,17 +23450,19 @@ LXAD-1234567890`}
             </div>
          )}
 
-         {/* BULK ACTION BAR FOR LOGISTIK_DATA */}
-         {activeView === 'LOGISTIK_DATA' && selectedScanIds.length > 0 && (showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || packingSearch.toLowerCase().includes('devmodenew')) && (
+         {/* BULK ACTION BAR FOR LOGISTIK_DATA & LEADER_PENDING_ADMIN */}
+         {(activeView === 'LOGISTIK_DATA' || activeView === 'LEADER_PENDING_ADMIN') && selectedScanIds.length > 0 && isDevModeNew && (
             <div className="fixed bottom-0 sm:bottom-8 left-0 sm:left-1/2 sm:-translate-x-1/2 w-full sm:w-auto bg-gray-900/95 dark:bg-black/95 backdrop-blur-xl text-white p-4 sm:rounded-[2.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.4)] border-t sm:border border-white/10 z-[60] flex flex-col sm:flex-row items-center gap-4 sm:gap-4 pb-8 sm:pb-4 transition-all animate-in fade-in slide-in-from-bottom-5 duration-300">
                <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start pl-2">
                   <div className="flex items-center gap-4">
-                     <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-red-600 to-rose-400 flex items-center justify-center font-black text-white shadow-lg shadow-red-500/20 ring-4 ring-white/5">
+                     <div className={`w-11 h-11 rounded-full ${activeView === 'LEADER_PENDING_ADMIN' ? 'bg-gradient-to-tr from-amber-500 to-orange-500 shadow-amber-500/20' : 'bg-gradient-to-tr from-red-600 to-rose-400 shadow-red-500/20'} flex items-center justify-center font-black text-white shadow-lg ring-4 ring-white/5`}>
                         {selectedScanIds.length}
                      </div>
                      <div className="flex flex-col">
                         <span className="font-black text-sm uppercase tracking-tighter text-white/90">Selected</span>
-                        <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest leading-none">Records</span>
+                        <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest leading-none">
+                           {activeView === 'LEADER_PENDING_ADMIN' ? 'Pending LT3' : 'Records'}
+                        </span>
                      </div>
                   </div>
                   <button onClick={() => setSelectedScanIds([])} className="sm:hidden p-2 bg-white/10 rounded-full text-white/60">
@@ -23424,23 +23476,25 @@ LXAD-1234567890`}
                   <button
                      onClick={async () => {
                         if (selectedScanIds.length === 0) return;
-                        if (!window.confirm(`WARNING: Anda akan menghapus ${selectedScanIds.length} data Logistik secara permanen dari database. Lanjutkan?`)) return;
+                        const labelView = activeView === 'LEADER_PENDING_ADMIN' ? 'Pending Leader (LT3)' : 'Logistik';
+                        if (!window.confirm(`WARNING: Anda akan menghapus ${selectedScanIds.length} data ${labelView} secara permanen dari database. Lanjutkan?`)) return;
 
                         setIsDeletingGudang(true);
                         try {
                            const targetTable = activeView === 'LEADER_2_DATA' ? 'leader_scan_2' : (activeView === 'LEADER_PENDING_ADMIN' ? 'leader_pending_scans' : 'scanned_items');
-                            const { error } = await supabase.from(targetTable).delete().in('id', selectedScanIds);
-                            if (activeView === 'LEADER_PENDING_ADMIN') {
-                               try { await supabaseNew.from('leader_pending_scans').delete().in('id', selectedScanIds); } catch(e) {}
-                               try {
-                                  const { doc: fsDoc, deleteDoc: fsDelDoc } = await import('firebase/firestore');
-                                  const { db: fsDb } = await import('../services/firebaseClient');
-                                  selectedScanIds.forEach(sId => fsDelDoc(fsDoc(fsDb, 'leader_pending_scans', sId)).catch(() => {}));
-                               } catch(e) {}
-                            }
+                           const { error } = await supabase.from(targetTable).delete().in('id', selectedScanIds);
                            if (error) throw error;
 
-                           setSuccessToast(`Berhasil menghapus ${selectedScanIds.length} data Logistik.`);
+                           if (activeView === 'LEADER_PENDING_ADMIN') {
+                              try { await supabaseNew.from('leader_pending_scans').delete().in('id', selectedScanIds); } catch(e) {}
+                              try {
+                                 const { doc: fsDoc, deleteDoc: fsDelDoc } = await import('firebase/firestore');
+                                 const { db: fsDb } = await import('../services/firebaseClient');
+                                 await Promise.all(selectedScanIds.map(sId => fsDelDoc(fsDoc(fsDb, 'leader_pending_scans', sId)).catch(() => {})));
+                              } catch(e) {}
+                           }
+
+                           setSuccessToast(`Berhasil menghapus ${selectedScanIds.length} data ${labelView}.`);
                            setSelectedScanIds([]);
                            fetchPackingData(); 
                         } catch (err: any) {
@@ -23450,7 +23504,7 @@ LXAD-1234567890`}
                         }
                      }}
                      disabled={isDeletingGudang}
-                     className="w-full sm:w-auto h-11 px-8 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-black text-sm rounded-2xl shadow-lg shadow-red-900/50 hover:shadow-red-900/70 transition-all active:scale-[0.98] flex items-center justify-center gap-2 whitespace-nowrap"
+                     className="w-full sm:w-auto h-11 px-8 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-black text-sm rounded-2xl shadow-lg shadow-red-900/50 hover:shadow-red-900/70 transition-all active:scale-[0.98] flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer"
                   >
                      {isDeletingGudang ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />} Hapus Data
                   </button>
