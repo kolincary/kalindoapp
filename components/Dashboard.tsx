@@ -763,11 +763,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
              let page = 0;
              let hasMore = true;
 
-             const sevenDaysAgo = new Date();
-             sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-             sevenDaysAgo.setHours(0, 0, 0, 0);
-             const sevenDaysAgoISO = sevenDaysAgo.toISOString();
-
              while (hasMore) {
                 const from = page * PAGE_SIZE;
                 const to = from + PAGE_SIZE - 1;
@@ -776,7 +771,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                    .from('cancelled_orders')
                    .select('barcode')
                    .eq('is_active', true)
-                   .gte('cancelled_at', sevenDaysAgoISO)
                    .range(from, to);
 
                 if (error) {
@@ -797,7 +791,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 }
              }
 
-             console.log(`[CANCEL] Loaded ${allBarcodes.length} cancelled barcodes (last 7 days)`);
+             console.log(`[CANCEL] Loaded ${allBarcodes.length} active cancelled barcodes`);
              setCancelledBarcodes(allBarcodes);
           } catch (err: any) {
              console.error('[CANCEL] Exception fetching cancelled barcodes:', err);
@@ -2010,19 +2004,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
          return; // STOP HERE
        }
 
-        // --- CANCEL CHECK FOR CHECKER & PACKING (7 DAYS) ---
+        // --- CANCEL CHECK FOR CHECKER & PACKING ---
         if ([UserRole.CHECKER, UserRole.PACKING, UserRole.PACKING_2].includes(role)) {
            try {
-              const sevenDaysAgo = new Date();
-              sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-              sevenDaysAgo.setHours(0, 0, 0, 0);
-
               const { data: cancelData, error: cancelErr } = await supabase
                  .from('cancelled_orders')
                  .select('barcode')
                  .eq('barcode', result.barcode)
                  .eq('is_active', true)
-                 .gte('cancelled_at', sevenDaysAgo.toISOString())
                  .limit(1)
                  .maybeSingle();
 
