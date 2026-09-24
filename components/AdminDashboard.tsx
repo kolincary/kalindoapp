@@ -495,11 +495,11 @@ const EmployeeRow = React.memo(({
       }`}>
          {/* Checkbox */}
          <td className="p-3.5 pl-4 sm:pl-6 w-12 sticky left-0 z-10 bg-white dark:bg-gray-800 group-hover:bg-slate-50 dark:group-hover:bg-gray-800 border-b border-gray-100 dark:border-gray-700">
-            <button 
-               onClick={() => onSelect(emp.id)} 
+            <button
+               onClick={() => onSelect(emp.id)}
                className={`w-5 h-5 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${
-                  isSelected 
-                     ? 'bg-blue-600 border-blue-600 text-white shadow-sm shadow-blue-500/30' 
+                  isSelected
+                     ? 'bg-blue-600 border-blue-600 text-white shadow-sm shadow-blue-500/30'
                      : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-blue-400'
                }`}
                title={isSelected ? "Deselect" : "Select employee"}
@@ -2302,7 +2302,56 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    // 6. Packing/Sortir View State
    const [packingData, setPackingData] = useState<any[]>([]);
    const [activeDataSource, setActiveDataSource] = useState<'SUPABASE' | 'FIRESTORE'>('SUPABASE');
-   const [forcedDataSource, setForcedDataSource] = useState<'AUTO' | 'SUPABASE' | 'FIRESTORE'>('AUTO');
+   const [forcedDataSource, setForcedDataSource] = useState<'SUPABASE' | 'FIRESTORE'>(() => {
+      return (localStorage.getItem('admin_active_db_source') as 'SUPABASE' | 'FIRESTORE') || 'SUPABASE';
+   });
+
+   const handleSwitchDatabase = async (newSource: 'SUPABASE' | 'FIRESTORE') => {
+      setForcedDataSource(newSource);
+      localStorage.setItem('admin_active_db_source', newSource);
+      setPage(1);
+
+      // 1. Simpan universal ke Supabase app_settings agar semua user otomatis default ke DB ini
+      try {
+         const { data: existing } = await supabase
+            .from('app_settings')
+            .select('id')
+            .eq('setting_key', 'active_db_source')
+            .maybeSingle();
+
+         if (existing) {
+            await supabase
+               .from('app_settings')
+               .update({ setting_value: newSource })
+               .eq('setting_key', 'active_db_source');
+         } else {
+            await supabase
+               .from('app_settings')
+               .insert({ setting_key: 'active_db_source', setting_value: newSource });
+         }
+      } catch (err) {
+         console.warn("Notice: could not save active_db_source to Supabase:", err);
+      }
+
+      // 2. Simpan universal backup ke Firestore app_settings
+      try {
+         const { doc, setDoc } = await import('firebase/firestore');
+         await setDoc(doc(db, 'app_settings', 'active_db_source'), {
+            source: newSource,
+            updated_at: Date.now()
+         }, { merge: true });
+      } catch (fsErr) {
+         console.warn("Notice: could not save active_db_source to Firestore:", fsErr);
+      }
+
+      setSuccessToast(`⚡ Database aktif berhasil diubah ke ${newSource} untuk SEMUA user!`);
+
+      if (activeView === 'OJOL_DATA') {
+         // fetchOjolData handles through dependency
+      } else {
+         fetchPackingData(1, newSource);
+      }
+   };
    const [firestoreLoadingText, setFirestoreLoadingText] = useState<string>('');
    const [packingStaffList, setPackingStaffList] = useState<string[]>([]);
    const [packing2OverallTotal, setPacking2OverallTotal] = useState<number>(0);
@@ -3303,6 +3352,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   console.error("Failed to parse hidden_menus from DB", e);
                }
             }
+            // Universal Active Database Source Setting (SUPABASE vs FIRESTORE)
+            const { data: dbSourceData } = await supabase
+               .from('app_settings')
+               .select('setting_value')
+               .eq('setting_key', 'active_db_source')
+               .maybeSingle();
+            if (dbSourceData && (dbSourceData.setting_value === 'SUPABASE' || dbSourceData.setting_value === 'FIRESTORE')) {
+               const s = dbSourceData.setting_value as 'SUPABASE' | 'FIRESTORE';
+               setForcedDataSource(s);
+               localStorage.setItem('admin_active_db_source', s);
+            } else {
+               // Fallback check Firestore
+               try {
+                  const { doc, getDoc } = await import('firebase/firestore');
+                  const snap = await getDoc(doc(db, 'app_settings', 'active_db_source'));
+                  if (snap.exists() && snap.data()?.source) {
+                     const s = snap.data().source;
+                     if (s === 'SUPABASE' || s === 'FIRESTORE') {
+                        setForcedDataSource(s);
+                        localStorage.setItem('admin_active_db_source', s);
+                     }
+                  }
+               } catch(e) {}
+            }
          } catch (err) {
             console.error("Error fetching settings:", err);
          }
@@ -3312,9 +3385,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       // Realtime listener for universal settings changes across all users & devices
       const channel = supabase
          .channel('app_settings_admin_changes')
-         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'app_settings' }, (payload) => {
+         .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings' }, (payload) => {
             if (payload.new) {
-               const data = payload.new;
+               const data = payload.new as any;
                if (data.skip_duplicate_batch !== undefined) setSkipDuplicateBatch(!!data.skip_duplicate_batch);
                if (data.skip_duplicate_checker !== undefined) setSkipDuplicateChecker(!!data.skip_duplicate_checker);
                if (data.strict_resi_mode !== undefined) setStrictResiMode(!!data.strict_resi_mode);
@@ -3331,12 +3404,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                      }
                   } catch(e) {}
                }
+
+               if (data.setting_key === 'active_db_source' && data.setting_value) {
+                  const val = data.setting_value as 'SUPABASE' | 'FIRESTORE';
+                  if (val === 'SUPABASE' || val === 'FIRESTORE') {
+                     setForcedDataSource(val);
+                     localStorage.setItem('admin_active_db_source', val);
+                  }
+               }
             }
          })
          .subscribe();
 
+      let unsubFsSettings: (() => void) | null = null;
+      import('firebase/firestore').then(({ doc, onSnapshot }) => {
+         unsubFsSettings = onSnapshot(doc(db, 'app_settings', 'active_db_source'), (snap) => {
+            if (snap.exists()) {
+               const s = snap.data()?.source;
+               if (s === 'SUPABASE' || s === 'FIRESTORE') {
+                  setForcedDataSource(s);
+                  localStorage.setItem('admin_active_db_source', s);
+               }
+            }
+         }, () => {});
+      }).catch(() => {});
+
       return () => {
          supabase.removeChannel(channel);
+         if (unsubFsSettings) unsubFsSettings();
       };
    }, []);
 
@@ -5371,7 +5466,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          }, 100);
          return () => clearTimeout(timer);
       }
-   }, [page, rowsPerPage, filterPackingStaff, filterPackingShift, packingSearch, filterDate, dateFilterMode, rangeStartDate, rangeEndDate, filterPackingRole, activeView, filterCancelOnly, filterPickerType]);
+   }, [page, rowsPerPage, filterPackingStaff, filterPackingShift, packingSearch, filterDate, dateFilterMode, rangeStartDate, rangeEndDate, filterPackingRole, activeView, filterCancelOnly, filterPickerType, forcedDataSource]);
 
    // 4b. Fetching for Tracking Status Resi
    useEffect(() => {
@@ -5945,7 +6040,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
    };
 
-   const fetchPackingData = async (targetPage = page, forceSource?: 'AUTO' | 'SUPABASE' | 'FIRESTORE') => {
+   const fetchPackingData = async (targetPage = page, forceSource?: 'SUPABASE' | 'FIRESTORE') => {
       // Permission guards for different views
       if (activeView === 'PACKING_DATA' && !hasPermission('view_packing')) return;
       if (activeView === 'PACKING_2_DATA' && !hasPermission('view_packing_2')) return;
@@ -6056,7 +6151,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 }
 
                let targetRole = 'PACKING';
-               if (activeView === 'PACKING_2_DATA') targetRole = 'PACKING_2';
+               if (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') targetRole = 'PACKING';
                else if (activeView === 'SORTIR_DATA') targetRole = 'SORTIR';
                else if (activeView === 'PICKER_DATA') targetRole = 'PICKER';
                else if (activeView === 'CHECKER_DATA') targetRole = 'CHECKER';
@@ -6070,20 +6165,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   let isMatch = false;
                   if (activeView === 'SCAN_ALL') {
                      isMatch = true;
-                  } else if (targetRole === 'PACKING_2') {
-                     isMatch = (r === 'PACKING_2' || r === 'PACKING_2_DATA');
                   } else if (targetRole === 'PACKING') {
-                     isMatch = (r === 'PACKING' || r === 'PACKING_DATA' || (r.includes('PACK') && r !== 'PACKING_2'));
+                     isMatch = (r === 'PACKING' || r === 'PACKING_DATA' || r === 'PACKING_2' || r === 'PACKING_2_DATA' || r.includes('PACK'));
                   } else if (targetRole === 'SORTIR') {
                      isMatch = (r === 'SORTIR' || r === 'SORTIR_DATA');
                   } else if (targetRole === 'PICKER') {
-                     isMatch = (r === 'PICKER' || r === 'PICKER_DATA');
+                     isMatch = (r === 'PICKER' || r === 'PICKER_DATA' || r === 'PICKER_2' || r.includes('PICK'));
                   } else if (targetRole === 'CHECKER') {
-                     isMatch = (r === 'CHECKER' || r === 'CHECKER_DATA');
+                     isMatch = (r === 'CHECKER' || r === 'CHECKER_DATA' || r.includes('CHECK'));
                   } else if (targetRole === 'LOGISTIK') {
-                     isMatch = (r === 'LOGISTIK' || r === 'LOGISTIK_DATA');
+                     isMatch = (r === 'LOGISTIK' || r === 'LOGISTIK_DATA' || r.includes('LOGISTIK'));
                   } else if (targetRole === 'OJOL') {
-                     isMatch = (r === 'OJOL' || r === 'OJOL_DATA');
+                     isMatch = (r === 'OJOL' || r === 'OJOL_DATA' || r.includes('OJOL'));
                   } else if (targetRole === 'GUDANG') {
                      isMatch = (r === 'GUDANG' || r.includes('GUDANG'));
                   }
@@ -6155,7 +6248,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          const startMs = new Date(`${targetDateStr}T00:00:00`).getTime();
          const endMs = new Date(`${targetDateStr}T23:59:59.999`).getTime();
 
-         const effectiveSource = forceSource || forcedDataSource;
+         const effectiveSource = forceSource || forcedDataSource || 'SUPABASE';
 
          const supportedFallbackViews = [
             'PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 
@@ -6186,17 +6279,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          // a) User forced Firestore source ('FIRESTORE')
          // b) activeView is in supportedFallbackViews AND (Supabase count is 0 or low < 500 or cache exists)
          const isSupportedView = supportedFallbackViews.includes(activeView);
-         const shouldCheckFirestore = isSupportedView && (
-            effectiveSource === 'FIRESTORE' ||
-            sbCount === 0 ||
-            sbCount < 500 ||
-            firestoreDayDataCache.has(targetDateStr)
-         );
+         const shouldCheckFirestore = isSupportedView && (effectiveSource === 'FIRESTORE');
 
          if (shouldCheckFirestore) {
             try {
                let targetRole = 'PACKING';
-               if (activeView === 'PACKING_2_DATA') targetRole = 'PACKING_2';
+               if (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') targetRole = 'PACKING';
                else if (activeView === 'SORTIR_DATA') targetRole = 'SORTIR';
                else if (activeView === 'PICKER_DATA') targetRole = 'PICKER';
                else if (activeView === 'CHECKER_DATA') targetRole = 'CHECKER';
@@ -6227,20 +6315,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                dayDocs.forEach(d => {
                   const r = (d.role || '').toUpperCase();
                   let isMatch = false;
-                  if (targetRole === 'PACKING_2') {
-                     isMatch = (r === 'PACKING_2' || r === 'PACKING_2_DATA');
-                  } else if (targetRole === 'PACKING') {
-                     isMatch = (r === 'PACKING' || r === 'PACKING_DATA' || (r.includes('PACK') && r !== 'PACKING_2'));
+                  if (targetRole === 'PACKING') {
+                     isMatch = (r === 'PACKING' || r === 'PACKING_DATA' || r === 'PACKING_2' || r === 'PACKING_2_DATA' || r.includes('PACK'));
                   } else if (targetRole === 'SORTIR') {
                      isMatch = (r === 'SORTIR' || r === 'SORTIR_DATA');
                   } else if (targetRole === 'PICKER') {
-                     isMatch = (r === 'PICKER' || r === 'PICKER_DATA');
+                     isMatch = (r === 'PICKER' || r === 'PICKER_DATA' || r === 'PICKER_2' || r.includes('PICK'));
                   } else if (targetRole === 'CHECKER') {
-                     isMatch = (r === 'CHECKER' || r === 'CHECKER_DATA');
+                     isMatch = (r === 'CHECKER' || r === 'CHECKER_DATA' || r.includes('CHECK'));
                   } else if (targetRole === 'LOGISTIK') {
-                     isMatch = (r === 'LOGISTIK' || r === 'LOGISTIK_DATA');
+                     isMatch = (r === 'LOGISTIK' || r === 'LOGISTIK_DATA' || r.includes('LOGISTIK'));
                   } else if (targetRole === 'OJOL') {
-                     isMatch = (r === 'OJOL' || r === 'OJOL_DATA');
+                     isMatch = (r === 'OJOL' || r === 'OJOL_DATA' || r.includes('OJOL'));
                   } else if (targetRole === 'GUDANG') {
                      isMatch = (r === 'GUDANG' || r.includes('GUDANG'));
                   }
@@ -6266,7 +6352,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                });
 
                // Gunakan data Firestore jika Supabase 0 data ATAU data Firestore lebih lengkap
-               if (effectiveSource === 'FIRESTORE' || (fsRoleItems.length > sbCount && fsRoleItems.length > 0) || (sbCount === 0 && fsRoleItems.length > 0)) {
+               if (effectiveSource === 'FIRESTORE' || fsRoleItems.length > 0) {
                   let filteredFs = fsRoleItems;
                   if (filterPackingStaff && filterPackingStaff !== 'ALL') {
                      filteredFs = filteredFs.filter(item => item.employee_name === filterPackingStaff || item.admin_name === filterPackingStaff);
@@ -11156,7 +11242,96 @@ if (filterPackingShift !== 'ALL') {
          }
          setOjolStaffList(Array.from(new Set(visibleStaff)).sort());
 
-         // 2. Build Query & Pagination
+         const shiftMap = new Map<string, string>();
+         if (empData) {
+            empData.forEach((e: any) => shiftMap.set(e.name, e.shift));
+         }
+
+         // FIRESTORE BRANCH FOR OJOL
+         if (forcedDataSource === 'FIRESTORE') {
+            const startMs = new Date(`${effectiveDate}T00:00:00`).getTime();
+            const endMs = new Date(`${effectiveDate}T23:59:59.999`).getTime();
+
+            let dayDocs: any[] = [];
+            if (firestoreDayDataCache.has(effectiveDate)) {
+               dayDocs = firestoreDayDataCache.get(effectiveDate)!;
+            } else {
+               setFirestoreLoadingText('Mengambil data Ojol dari Firestore...');
+               const activeFsQuery = fsQuery(
+                  collection(db, 'scanned_items'),
+                  where('timestamp', '>=', startMs),
+                  where('timestamp', '<=', endMs)
+               );
+               const fsSnap = await getDocs(activeFsQuery);
+               dayDocs = fsSnap.docs.map(docSnap => ({
+                  id: docSnap.id,
+                  ...(docSnap.data() as Record<string, any>)
+               }));
+               firestoreDayDataCache.set(effectiveDate, dayDocs);
+               setFirestoreLoadingText('');
+            }
+
+            let fsOjolItems: any[] = [];
+            dayDocs.forEach(d => {
+               const r = (d.role || '').toUpperCase();
+               if (r === 'OJOL' || r === 'OJOL_DATA') {
+                  let rawBarcode = (d.barcode || '').toString().trim();
+                  if (rawBarcode.startsWith('0026') || rawBarcode.startsWith('002')) rawBarcode = rawBarcode.replace(/^00/, '');
+                  if (/^LXAD[^-]/i.test(rawBarcode)) rawBarcode = 'LXAD-' + rawBarcode.substring(4);
+                  if (/^JNAP[^-]/i.test(rawBarcode)) rawBarcode = 'JNAP-' + rawBarcode.substring(4);
+                  if (/^JNEB[^-]/i.test(rawBarcode)) rawBarcode = 'JNEB-' + rawBarcode.substring(4);
+
+                  const empName = d.employee_name || d.admin_name || d.leader_name || '-';
+                  fsOjolItems.push({
+                     ...d,
+                     barcode: rawBarcode,
+                     employee_name: empName,
+                     shift: shiftMap.get(empName) || 'Unknown',
+                     is_from_firestore: true
+                  });
+               }
+            });
+
+            if (filterOjolStaff && filterOjolStaff !== 'ALL') {
+               fsOjolItems = fsOjolItems.filter(item => item.employee_name === filterOjolStaff);
+            }
+            if (filterOjolShift && filterOjolShift !== 'ALL') {
+               const validNames = new Set(shiftToNamesMap[filterOjolShift] || []);
+               fsOjolItems = fsOjolItems.filter(item => validNames.has(item.employee_name));
+            }
+            if (ojolSearch) {
+               const term = ojolSearch.toLowerCase();
+               fsOjolItems = fsOjolItems.filter(item =>
+                  (item.barcode && item.barcode.toLowerCase().includes(term)) ||
+                  (item.employee_name && item.employee_name.toLowerCase().includes(term))
+               );
+            }
+
+            fsOjolItems.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+            const totalFsCount = fsOjolItems.length;
+            const from = (page - 1) * rowsPerPage;
+            const to = from + rowsPerPage - 1;
+            const pageItems = fsOjolItems.slice(from, to + 1);
+
+            setOjolData(pageItems);
+            setTotalRows(totalFsCount);
+            setActiveDataSource('FIRESTORE');
+
+            const uniqueBarcodes = new Set(fsOjolItems.map((i: any) => i.barcode)).size;
+            const uniqueStaff = new Set(fsOjolItems.map((i: any) => i.employee_name)).size;
+            const latest = fsOjolItems.length > 0 ? new Date(fsOjolItems[0].timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '-';
+            setOjolStats({
+               total: totalFsCount,
+               distinctBarcodes: uniqueBarcodes,
+               activeStaff: uniqueStaff,
+               latest
+            });
+            setIsLoadingOjol(false);
+            return;
+         }
+
+         // SUPABASE BRANCH FOR OJOL
          const query = buildOjolQuery(shiftToNamesMap);
          const from = (page - 1) * rowsPerPage;
          const to = from + rowsPerPage - 1;
@@ -11165,12 +11340,7 @@ if (filterPackingShift !== 'ALL') {
          if (error) throw error;
          const finalData = data || [];
          setTotalRows(count || 0);
-
-         // 3. Enrich with Shift info
-         const shiftMap = new Map<string, string>();
-         if (empData) {
-            empData.forEach((e: any) => shiftMap.set(e.name, e.shift));
-         }
+         setActiveDataSource('SUPABASE');
 
          const enriched = finalData.map((item: any) => {
             let rawBarcode = (item.barcode || '').toString().trim();
@@ -11194,8 +11364,8 @@ if (filterPackingShift !== 'ALL') {
          });
          setOjolData(enriched);
 
-         // 4. Stats Query (Separate to ignore pagination)
-         const statsQuery = buildOjolQuery(shiftToNamesMap); // Same filters
+         // Stats Query (Separate to ignore pagination)
+         const statsQuery = buildOjolQuery(shiftToNamesMap);
          const { data: allStatsData } = await statsQuery.select('barcode, employee_name, timestamp');
 
          if (allStatsData) {
@@ -11214,7 +11384,7 @@ if (filterPackingShift !== 'ALL') {
       } finally {
          setIsLoadingOjol(false);
       }
-   }, [activeView, filterOjolShift, filterOjolStaff, filterDate, page, rowsPerPage, ojolSearch]);
+   }, [activeView, filterOjolShift, filterOjolStaff, filterDate, page, rowsPerPage, ojolSearch, forcedDataSource]);
 
    // Trigger Fetch
    useEffect(() => {
@@ -12753,6 +12923,43 @@ if (filterPackingShift !== 'ALL') {
                                        )}
                                     </div>
 
+                                    {/* 1b. Database Switcher (Supabase / Firestore) - h-11 */}
+                                    {isDevModeNew && ['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'OJOL_DATA', 'LOGISTIK_DATA'].includes(activeView) && (
+                                       <div className={`col-span-12 sm:col-span-6 md:col-span-4 lg:col-span-3 h-11`}>
+                                          <div className="flex items-center h-full rounded-xl border-2 border-gray-200 dark:border-gray-700/80 bg-gray-50/80 dark:bg-gray-800/60 shadow-2xs overflow-hidden select-none">
+                                             <button
+                                                type="button"
+                                                onClick={() => handleSwitchDatabase('SUPABASE')}
+                                                className={`flex-1 flex items-center justify-center gap-1.5 h-full px-2.5 text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap ${
+                                                   forcedDataSource === 'SUPABASE'
+                                                      ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-600/30 ring-1 ring-blue-400/30 relative z-10'
+                                                      : 'text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-950/30'
+                                                }`}
+                                                title="Ambil data dari Supabase (Database Utama)"
+                                             >
+                                                <span className="text-sm">⚡</span>
+                                                <span>Supabase</span>
+                                                {forcedDataSource === 'SUPABASE' && <span className="w-1.5 h-1.5 rounded-full bg-white/70 animate-pulse shrink-0"></span>}
+                                             </button>
+                                             <div className="w-px h-5 bg-gray-300 dark:bg-gray-600 shrink-0"></div>
+                                             <button
+                                                type="button"
+                                                onClick={() => handleSwitchDatabase('FIRESTORE')}
+                                                className={`flex-1 flex items-center justify-center gap-1.5 h-full px-2.5 text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap ${
+                                                   forcedDataSource === 'FIRESTORE'
+                                                      ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md shadow-orange-500/30 ring-1 ring-amber-400/30 relative z-10'
+                                                      : 'text-gray-500 dark:text-gray-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50/50 dark:hover:bg-amber-950/30'
+                                                }`}
+                                                title="Ambil data dari Firestore (Cloud Backup)"
+                                             >
+                                                <span className="text-sm">🔥</span>
+                                                <span>Firestore</span>
+                                                {forcedDataSource === 'FIRESTORE' && <span className="w-1.5 h-1.5 rounded-full bg-white/70 animate-pulse shrink-0"></span>}
+                                             </button>
+                                          </div>
+                                       </div>
+                                    )}
+
                                     {/* 2. Cancel Filter (h-11) */}
                                     {['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'LEADER_PENDING_ADMIN', 'OJOL_DATA', 'LOGISTIK_DATA'].includes(activeView) && (
                                        <div className={`col-span-5 ${canUse7DaysRangeFilter && dateFilterMode === 'RANGE' ? 'sm:col-span-4 md:col-span-2 lg:col-span-2' : 'sm:col-span-3 md:col-span-3 lg:col-span-2'} h-11`}>
@@ -12792,23 +12999,25 @@ if (filterPackingShift !== 'ALL') {
                                        <SearchInput
                                           value={activeView === 'OJOL_DATA' ? ojolSearch : packingSearch}
                                           onChange={(val) => {
+                                             if (val.toLowerCase().includes('devmodenew')) {
+                                                const isCurrentlyOn = localStorage.getItem('isDevModeNew') === 'true' || showSecretMenu;
+                                                const newState = !isCurrentlyOn;
+                                                setShowSecretMenu(newState);
+                                                setShowFsSyncDevMode(newState);
+                                                setShowFakeReportMenu(newState);
+                                                localStorage.setItem('showSecretMenu', String(newState));
+                                                localStorage.setItem('isDevModeNew', String(newState));
+                                                localStorage.setItem('showFakeReportMenu', String(newState));
+                                                setSuccessToast(newState ? "⚡ Dev Mode Secret Unlocked! (Database Switcher & Fitur Dev Aktif)" : "Dev Mode Deactivated");
+                                                const cleaned = val.replace(/devmodenew/gi, '').trim();
+                                                if (activeView === 'OJOL_DATA') setOjolSearch(cleaned);
+                                                else setPackingSearch(cleaned);
+                                                return;
+                                             }
                                              if (activeView === 'OJOL_DATA') {
                                                 setOjolSearch(val);
                                              } else {
-                                                if (val.toLowerCase().includes('devmodenew')) {
-                                                   const isCurrentlyOn = localStorage.getItem('isDevModeNew') === 'true' || showSecretMenu;
-                                                   const newState = !isCurrentlyOn;
-                                                   setShowSecretMenu(newState);
-                                                   setShowFsSyncDevMode(newState);
-                                                   setShowFakeReportMenu(newState);
-                                                   localStorage.setItem('showSecretMenu', String(newState));
-                                                   localStorage.setItem('isDevModeNew', String(newState));
-                                                   localStorage.setItem('showFakeReportMenu', String(newState));
-                                                   setSuccessToast(newState ? "⚡ Dev Mode Secret Unlocked! (Fitur Checkbox & Hapus Aktif)" : "Dev Mode Deactivated");
-                                                   setPackingSearch(val.replace(/devmodenew/gi, '').trim());
-                                                } else {
-                                                   setPackingSearch(val);
-                                                }
+                                                setPackingSearch(val);
                                              }
                                           }}
                                           placeholder={`Search ${activeView === 'OJOL_DATA' ? 'Ojol' : (activeView === 'SORTIR_DATA' ? 'Sortir' : (activeView === 'LOGISTIK_DATA' ? 'Logistik' : (activeView === 'GUDANG_PENDING' ? 'Pending Scans' : (activeView === 'GUDANG_READY' ? 'Resi Ready' : (activeView === 'GUDANG_REPORT' ? 'Gudang Report' : (activeView === 'GUDANG_BUNDLING' ? 'Bundling' : (activeView === 'SCAN_ALL' ? 'All Data' : ((activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') ? 'Picker' : (activeView === 'LEADER_2_DATA' ? 'Rekap Detail Leader' : (activeView === 'LEADER_PENDING_ADMIN' ? 'Pending Leader' : 'Packing'))))))))))}...`}
@@ -16647,33 +16856,35 @@ if (filterPackingShift !== 'ALL') {
                                                    <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 shadow-2xs">
                                                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                                                       Firestore
-                                                      <button
-                                                         type="button"
+                                                      {isDevModeNew && (
+                                                       <button
+                                                          type="button"
                                                          onClick={() => {
-                                                            setForcedDataSource('SUPABASE');
-                                                            fetchPackingData(1, 'SUPABASE');
+                                                            handleSwitchDatabase('SUPABASE');
                                                          }}
                                                          className="ml-1 text-[10px] font-normal underline hover:text-emerald-950 dark:hover:text-white cursor-pointer"
                                                          title="Klik untuk paksa beralih ke sumber Supabase"
                                                       >
                                                          (Ke Supabase)
                                                       </button>
+                                                    )}
                                                    </span>
                                                 ) : (
                                                    <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border border-blue-300 dark:border-blue-800 shadow-2xs">
                                                       <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
                                                       Supabase
-                                                      <button
-                                                         type="button"
+                                                      {isDevModeNew && (
+                                                       <button
+                                                          type="button"
                                                          onClick={() => {
-                                                            setForcedDataSource('FIRESTORE');
-                                                            fetchPackingData(1, 'FIRESTORE');
+                                                            handleSwitchDatabase('FIRESTORE');
                                                          }}
                                                          className="ml-1 text-[10px] font-normal underline hover:text-blue-950 dark:hover:text-white cursor-pointer"
                                                          title="Klik untuk paksa beralih ke sumber Firestore"
                                                       >
                                                          (Ke Firestore)
                                                       </button>
+                                                    )}
                                                    </span>
                                                 )}
                                              </span>
