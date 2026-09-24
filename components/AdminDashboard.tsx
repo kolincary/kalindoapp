@@ -12632,9 +12632,13 @@ if (filterPackingShift !== 'ALL') {
                                     <div className={`col-span-12 ${canUse7DaysRangeFilter && dateFilterMode === 'RANGE' ? 'sm:col-span-12 md:col-span-6 lg:col-span-5' : 'sm:col-span-5 md:col-span-4 lg:col-span-3'} relative h-11`}>
                                        {canUse7DaysRangeFilter && dateFilterMode === 'RANGE' ? (
                                           <div className="flex items-center gap-2 h-11 w-full select-none">
-                                             {/* Tanggal Mulai (Full Click Area, No text selection/block) */}
-                                             <div className="relative flex-1 h-full group select-none">
-                                                <CalendarIcon size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500 group-hover:text-blue-500 pointer-events-none z-10 transition-colors" />
+                                             {/* Tanggal Mulai (Full Click Area, No text selection/block, Clear Border) */}
+                                             <div className="relative flex-1 h-full group select-none rounded-xl">
+                                                <div className="absolute inset-0 w-full h-full pl-9 pr-7 bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-600 group-hover:border-blue-500 dark:group-hover:border-blue-400 rounded-xl text-xs sm:text-sm flex items-center font-bold text-slate-800 dark:text-slate-100 shadow-xs pointer-events-none select-none transition-all truncate">
+                                                   {formatDisplayDate(rangeStartDate) || rangeStartDate || 'Tanggal Mulai'}
+                                                </div>
+                                                <CalendarIcon size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-500 dark:text-blue-400 pointer-events-none z-10 transition-colors" />
+                                                <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 group-hover:text-blue-500 pointer-events-none z-10 transition-colors" />
                                                 <input
                                                    type="date"
                                                    value={rangeStartDate}
@@ -12663,19 +12667,19 @@ if (filterPackingShift !== 'ALL') {
                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20 select-none"
                                                    title="Klik untuk memilih tanggal mulai"
                                                 />
-                                                <div className="w-full h-full pl-9 pr-7 bg-gray-50/80 hover:bg-white dark:bg-gray-800/90 dark:hover:bg-gray-800 border-2 border-gray-300 dark:border-gray-600 group-hover:border-blue-400 dark:group-hover:border-blue-500 rounded-xl text-xs sm:text-sm flex items-center font-bold text-gray-800 dark:text-gray-200 shadow-2xs pointer-events-none select-none transition-all truncate">
-                                                   {formatDisplayDate(rangeStartDate)}
-                                                </div>
-                                                <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 group-hover:text-blue-500 pointer-events-none z-10 transition-colors" />
                                              </div>
 
-                                             <span className="px-2 py-1 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-xs font-black text-gray-500 dark:text-gray-400 rounded-lg shrink-0 select-none">
+                                             <span className="px-2.5 py-1 bg-slate-100 dark:bg-slate-700/80 border border-slate-300 dark:border-slate-600 text-[11px] font-black text-slate-600 dark:text-slate-300 rounded-lg shrink-0 select-none shadow-2xs">
                                                 s/d
                                              </span>
 
-                                             {/* Tanggal Akhir (Full Click Area, No text selection/block) */}
-                                             <div className="relative flex-1 h-full group select-none">
-                                                <CalendarIcon size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500 group-hover:text-blue-500 pointer-events-none z-10 transition-colors" />
+                                             {/* Tanggal Akhir (Full Click Area, No text selection/block, Clear Border) */}
+                                             <div className="relative flex-1 h-full group select-none rounded-xl">
+                                                <div className="absolute inset-0 w-full h-full pl-9 pr-7 bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-600 group-hover:border-blue-500 dark:group-hover:border-blue-400 rounded-xl text-xs sm:text-sm flex items-center font-bold text-slate-800 dark:text-slate-100 shadow-xs pointer-events-none select-none transition-all truncate">
+                                                   {formatDisplayDate(rangeEndDate) || rangeEndDate || 'Tanggal Akhir'}
+                                                </div>
+                                                <CalendarIcon size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-500 dark:text-blue-400 pointer-events-none z-10 transition-colors" />
+                                                <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 group-hover:text-blue-500 pointer-events-none z-10 transition-colors" />
                                                 <input
                                                    type="date"
                                                    value={rangeEndDate}
@@ -12705,16 +12709,16 @@ if (filterPackingShift !== 'ALL') {
                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20 select-none"
                                                    title="Klik untuk memilih tanggal akhir"
                                                 />
-                                                <div className="w-full h-full pl-9 pr-7 bg-gray-50/80 hover:bg-white dark:bg-gray-800/90 dark:hover:bg-gray-800 border-2 border-gray-300 dark:border-gray-600 group-hover:border-blue-400 dark:group-hover:border-blue-500 rounded-xl text-xs sm:text-sm flex items-center font-bold text-gray-800 dark:text-gray-200 shadow-2xs pointer-events-none select-none transition-all truncate">
-                                                   {formatDisplayDate(rangeEndDate)}
-                                                </div>
-                                                <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 group-hover:text-blue-500 pointer-events-none z-10 transition-colors" />
                                              </div>
                                           </div>
                                        ) : (
                                           <div className="relative w-full h-11 select-none">
-                                             <div className="relative w-full h-full group select-none">
-                                                <CalendarIcon size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500 group-hover:text-blue-500 pointer-events-none z-10 transition-colors" />
+                                             <div className="relative w-full h-full group select-none rounded-xl">
+                                                <div className={`absolute inset-0 w-full h-full pl-10 pr-9 bg-white dark:bg-slate-800 border-2 rounded-xl text-xs sm:text-sm flex items-center font-bold shadow-xs pointer-events-none select-none transition-all ${canManageDate ? 'border-slate-300 dark:border-slate-600 group-hover:border-blue-500 dark:group-hover:border-blue-400 text-slate-800 dark:text-slate-100' : 'border-slate-200 dark:border-slate-700 text-slate-400 bg-slate-50 dark:bg-slate-900/50'}`}>
+                                                   {formatDisplayDate(canManageDate ? filterDate : getTodayString()) || filterDate || 'Pilih Tanggal'}
+                                                </div>
+                                                <CalendarIcon size={16} className={`absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none z-10 transition-colors ${canManageDate ? 'text-blue-500 dark:text-blue-400' : 'text-slate-400'}`} />
+                                                {canManageDate && <ChevronDown size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 group-hover:text-blue-500 pointer-events-none z-10 transition-colors" />}
                                                 {canManageDate ? (
                                                    <input
                                                       id="main-date-filter"
@@ -12744,10 +12748,6 @@ if (filterPackingShift !== 'ALL') {
                                                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20 select-none"
                                                    />
                                                 ) : null}
-                                                <div className={`w-full h-full pl-10 pr-9 bg-gray-50/80 hover:bg-white dark:bg-gray-800/90 dark:hover:bg-gray-800 border-2 border-gray-300 dark:border-gray-600 rounded-xl text-xs sm:text-sm flex items-center font-bold shadow-2xs pointer-events-none select-none ${canManageDate ? 'text-gray-800 dark:text-gray-200 group-hover:border-blue-400 dark:group-hover:border-blue-500' : 'text-gray-400 bg-gray-50/50'} transition-all`}>
-                                                   {formatDisplayDate(canManageDate ? filterDate : getTodayString())}
-                                                </div>
-                                                {canManageDate && <ChevronDown size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 group-hover:text-blue-500 pointer-events-none z-10 transition-colors" />}
                                              </div>
                                           </div>
                                        )}
@@ -14524,24 +14524,26 @@ if (filterPackingShift !== 'ALL') {
 
                               <div className="bg-gray-50 dark:bg-gray-900/50 p-6 rounded-xl border border-gray-200 dark:border-gray-700 mb-8">
                                  <div className="flex flex-col sm:flex-row gap-6 items-end">
-                                    <div className="w-full sm:w-auto">
+                                    <div className="w-full sm:w-auto relative">
                                        <label className="block text-sm font-bold text-gray-500 mb-2">Start Date</label>
                                        <input
                                           type="date"
                                           value={exportStartDate}
                                           max={exportEndDate}
                                           onChange={(e) => setExportStartDate(e.target.value)}
-                                          className="h-11 px-4 rounded-lg border border-gray-300 dark:border-gray-600 w-full sm:w-48 bg-white dark:bg-gray-800"
+                                          onClick={(e) => { try { if (typeof (e.currentTarget as any).showPicker === 'function') (e.currentTarget as any).showPicker(); } catch (err) {} }}
+                                          className="h-11 px-4 rounded-lg border border-gray-300 dark:border-gray-600 w-full sm:w-48 bg-white dark:bg-gray-800 relative cursor-pointer"
                                        />
                                     </div>
-                                    <div className="w-full sm:w-auto">
+                                    <div className="w-full sm:w-auto relative">
                                        <label className="block text-sm font-bold text-gray-500 mb-2">End Date</label>
                                        <input
                                           type="date"
                                           value={exportEndDate}
                                           min={exportStartDate}
                                           onChange={(e) => setExportEndDate(e.target.value)}
-                                          className="h-11 px-4 rounded-lg border border-gray-300 dark:border-gray-600 w-full sm:w-48 bg-white dark:bg-gray-800"
+                                          onClick={(e) => { try { if (typeof (e.currentTarget as any).showPicker === 'function') (e.currentTarget as any).showPicker(); } catch (err) {} }}
+                                          className="h-11 px-4 rounded-lg border border-gray-300 dark:border-gray-600 w-full sm:w-48 bg-white dark:bg-gray-800 relative cursor-pointer"
                                        />
                                     </div>
                                     <div className="ml-auto text-sm text-gray-500">
@@ -14963,7 +14965,7 @@ if (filterPackingShift !== 'ALL') {
                                        {/* Form Inputs Grid */}
                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-5">
                                           {/* Tanggal Mulai */}
-                                          <div>
+                                          <div className="relative">
                                              <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
                                                 <CalendarIcon size={14} className="text-orange-400" />
                                                 Tanggal Mulai
@@ -14972,12 +14974,13 @@ if (filterPackingShift !== 'ALL') {
                                                 type="date"
                                                 value={syncStartDate}
                                                 onChange={(e) => setSyncStartDate(e.target.value)}
-                                                className="w-full h-10 px-3 bg-gray-800/90 border border-gray-700 rounded-xl text-sm text-white focus:outline-none focus:border-orange-500 transition-all font-mono"
+                                                onClick={(e) => { try { if (typeof (e.currentTarget as any).showPicker === 'function') (e.currentTarget as any).showPicker(); } catch (err) {} }}
+                                                className="w-full h-10 px-3 bg-gray-800/90 border border-gray-700 rounded-xl text-sm text-white focus:outline-none focus:border-orange-500 transition-all font-mono relative cursor-pointer"
                                              />
                                           </div>
 
                                           {/* Tanggal Akhir */}
-                                          <div>
+                                          <div className="relative">
                                              <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
                                                 <CalendarIcon size={14} className="text-orange-400" />
                                                 Tanggal Akhir
@@ -14986,7 +14989,8 @@ if (filterPackingShift !== 'ALL') {
                                                 type="date"
                                                 value={syncEndDate}
                                                 onChange={(e) => setSyncEndDate(e.target.value)}
-                                                className="w-full h-10 px-3 bg-gray-800/90 border border-gray-700 rounded-xl text-sm text-white focus:outline-none focus:border-orange-500 transition-all font-mono"
+                                                onClick={(e) => { try { if (typeof (e.currentTarget as any).showPicker === 'function') (e.currentTarget as any).showPicker(); } catch (err) {} }}
+                                                className="w-full h-10 px-3 bg-gray-800/90 border border-gray-700 rounded-xl text-sm text-white focus:outline-none focus:border-orange-500 transition-all font-mono relative cursor-pointer"
                                              />
                                           </div>
 

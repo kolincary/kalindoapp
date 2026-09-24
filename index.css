@@ -84,3 +84,7 @@ input[type="date"] {
   user-select: none;
   -webkit-user-select: none;
 }
+
+input[type="date"]:not(.absolute) {
+  position: relative;
+}
