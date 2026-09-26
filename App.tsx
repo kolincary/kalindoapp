@@ -12,6 +12,7 @@ import { NameSelectionModal } from './components/NameSelectionModal';
 import { AutoUpdateHandler } from './components/AutoUpdateHandler'; // NEW IMPORT
 import { UserRole, UserPermissions, UserPins, AuthStep, AdminUser, UserManualInputAccess, ProfileConfig } from './types';
 import { supabase } from './services/supabaseClient';
+import { startDeviceTracking, stopDeviceTracking } from './services/deviceTracker';
 import { Ban, LogOut, User, Crown, Search, X, Lock, Target } from 'lucide-react';
 
 const DEFAULT_PROFILE_CONFIG: ProfileConfig[] = [
@@ -450,9 +451,20 @@ const App: React.FC = () => {
 
 
 
-  // --- 4. USER ACTIVITY MONITORING ---
+  // --- 4. USER ACTIVITY & DEVICE MONITORING ---
   useEffect(() => {
     if (authStep === 'LOGGED_IN' && userEmail && currentRole) {
+      // Start Multi-Device Tracking in Firestore
+      startDeviceTracking(
+        userEmail,
+        employeeName || userEmail,
+        currentRole,
+        () => {
+          alert("PERINGATAN: Sesi perangkat ini telah dihentikan oleh Administrator.");
+          handleLogout();
+        }
+      );
+
       const updateActivity = async (status: 'LOGGED_IN' | 'LOGGED_OUT' = 'LOGGED_IN') => {
         try {
           // Check if admin has force logged out this user before updating activity
@@ -499,9 +511,30 @@ const App: React.FC = () => {
       return () => {
         clearInterval(interval);
         supabase.removeChannel(sub);
+        stopDeviceTracking(userEmail);
       };
     }
   }, [authStep, userEmail, currentRole, employeeName]);
+
+  // --- 4b. ADMIN DEVICE MONITORING (admin, admin2, admin3, etc.) ---
+  useEffect(() => {
+    if (authStep === 'ADMIN_DASHBOARD' && currentAdmin?.username) {
+      const adminName = currentAdmin.username;
+      startDeviceTracking(
+        adminName,
+        adminName,
+        currentAdmin.role || 'ADMIN',
+        () => {
+          alert("PERINGATAN: Sesi perangkat Admin ini telah dihentikan oleh Administrator.");
+          handleLogout();
+        }
+      );
+
+      return () => {
+        stopDeviceTracking(adminName);
+      };
+    }
+  }, [authStep, currentAdmin?.username]);
 
   const toggleTheme = () => {
     setIsDarkMode(prev => {
@@ -686,15 +719,19 @@ const App: React.FC = () => {
     // 1. Snapshot settings we want to keep
     const savedTheme = localStorage.getItem(STORAGE_KEY_THEME);
     const savedScanPos = localStorage.getItem(STORAGE_KEY_SCAN_POS);
+    const savedDeviceId = localStorage.getItem('kalindo_device_id');
 
-    // 2. Sign out from Supabase to kill the browser session (Nuclear option)
+    // 2. Stop device tracking & sign out
     try {
       if (userEmail) {
+        await stopDeviceTracking(userEmail);
         // Record logout in activity table
         await supabase.from('user_activity').update({
           login_status: 'LOGGED_OUT',
           last_logout: new Date().toISOString()
         }).eq('user_email', userEmail);
+      } else if (currentAdmin?.username) {
+        await stopDeviceTracking(currentAdmin.username);
       }
       await supabase.auth.signOut();
     } catch (error) {
@@ -705,9 +742,10 @@ const App: React.FC = () => {
     // This removes 'sb-[project-id]-auth-token' which causes the auto-login loops
     localStorage.clear();
 
-    // 4. Restore settings
+    // 4. Restore settings & persistent device ID
     if (savedTheme) localStorage.setItem(STORAGE_KEY_THEME, savedTheme);
     if (savedScanPos) localStorage.setItem(STORAGE_KEY_SCAN_POS, savedScanPos);
+    if (savedDeviceId) localStorage.setItem('kalindo_device_id', savedDeviceId);
 
     // 5. Reset internal state (React)
     setCurrentRole(null);

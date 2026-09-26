@@ -111,10 +111,24 @@ import {
    PackageCheck,
    BarChart3,
    Calculator,
-   TrendingUp,
    Activity,
    Award,
+   Smartphone,
+   Laptop,
+   Tablet,
+   Monitor,
+   Cpu,
+   Radio,
 } from 'lucide-react';
+import {
+   getDeviceId,
+   forceLogoutDeviceSession,
+   forceLogoutAllUserDevices,
+   deleteDeviceSession,
+   subscribeDeviceSessions,
+   UserDeviceSession
+} from '../services/deviceTracker';
+
 
 // --- TYPES & CONSTANTS ---
 
@@ -2290,6 +2304,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false); // New: Manual Add User
    const [isResetPinModalOpen, setIsResetPinModalOpen] = useState(false); // NEW: Reset PIN Modal
    const [selectedUserMonitoring, setSelectedUserMonitoring] = useState<string[]>([]);
+   
+   // Multi-Device Tracking State
+   const [deviceSessions, setDeviceSessions] = useState<UserDeviceSession[]>([]);
+   const [isLoadingDeviceSessions, setIsLoadingDeviceSessions] = useState(false);
+   const [monitoringTab, setMonitoringTab] = useState<'DEVICES' | 'ACCOUNTS'>('DEVICES');
+   const [deviceSearchTerm, setDeviceSearchTerm] = useState('');
+   const [deviceFilterStatus, setDeviceFilterStatus] = useState<'ALL' | 'ONLINE' | 'OFFLINE'>('ALL');
+   const [deviceFilterType, setDeviceFilterType] = useState<'ALL' | 'Desktop' | 'Mobile' | 'Tablet'>('ALL');
+   const [myCurrentDeviceId] = useState<string>(() => getDeviceId());
+
 
    // 5. Dynamic Data
    const [availableShifts, setAvailableShifts] = useState<string[]>([]);
@@ -2370,6 +2394,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return d.toISOString().split('T')[0];
    });
    const [rangeEndDate, setRangeEndDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+   const [appliedRangeStartDate, setAppliedRangeStartDate] = useState<string>('');
+   const [appliedRangeEndDate, setAppliedRangeEndDate] = useState<string>('');
+   const [hasExecutedRangeSearch, setHasExecutedRangeSearch] = useState<boolean>(false);
    const [firestoreFetchCount, setFirestoreFetchCount] = useState<number>(0);
 
    const [page, setPage] = useState(1);
@@ -4331,9 +4358,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
    };
 
+   // --- DEVICE MONITORING HANDLERS ---
+   const handleKickDevice = async (session: UserDeviceSession) => {
+      const confirmKick = confirm(`Logout paksa perangkat ${session.device_id} (${session.device_label}) milik ${session.user_email}?`);
+      if (!confirmKick) return;
+
+      try {
+         await forceLogoutDeviceSession(session.id);
+         setSuccessToast(`Perangkat ${session.device_id} berhasil di-logout paksa!`);
+      } catch (err: any) {
+         alert("Gagal logout perangkat: " + err.message);
+      }
+   };
+
+   const handleKickAllUserDevices = async (userEmail: string, count: number) => {
+      const confirmKick = confirm(`Logout paksa SEMUA (${count}) perangkat yang terhubung dengan akun ${userEmail}?`);
+      if (!confirmKick) return;
+
+      try {
+         await forceLogoutAllUserDevices(userEmail);
+         setSuccessToast(`Semua perangkat untuk ${userEmail} berhasil di-logout!`);
+      } catch (err: any) {
+         alert("Gagal logout semua perangkat: " + err.message);
+      }
+   };
+
+   const handleDeleteDeviceRecord = async (sessionDocId: string, deviceId: string) => {
+      const confirmDel = confirm(`Hapus catatan riwayat perangkat ${deviceId} dari database?`);
+      if (!confirmDel) return;
+
+      try {
+         await deleteDeviceSession(sessionDocId);
+         setSuccessToast(`Catatan perangkat ${deviceId} berhasil dihapus.`);
+      } catch (err: any) {
+         alert("Gagal menghapus catatan perangkat: " + err.message);
+      }
+   };
+
     useEffect(() => {
        if (activeView === 'USER_MONITORING') {
           fetchUserActivity();
+
+          setIsLoadingDeviceSessions(true);
+          const unsubDevices = subscribeDeviceSessions(
+             (sessions) => {
+                setDeviceSessions(sessions);
+                setIsLoadingDeviceSessions(false);
+             },
+             (err) => {
+                console.error("Device sessions subscription error:", err);
+                setIsLoadingDeviceSessions(false);
+             }
+          );
+
           let debounceTimer: any = null;
           const sub = supabase.channel('user_activity_realtime')
              .on('postgres_changes', { event: '*', schema: 'public', table: 'user_activity' }, () => {
@@ -4344,11 +4421,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
              })
              .subscribe();
           return () => {
+             unsubDevices();
              supabase.removeChannel(sub);
              if (debounceTimer) clearTimeout(debounceTimer);
           };
        }
     }, [activeView]);
+
 
    // --- EFFECTS ---
 
@@ -5461,12 +5540,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    }, [activeView, filterDate, logistikActiveTab]);
    useEffect(() => {
       if (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA' || activeView === 'SORTIR_DATA' || activeView === 'LOGISTIK_DATA' || (activeView === 'PICKER_DATA' || activeView === 'CHECKER_DATA') || activeView === 'LEADER_2_DATA' || activeView === 'LEADER_PENDING_ADMIN' || activeView === 'GUDANG_PENDING' || activeView === 'GUDANG_READY' || activeView === 'GUDANG_CANCEL' || activeView === 'GUDANG_REPORT' || activeView === 'SCAN_ALL') {
+         if (dateFilterMode === 'RANGE' && !hasExecutedRangeSearch) {
+            return;
+         }
          const timer = setTimeout(() => {
             fetchPackingData(page);
          }, 100);
          return () => clearTimeout(timer);
       }
-   }, [page, rowsPerPage, filterPackingStaff, filterPackingShift, packingSearch, filterDate, dateFilterMode, rangeStartDate, rangeEndDate, filterPackingRole, activeView, filterCancelOnly, filterPickerType, forcedDataSource]);
+   }, [page, rowsPerPage, filterPackingStaff, filterPackingShift, packingSearch, filterDate, dateFilterMode, appliedRangeStartDate, appliedRangeEndDate, hasExecutedRangeSearch, filterPackingRole, activeView, filterCancelOnly, filterPickerType, forcedDataSource]);
 
    // 4b. Fetching for Tracking Status Resi
    useEffect(() => {
@@ -5930,6 +6012,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       else if (targetView === 'PICKER_DATA') effectiveRole = 'PICKER';
       else if (targetView === 'LOGISTIK_DATA') effectiveRole = 'LOGISTIK';
       else if (targetView === 'CHECKER_DATA') effectiveRole = 'CHECKER';
+      else if (targetView === 'OJOL_DATA') effectiveRole = 'OJOL';
       else if (targetView === 'LEADER_2_DATA') effectiveRole = 'LEADER_2';
       else if (targetView === 'LEADER_PENDING_ADMIN') effectiveRole = 'LEADER_PENDING';
 
@@ -6040,7 +6123,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
    };
 
-   const fetchPackingData = async (targetPage = page, forceSource?: 'SUPABASE' | 'FIRESTORE') => {
+   const handleSearchDateRange = (explicitStart?: string, explicitEnd?: string) => {
+      const start = explicitStart || rangeStartDate;
+      const end = explicitEnd || rangeEndDate;
+      setAppliedRangeStartDate(start);
+      setAppliedRangeEndDate(end);
+      setHasExecutedRangeSearch(true);
+      setPage(1);
+      if (activeView === 'OJOL_DATA') {
+         fetchOjolData();
+      } else {
+         fetchPackingData(1, undefined, { startDate: start, endDate: end });
+      }
+   };
+
+   const fetchPackingData = async (targetPage = page, forceSource?: 'SUPABASE' | 'FIRESTORE', explicitRangeOptions?: { startDate?: string, endDate?: string }) => {
       // Permission guards for different views
       if (activeView === 'PACKING_DATA' && !hasPermission('view_packing')) return;
       if (activeView === 'PACKING_2_DATA' && !hasPermission('view_packing_2')) return;
@@ -6088,178 +6185,56 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             else leaderBarcodes = ['NO_MATCH_XYZ_123']; // Prevent empty array from fetching all
          }
 
-         // JIKA MODE RENTANG TANGGAL DIAKTIFKAN (KHUSUS ADMIN/ADMIN3 VIA FIRESTORE ONLY)
-         if (canUse7DaysRangeFilter && dateFilterMode === 'RANGE') {
-            // Safety Clamp: Maksimal 7 Hari agar browser tidak crash/freeze
-            let startD = new Date(rangeStartDate);
-            let endD = new Date(rangeEndDate);
-            if (isNaN(startD.getTime())) startD = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000);
-            if (isNaN(endD.getTime())) endD = new Date();
-            if (startD > endD) startD = endD;
-            const diffDays = Math.ceil((endD.getTime() - startD.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-            if (diffDays > 7) {
-               startD = new Date(endD.getTime() - 6 * 24 * 60 * 60 * 1000);
-               const clampedStartStr = startD.toISOString().split('T')[0];
-               setRangeStartDate(clampedStartStr);
-            }
-
-            // Generate list of date strings: [date1, date2, ..., dateN]
-            const dateList: string[] = [];
-            let curr = new Date(startD);
-            while (curr <= endD) {
-               dateList.push(curr.toISOString().split('T')[0]);
-               curr.setDate(curr.getDate() + 1);
-            }
-
-            try {
-                const uncachedDates = dateList.filter(dStr => !firestoreDayDataCache.has(dStr));
-                if (uncachedDates.length > 0) {
-                   await Promise.all(
-                      uncachedDates.map(async (dStr) => {
-                         const dStartMs = new Date(`${dStr}T00:00:00`).getTime();
-                         const dEndMs = new Date(`${dStr}T23:59:59.999`).getTime();
-                         const dQuery = fsQuery(
-                            collection(db, 'scanned_items'),
-                            where('timestamp', '>=', dStartMs),
-                            where('timestamp', '<=', dEndMs)
-                         );
-                         const dSnap = await getDocs(dQuery);
-                         const singleDayDocs = dSnap.docs.map(docSnap => {
-                            const data = docSnap.data();
-                            return {
-                               id: docSnap.id,
-                               barcode: data.barcode,
-                               employee_name: data.employee_name || data.admin_name || data.leader_name || '-',
-                               timestamp: data.timestamp,
-                               role: data.role,
-                               status: data.status,
-                               description: data.description,
-                               menu_context: data.menu_context,
-                               order_id: data.order_id
-                            };
-                         });
-                         firestoreDayDataCache.set(dStr, singleDayDocs);
-                      })
-                   );
-                   setFirestoreFetchCount(prev => prev + uncachedDates.length);
-                }
-
-                let combinedDocs: any[] = [];
-                for (const dStr of dateList) {
-                   const dayDocs = firestoreDayDataCache.get(dStr) || [];
-                   combinedDocs = combinedDocs.concat(dayDocs);
-                }
-
-               let targetRole = 'PACKING';
-               if (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') targetRole = 'PACKING';
-               else if (activeView === 'SORTIR_DATA') targetRole = 'SORTIR';
-               else if (activeView === 'PICKER_DATA') targetRole = 'PICKER';
-               else if (activeView === 'CHECKER_DATA') targetRole = 'CHECKER';
-               else if (activeView === 'LOGISTIK_DATA') targetRole = 'LOGISTIK';
-               else if (activeView === 'OJOL_DATA') targetRole = 'OJOL';
-               else if (activeView.startsWith('GUDANG')) targetRole = 'GUDANG';
-
-               let fsRoleItems: any[] = [];
-               combinedDocs.forEach(d => {
-                  const r = (d.role || '').toUpperCase();
-                  let isMatch = false;
-                  if (activeView === 'SCAN_ALL') {
-                     isMatch = true;
-                  } else if (targetRole === 'PACKING') {
-                     isMatch = (r === 'PACKING' || r === 'PACKING_DATA' || r === 'PACKING_2' || r === 'PACKING_2_DATA' || r.includes('PACK'));
-                  } else if (targetRole === 'SORTIR') {
-                     isMatch = (r === 'SORTIR' || r === 'SORTIR_DATA');
-                  } else if (targetRole === 'PICKER') {
-                     isMatch = (r === 'PICKER' || r === 'PICKER_DATA' || r === 'PICKER_2' || r.includes('PICK'));
-                  } else if (targetRole === 'CHECKER') {
-                     isMatch = (r === 'CHECKER' || r === 'CHECKER_DATA' || r.includes('CHECK'));
-                  } else if (targetRole === 'LOGISTIK') {
-                     isMatch = (r === 'LOGISTIK' || r === 'LOGISTIK_DATA' || r.includes('LOGISTIK'));
-                  } else if (targetRole === 'OJOL') {
-                     isMatch = (r === 'OJOL' || r === 'OJOL_DATA' || r.includes('OJOL'));
-                  } else if (targetRole === 'GUDANG') {
-                     isMatch = (r === 'GUDANG' || r.includes('GUDANG'));
-                  }
-
-                  if (isMatch) {
-                     let rawBarcode = (d.barcode || '').toString().trim();
-                     if (rawBarcode && targetRole !== 'LOGISTIK' && rawBarcode.startsWith('0026')) {
-                        rawBarcode = rawBarcode.slice(2);
-                     }
-                     if (/^LXAD[^-]/i.test(rawBarcode)) rawBarcode = 'LXAD-' + rawBarcode.substring(4);
-                     if (/^JNAP[^-]/i.test(rawBarcode)) rawBarcode = 'JNAP-' + rawBarcode.substring(4);
-                     if (/^JNEB[^-]/i.test(rawBarcode)) rawBarcode = 'JNEB-' + rawBarcode.substring(4);
-
-                     const empName = d.employee_name || d.admin_name || d.leader_name || '-';
-                     fsRoleItems.push({
-                        ...d,
-                        barcode: rawBarcode,
-                        employee_name: empName,
-                        shift: shiftMap.get(empName) || 'Unknown',
-                        is_from_firestore: true
-                     });
-                  }
-               });
-
-               // Filter Staff
-               if (filterPackingStaff && filterPackingStaff !== 'ALL') {
-                  fsRoleItems = fsRoleItems.filter(item => item.employee_name === filterPackingStaff || item.admin_name === filterPackingStaff);
-               }
-               // Filter Shift
-               if (filterPackingShift && filterPackingShift !== 'ALL') {
-                  const validNames = new Set(shiftToNamesMap[filterPackingShift] || []);
-                  fsRoleItems = fsRoleItems.filter(item => validNames.has(item.employee_name));
-               }
-               // Filter Cancel Only
-               if (filterCancelOnly) {
-                  fsRoleItems = fsRoleItems.filter(item => (item.description || '').includes('[CANCEL] Camera Scan'));
-               }
-               // Filter Search Term
-               if (packingSearch) {
-                  const term = packingSearch.toLowerCase();
-                  fsRoleItems = fsRoleItems.filter(item =>
-                     (item.barcode && item.barcode.toLowerCase().includes(term)) ||
-                     (item.employee_name && item.employee_name.toLowerCase().includes(term)) ||
-                     (item.admin_name && item.admin_name.toLowerCase().includes(term))
-                  );
-               }
-
-               fsRoleItems.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-
-               const totalFsCount = fsRoleItems.length;
-               const from = (targetPage - 1) * rowsPerPage;
-               const to = from + rowsPerPage - 1;
-               const pageItems = fsRoleItems.slice(from, to + 1);
-
-               setPackingData(pageItems);
-               setTotalRows(totalFsCount);
-               setActiveDataSource('FIRESTORE');
-               setIsLoadingPacking(false);
-               return;
-            } catch (err: any) {
-               console.error("Error fetching date range from Firestore:", err);
-               alert("Gagal memuat data rentang tanggal dari Firestore: " + err.message);
-            } finally {
-               setIsLoadingPacking(false);
-            }
-         }
-
-         const targetDateStr = effectiveDate;
-         const startMs = new Date(`${targetDateStr}T00:00:00`).getTime();
-         const endMs = new Date(`${targetDateStr}T23:59:59.999`).getTime();
-
-         const effectiveSource = forceSource || forcedDataSource || 'SUPABASE';
-
-         const supportedFallbackViews = [
-            'PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 
-            'CHECKER_DATA', 'LOGISTIK_DATA', 'OJOL_DATA', 'GUDANG_PENDING', 
-            'GUDANG_READY', 'GUDANG_REPORT', 'GUDANG_BUNDLING'
-         ];
-
-         // 1. Fetch Supabase Data
          let sbData: any[] = [];
          let sbCount = 0;
-         if (effectiveSource !== 'FIRESTORE') {
+
+         // JIKA MODE RENTANG TANGGAL DIAKTIFKAN
+         if (canUse7DaysRangeFilter && dateFilterMode === 'RANGE') {
+            if (!hasExecutedRangeSearch && !explicitRangeOptions) {
+               setPackingData([]);
+               setTotalRows(0);
+               setIsLoadingPacking(false);
+               return;
+            }
+
+            const effectiveStart = explicitRangeOptions?.startDate || appliedRangeStartDate || rangeStartDate;
+            const effectiveEnd = explicitRangeOptions?.endDate || appliedRangeEndDate || rangeEndDate;
+
+            try {
+               const query = buildPackingQuery(shiftToNamesMap, 'exact', {
+                  startDate: effectiveStart,
+                  endDate: effectiveEnd,
+                  leaderBarcodes
+               });
+               const from = (targetPage - 1) * rowsPerPage;
+               const to = from + rowsPerPage - 1;
+               const res = await query.range(from, to);
+
+               if (res.error) throw res.error;
+
+               sbData = res.data || [];
+               sbCount = res.count || 0;
+            } catch (err: any) {
+               console.error("Error fetching date range from Supabase:", err);
+               alert("Gagal memuat data rentang tanggal dari Supabase: " + err.message);
+               setIsLoadingPacking(false);
+               return;
+            }
+         } else {
+            const targetDateStr = effectiveDate;
+            const startMs = new Date(`${targetDateStr}T00:00:00`).getTime();
+            const endMs = new Date(`${targetDateStr}T23:59:59.999`).getTime();
+
+            const effectiveSource = forceSource || forcedDataSource || 'SUPABASE';
+
+            const supportedFallbackViews = [
+               'PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 
+               'CHECKER_DATA', 'LOGISTIK_DATA', 'OJOL_DATA', 'GUDANG_PENDING', 
+               'GUDANG_READY', 'GUDANG_REPORT', 'GUDANG_BUNDLING'
+            ];
+
+            // 1. Fetch Supabase Data
+            if (effectiveSource !== 'FIRESTORE') {
             try {
                const query = buildPackingQuery(shiftToNamesMap, 'exact', { leaderBarcodes });
                const from = (targetPage - 1) * rowsPerPage;
@@ -6441,6 +6416,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             } catch (fsErr) {
                console.error("Error fetching fallback leader pending data from Firestore:", fsErr);
             }
+         }
          }
 
          // Default to Supabase data
@@ -10363,8 +10339,8 @@ Data yang dihapus tidak dapat dipulihkan.`)) {
          const isRangeExport = canUse7DaysRangeFilter && dateFilterMode === 'RANGE';
          const cacheKey = isRangeExport ? `range_${rangeStartDate}_to_${rangeEndDate}` : targetDateStr;
 
-         // Direct Export from Firestore if Range Mode or activeDataSource === 'FIRESTORE'
-         if (isRangeExport || (activeDataSource === 'FIRESTORE' && firestoreDayDataCache.has(targetDateStr))) {
+         // Direct Export from Firestore if activeDataSource === 'FIRESTORE' and NOT Range Export
+         if (!isRangeExport && activeDataSource === 'FIRESTORE' && firestoreDayDataCache.has(targetDateStr)) {
             let allDayDocs: any[] = [];
             if (isRangeExport) {
                let startD = new Date(rangeStartDate);
@@ -10500,7 +10476,9 @@ Data yang dihapus tidak dapat dipulihkan.`)) {
             return;
          }
 
-         const countQuery = buildPackingQuery(shiftToNamesMap, 'exact');
+         const exportStartDateStr = isRangeExport ? (appliedRangeStartDate || rangeStartDate) : targetDateStr;
+         const exportEndDateStr = isRangeExport ? (appliedRangeEndDate || rangeEndDate) : targetDateStr;
+         const countQuery = buildPackingQuery(shiftToNamesMap, 'exact', { startDate: exportStartDateStr, endDate: exportEndDateStr });
          const { count, error: countError } = await countQuery.range(0, 1);
          if (countError) throw countError;
          const totalRecords = count || 0;
@@ -10517,7 +10495,7 @@ Data yang dihapus tidak dapat dipulihkan.`)) {
             const to = Math.min(offset + FETCH_BATCH_SIZE - 1, totalRecords - 1);
 
             // Re-use builders
-            let batchQuery = buildPackingQuery(shiftToNamesMap, null);
+            let batchQuery = buildPackingQuery(shiftToNamesMap, null, { startDate: exportStartDateStr, endDate: exportEndDateStr });
 
             const { data, error } = await batchQuery.range(offset, to);
             if (error) throw error;
@@ -10542,7 +10520,8 @@ Data yang dihapus tidak dapat dipulihkan.`)) {
          const url = URL.createObjectURL(blob);
          const link = document.createElement('a');
          link.href = url;
-         link.setAttribute('download', `${label}_${filterDate}_ALL.csv`);
+         const dateLabel = isRangeExport ? `${exportStartDateStr}_sd_${exportEndDateStr}` : filterDate;
+         link.setAttribute('download', `${label}_${dateLabel}_ALL.csv`);
          document.body.appendChild(link);
          link.click();
          document.body.removeChild(link);
@@ -12738,6 +12717,7 @@ if (filterPackingShift !== 'ALL') {
                                                    if (dateFilterMode !== 'SINGLE') {
                                                       setPage(1);
                                                       setDateFilterMode('SINGLE');
+                                                      setHasExecutedRangeSearch(false);
                                                    }
                                                 }}
                                                 className={`px-4 py-2 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${dateFilterMode === 'SINGLE' ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-xs font-black ring-1 ring-black/5 dark:ring-white/10' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white font-semibold'}`}
@@ -12751,6 +12731,9 @@ if (filterPackingShift !== 'ALL') {
                                                    if (dateFilterMode !== 'RANGE') {
                                                       setPage(1);
                                                       setDateFilterMode('RANGE');
+                                                      setHasExecutedRangeSearch(false);
+                                                      setPackingData([]);
+                                                      setTotalRows(0);
                                                    }
                                                 }}
                                                 className={`px-4 py-2 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${dateFilterMode === 'RANGE' ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm font-black ring-1 ring-blue-500/50' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white font-semibold'}`}
@@ -12783,12 +12766,12 @@ if (filterPackingShift !== 'ALL') {
                                              {isLoadingPacking ? (
                                                 <>
                                                    <Loader2 size={13} className="animate-spin text-indigo-600 dark:text-indigo-400" />
-                                                   <span>Mengambil Data Firestore...</span>
+                                                   <span>Mengambil Data Supabase...</span>
                                                 </>
                                              ) : (
                                                 <>
                                                    <Database size={13} />
-                                                   <span>Mode Rentang 7 Hari (Firestore)</span>
+                                                   <span>Mode Rentang Tanggal (Supabase)</span>
                                                 </>
                                              )}
                                           </div>
@@ -12799,7 +12782,7 @@ if (filterPackingShift !== 'ALL') {
                                  {/* ROW 1: Date Filter, Cancel Only / Role, Search Box */}
                                  <div className="grid grid-cols-12 gap-3 items-center">
                                     {/* 1. Date Filter (h-11, Instant click anywhere to open calendar, No text selection) */}
-                                    <div className={`col-span-12 ${canUse7DaysRangeFilter && dateFilterMode === 'RANGE' ? 'sm:col-span-12 md:col-span-6 lg:col-span-5' : 'sm:col-span-5 md:col-span-4 lg:col-span-3'} relative h-11`}>
+                                    <div className={`col-span-12 ${canUse7DaysRangeFilter && dateFilterMode === 'RANGE' ? 'sm:col-span-12 md:col-span-7 lg:col-span-6' : 'sm:col-span-5 md:col-span-4 lg:col-span-3'} relative h-11`}>
                                        {canUse7DaysRangeFilter && dateFilterMode === 'RANGE' ? (
                                           <div className="flex items-center gap-2 h-11 w-full select-none">
                                              {/* Tanggal Mulai (Full Click Area, No text selection/block, Clear Border) */}
@@ -12866,7 +12849,6 @@ if (filterPackingShift !== 'ALL') {
                                                          setRangeStartDate(newStart);
                                                          setSuccessToast("Rentang tanggal disesuaikan maksimal 7 hari.");
                                                       }
-                                                      setPage(1);
                                                       setRangeEndDate(val);
                                                    }}
                                                    onClick={(e) => {
@@ -12880,6 +12862,18 @@ if (filterPackingShift !== 'ALL') {
                                                    title="Klik untuk memilih tanggal akhir"
                                                 />
                                              </div>
+
+                                             {/* Tombol Cari Khusus Rentang Tanggal */}
+                                             <button
+                                                type="button"
+                                                onClick={() => handleSearchDateRange()}
+                                                disabled={isLoadingPacking}
+                                                className={`h-full px-3.5 sm:px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:scale-95 text-white font-black text-xs sm:text-sm rounded-xl shadow-md shadow-blue-500/25 flex items-center justify-center gap-1.5 transition-all cursor-pointer shrink-0 disabled:opacity-50 ${hasExecutedRangeSearch && (rangeStartDate !== appliedRangeStartDate || rangeEndDate !== appliedRangeEndDate) ? 'ring-2 ring-amber-400 ring-offset-1 shadow-amber-500/30' : ''}`}
+                                                title="Klik untuk mengambil data rentang tanggal"
+                                             >
+                                                {isLoadingPacking ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
+                                                <span>Cari</span>
+                                             </button>
                                           </div>
                                        ) : (
                                           <div className="relative w-full h-11 select-none">
@@ -12995,7 +12989,7 @@ if (filterPackingShift !== 'ALL') {
                                     )}
 
                                     {/* 3. Search Box (h-11, clear border-2, comfortable colors) */}
-                                    <div className={`col-span-7 ${['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'LEADER_PENDING_ADMIN', 'OJOL_DATA', 'LOGISTIK_DATA', 'SCAN_ALL'].includes(activeView) ? (canUse7DaysRangeFilter && dateFilterMode === 'RANGE' ? 'sm:col-span-8 md:col-span-4 lg:col-span-5' : 'sm:col-span-4 md:col-span-5 lg:col-span-7') : (canUse7DaysRangeFilter && dateFilterMode === 'RANGE' ? 'sm:col-span-12 md:col-span-6 lg:col-span-7' : 'sm:col-span-7 md:col-span-8 lg:col-span-9')} relative h-11`}>
+                                    <div className={`col-span-7 ${['PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LEADER_2_DATA', 'LEADER_PENDING_ADMIN', 'OJOL_DATA', 'LOGISTIK_DATA', 'SCAN_ALL'].includes(activeView) ? (canUse7DaysRangeFilter && dateFilterMode === 'RANGE' ? 'sm:col-span-8 md:col-span-3 lg:col-span-4' : 'sm:col-span-4 md:col-span-5 lg:col-span-7') : (canUse7DaysRangeFilter && dateFilterMode === 'RANGE' ? 'sm:col-span-12 md:col-span-5 lg:col-span-6' : 'sm:col-span-7 md:col-span-8 lg:col-span-9')} relative h-11`}>
                                        <SearchInput
                                           value={activeView === 'OJOL_DATA' ? ojolSearch : packingSearch}
                                           onChange={(val) => {
@@ -16679,7 +16673,21 @@ if (filterPackingShift !== 'ALL') {
                                              </thead>
                                              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                                                 {packingData.length === 0 ? (
-                                                   <tr><td colSpan={7} className="p-10 text-center text-gray-400 dark:text-gray-500 text-sm font-medium">No data matches your filter</td></tr>
+                                                   <tr><td colSpan={7} className="p-10 text-center text-gray-400 dark:text-gray-500 text-sm font-medium">
+                                                       {dateFilterMode === 'RANGE' && !hasExecutedRangeSearch ? (
+                                                          <div className="flex flex-col items-center justify-center gap-2.5 py-6">
+                                                             <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center shadow-xs">
+                                                                <Calendar size={24} />
+                                                             </div>
+                                                             <div className="text-sm font-bold text-gray-700 dark:text-gray-200">Mode Rentang Tanggal Aktif</div>
+                                                             <p className="text-xs text-gray-500 dark:text-gray-400 max-w-sm text-center">
+                                                                Silakan tentukan Tanggal Mulai dan Tanggal Akhir di atas, lalu klik tombol <span className="font-bold text-blue-600 dark:text-blue-400">Cari</span> untuk menampilkan data.
+                                                             </p>
+                                                          </div>
+                                                       ) : (
+                                                          "No data matches your filter"
+                                                       )}
+                                                    </td></tr>
                                                 ) : (
                                                    packingData.map((item, index) => (
                                                       <tr key={item.id} className={`transition-colors duration-150 ${(isDevMode ? selectedGudangIds.includes(item.id) : selectedScanIds.includes(item.id)) ? 'bg-blue-50/80 dark:bg-blue-900/30' : 'hover:bg-slate-50 dark:hover:bg-gray-750/50'}`}>
@@ -23352,183 +23360,653 @@ LXAD-1234567890`}
                            </div>
                         )}
 
-                        {activeView === 'USER_MONITORING' && (
+                                                {activeView === 'USER_MONITORING' && (
                            <div className="w-full h-full min-h-full flex flex-col bg-white dark:bg-gray-800 overflow-y-auto">
-                              <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 bg-blue-50 dark:bg-gray-900/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shrink-0">
+                              {/* HEADER */}
+                              <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 bg-blue-50/70 dark:bg-gray-900/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shrink-0">
                                  <div className="flex items-center gap-3 sm:gap-4">
-                                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-500 rounded-full flex items-center justify-center shrink-0">
-                                       <Users size={24} className="sm:w-7 sm:h-7" />
+                                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center shrink-0 shadow-sm">
+                                       <Smartphone size={24} className="sm:w-7 sm:h-7" />
                                     </div>
                                     <div>
-                                       <h3 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white">Monitoring User Aktif</h3>
-                                       <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Status login dan aktivitas terakhir semua user.</p>
+                                       <div className="flex items-center gap-2">
+                                          <h3 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white">Monitoring User & Sesi Perangkat</h3>
+                                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400 flex items-center gap-1">
+                                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                             Live
+                                          </span>
+                                       </div>
+                                       <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Pantau realtime perangkat yang terhubung per user (misal: admin2), ID device, hardware, dan kontrol force logout.</p>
                                     </div>
                                  </div>
                                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
-                                    {selectedUserMonitoring.length > 0 && (
-                                       <span className="text-xs sm:text-sm font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-3 py-1.5 rounded-full border border-blue-100 dark:border-blue-800">
-                                          {selectedUserMonitoring.length} Terpilih
-                                       </span>
+                                    {monitoringTab === 'ACCOUNTS' ? (
+                                       <>
+                                          {selectedUserMonitoring.length > 0 && (
+                                             <span className="text-xs sm:text-sm font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-3 py-1.5 rounded-full border border-blue-100 dark:border-blue-800">
+                                                {selectedUserMonitoring.length} Terpilih
+                                             </span>
+                                          )}
+                                          <button
+                                             onClick={toggleAllMonitoringSelection}
+                                             className="flex items-center gap-1.5 sm:gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl hover:bg-gray-200 transition-colors text-xs sm:text-sm font-bold"
+                                          >
+                                             {selectedUserMonitoring.length === userActivityData.length ? "Batal Semua" : "Pilih Semua"}
+                                          </button>
+                                          <button
+                                             onClick={handleBulkForceLogout}
+                                             disabled={isLoadingUserActivity || (selectedUserMonitoring.length === 0 && userActivityData.filter(u => u.login_status === 'LOGGED_IN').length === 0)}
+                                             className="flex items-center gap-1.5 sm:gap-2 px-3.5 py-2 bg-red-600 text-white border border-red-700 rounded-xl hover:bg-red-700 transition-colors shadow-sm text-xs sm:text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                                          >
+                                             <LogOut size={16} /> {selectedUserMonitoring.length > 0 ? "Logout Terpilih" : "Logout Semua User"}
+                                          </button>
+                                          <button
+                                             onClick={fetchUserActivity}
+                                             className="flex items-center gap-1.5 sm:gap-2 px-3.5 py-2 bg-white dark:bg-gray-700 dark:text-white border border-gray-300 dark:border-gray-600 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors shadow-sm text-xs sm:text-sm font-bold"
+                                          >
+                                             {isLoadingUserActivity ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />} Refresh
+                                          </button>
+                                       </>
+                                    ) : (
+                                       <div className="flex items-center gap-2">
+                                          <span className="text-xs text-gray-500 dark:text-gray-400 font-medium hidden sm:inline">
+                                             Otomatis tersinkronisasi via Firestore Realtime
+                                          </span>
+                                          <span className="px-3 py-1.5 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                                             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                                             {deviceSessions.filter(s => (Date.now() - (s.last_active || 0)) < 60000 && s.login_status === 'LOGGED_IN').length} Online
+                                          </span>
+                                       </div>
                                     )}
+                                 </div>
+                              </div>
+
+                              {/* TAB SWITCHER */}
+                              <div className="px-4 sm:px-6 py-2.5 bg-gray-100/80 dark:bg-gray-900/70 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3 shrink-0">
+                                 <div className="flex items-center gap-2">
                                     <button
-                                       onClick={toggleAllMonitoringSelection}
-                                       className="flex items-center gap-1.5 sm:gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl hover:bg-gray-200 transition-colors text-xs sm:text-sm font-bold"
+                                       onClick={() => setMonitoringTab('DEVICES')}
+                                       className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${monitoringTab === 'DEVICES' ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/60 border border-gray-200 dark:border-gray-700'}`}
                                     >
-                                       {selectedUserMonitoring.length === userActivityData.length ? "Batal Semua" : "Pilih Semua"}
+                                       <Laptop size={16} />
+                                       <span>Sesi Perangkat Terhubung</span>
+                                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${monitoringTab === 'DEVICES' ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'}`}>
+                                          {deviceSessions.length}
+                                       </span>
                                     </button>
                                     <button
-                                       onClick={handleBulkForceLogout}
-                                       disabled={isLoadingUserActivity || (selectedUserMonitoring.length === 0 && userActivityData.filter(u => u.login_status === 'LOGGED_IN').length === 0)}
-                                       className="flex items-center gap-1.5 sm:gap-2 px-3.5 py-2 bg-red-600 text-white border border-red-700 rounded-xl hover:bg-red-700 transition-colors shadow-sm text-xs sm:text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                                       onClick={() => setMonitoringTab('ACCOUNTS')}
+                                       className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${monitoringTab === 'ACCOUNTS' ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/60 border border-gray-200 dark:border-gray-700'}`}
                                     >
-                                       <LogOut size={16} /> {selectedUserMonitoring.length > 0 ? "Logout Terpilih" : "Logout Semua User"}
-                                    </button>
-                                    <button
-                                       onClick={fetchUserActivity}
-                                       className="flex items-center gap-1.5 sm:gap-2 px-3.5 py-2 bg-white dark:bg-gray-700 dark:text-white border border-gray-300 dark:border-gray-600 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors shadow-sm text-xs sm:text-sm font-bold"
-                                    >
-                                       {isLoadingUserActivity ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />} Refresh
+                                       <Users size={16} />
+                                       <span>Akun User (Activity)</span>
+                                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${monitoringTab === 'ACCOUNTS' ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'}`}>
+                                          {userActivityData.length}
+                                       </span>
                                     </button>
                                  </div>
                               </div>
 
                               <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-gray-50 dark:bg-gray-900/20">
-                                 {/* SUMMARY STATS CARDS FOR USER MONITORING */}
-                                 {(() => {
-                                    const totalUsers = userActivityData.length;
-                                    const activeUsers = userActivityData.filter(user => {
-                                       const lastActiveDate = new Date(user.last_active);
-                                       return (Date.now() - lastActiveDate.getTime()) < 60000 && user.login_status === 'LOGGED_IN';
-                                    }).length;
-                                    const offlineUsers = totalUsers - activeUsers;
-
-                                    return (
-                                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-                                          {/* Card 1: Total User */}
-                                          <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4 sm:p-5 shadow-sm flex items-center justify-between">
+                                 {monitoringTab === 'DEVICES' ? (
+                                    <div className="space-y-6">
+                                       {/* HERO: CURRENT DEVICE BANNER */}
+                                       <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white shadow-lg border border-blue-700/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                                          <div className="flex items-center gap-3.5">
+                                             <div className="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-md flex items-center justify-center shrink-0 border border-white/20">
+                                                <Laptop size={24} className="text-blue-300" />
+                                             </div>
                                              <div>
-                                                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Total User</p>
-                                                <h4 className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white">{totalUsers.toLocaleString()}</h4>
-                                                <p className="text-[11px] text-gray-400 mt-0.5">Terdaftar di sistem</p>
-                                             </div>
-                                             <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-                                                <Users size={24} />
-                                             </div>
-                                          </div>
-
-                                          {/* Card 2: User Aktif (Online) */}
-                                          <div className="bg-white dark:bg-gray-800 rounded-2xl border border-emerald-200 dark:border-emerald-800/40 p-4 sm:p-5 shadow-sm flex items-center justify-between">
-                                             <div>
-                                                <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                                                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                                                   User Aktif (Online)
-                                                </p>
-                                                <h4 className="text-2xl sm:text-3xl font-black text-emerald-600 dark:text-emerald-400">{activeUsers.toLocaleString()}</h4>
-                                                <p className="text-[11px] text-gray-400 mt-0.5">Sedang beraktivitas</p>
-                                             </div>
-                                             <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-                                                <CheckCircle size={24} />
-                                             </div>
-                                          </div>
-
-                                          {/* Card 3: User Offline / Tidak Aktif */}
-                                          <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4 sm:p-5 shadow-sm flex items-center justify-between">
-                                             <div>
-                                                <p className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">User Offline</p>
-                                                <h4 className="text-2xl sm:text-3xl font-black text-gray-700 dark:text-gray-300">{offlineUsers.toLocaleString()}</h4>
-                                                <p className="text-[11px] text-gray-400 mt-0.5">Tidak aktif / Logged out</p>
-                                             </div>
-                                             <div className="w-12 h-12 rounded-2xl bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 flex items-center justify-center shrink-0">
-                                                <UserX size={24} />
-                                             </div>
-                                          </div>
-                                       </div>
-                                    );
-                                 })()}
-                                 {userActivityData.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center h-64 text-gray-400">
-                                       <Info size={48} className="mb-4 opacity-50" />
-                                       <p>Belum ada data aktivitas user.</p>
-                                    </div>
-                                 ) : (
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-                                       {userActivityData.map((user) => {
-                                          const lastActiveDate = new Date(user.last_active);
-                                          const isActive = (Date.now() - lastActiveDate.getTime()) < 60000 && user.login_status === 'LOGGED_IN';
-                                          const isLoggedOut = user.login_status === 'LOGGED_OUT';
-
-                                          return (
-                                             <div
-                                                key={user.id}
-                                                onClick={() => toggleMonitoringSelection(user.user_email)}
-                                                className={`bg-white dark:bg-gray-800 rounded-2xl sm:rounded-3xl border ${selectedUserMonitoring.includes(user.user_email) ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-gray-200 dark:border-gray-700'} shadow-sm overflow-hidden flex flex-col transition-all hover:shadow-md cursor-pointer`}
-                                             >
-                                                <div className="p-4 sm:p-5 border-b border-gray-100 dark:border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                                                   <div className="flex items-center gap-3">
-                                                      <div className={`w-5 h-5 sm:w-6 sm:h-6 rounded border flex items-center justify-center transition-colors shrink-0 ${selectedUserMonitoring.includes(user.user_email) ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-300 dark:border-gray-600'}`}>
-                                                         {selectedUserMonitoring.includes(user.user_email) && <Check size={14} />}
-                                                      </div>
-                                                      <div className="flex items-center gap-2.5 min-w-0">
-                                                         <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl flex items-center justify-center text-white font-bold text-base sm:text-lg shrink-0 ${isActive ? 'bg-green-500 shadow-md shadow-green-500/30' : 'bg-gray-400 dark:bg-gray-700'}`}>
-                                                            {user.employee_name?.charAt(0) || user.user_email?.charAt(0) || '?'}
-                                                         </div>
-                                                         <div className="min-w-0">
-                                                            <h4 className="font-bold text-sm sm:text-base text-gray-900 dark:text-white truncate" title={user.employee_name}>{user.employee_name || 'Anonymous'}</h4>
-                                                            <p className="text-xs text-gray-400 truncate" title={user.user_email}>{user.user_email}</p>
-                                                         </div>
-                                                      </div>
-                                                   </div>
-                                                   <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto gap-1">
-                                                      <div className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 ${isActive ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
-                                                         <div className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></div>
-                                                         {isActive ? 'Aktif Sekarang' : 'Tidak Aktif'}
-                                                      </div>
-                                                      <div className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${isLoggedOut ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'}`}>
-                                                         {isLoggedOut ? 'Sudah Logout' : 'Masih Login'}
-                                                      </div>
-                                                   </div>
+                                                <div className="flex items-center gap-2">
+                                                   <span className="text-xs font-bold text-blue-300 uppercase tracking-wider">Perangkat Anda Saat Ini</span>
+                                                   <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Perangkat Ini</span>
                                                 </div>
-
-                                                <div className="p-4 sm:p-5 space-y-3 sm:space-y-4 flex-1">
-                                                   <div className="grid grid-cols-2 gap-3 sm:gap-4">
-                                                      <div>
-                                                         <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Role Terakhir</p>
-                                                         <p className="text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded inline-block">{user.role || '-'}</p>
-                                                      </div>
-                                                      <div>
-                                                         <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Aktivitas Terakhir</p>
-                                                         <p className="text-xs font-medium text-gray-700 dark:text-gray-200">{new Date(user.last_active).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</p>
-                                                      </div>
-                                                   </div>
-
-                                                   <div className="space-y-1.5 sm:space-y-2">
-                                                      <div className="flex justify-between items-center text-[11px]">
-                                                         <span className="text-gray-400 font-medium">Login Timestamp</span>
-                                                         <span className="text-gray-600 dark:text-gray-300 font-bold">{user.last_login ? new Date(user.last_login).toLocaleString('id-ID') : '-'}</span>
-                                                      </div>
-                                                      <div className="flex justify-between items-center text-[11px]">
-                                                         <span className="text-gray-400 font-medium">Logout Timestamp</span>
-                                                         <span className="text-gray-600 dark:text-gray-300 font-bold">{user.last_logout ? new Date(user.last_logout).toLocaleString('id-ID') : (user.login_status === 'LOGGED_IN' ? 'Sedang Online' : '-')}</span>
-                                                      </div>
-                                                   </div>
-                                                </div>
-
-                                                <div className="p-3.5 sm:p-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-100 dark:border-gray-700">
+                                                <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                                                   <span className="font-mono font-bold text-base sm:text-lg text-white bg-black/30 px-2.5 py-0.5 rounded-lg border border-white/10">
+                                                      {myCurrentDeviceId}
+                                                   </span>
                                                    <button
-                                                      onClick={(e) => {
-                                                         e.stopPropagation();
-                                                         handleForceLogoutUser(user.user_email);
+                                                      onClick={() => {
+                                                         navigator.clipboard?.writeText(myCurrentDeviceId);
+                                                         setSuccessToast("ID Device berhasil disalin!");
                                                       }}
-                                                      disabled={isLoggedOut}
-                                                      className={`w-full py-2 sm:py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${isLoggedOut ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-red-50 text-red-600 hover:bg-red-600 hover:text-white dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-600 dark:hover:text-white shadow-sm active:scale-95'}`}
+                                                      className="p-1.5 hover:bg-white/10 rounded-lg text-blue-200 hover:text-white transition-colors"
+                                                      title="Salin ID Device"
                                                    >
-                                                      <LogOut size={14} />
-                                                      Force Logout User
+                                                      <Copy size={14} />
                                                    </button>
                                                 </div>
                                              </div>
+                                          </div>
+                                          <div className="text-xs text-blue-200/90 bg-white/5 px-3 py-2 rounded-xl border border-white/10">
+                                             <p className="font-medium">Device ID tersimpan secara persisten di browser ini.</p>
+                                             <p className="text-[11px] text-blue-300/70 mt-0.5">Sesi perangkat Anda aktif di Firestore: <span className="font-mono text-white">user_device_sessions</span></p>
+                                          </div>
+                                       </div>
+
+                                       {/* STATS OVERVIEW CARDS */}
+                                       {(() => {
+                                          const totalDevices = deviceSessions.length;
+                                          const onlineDevices = deviceSessions.filter(s => (Date.now() - (s.last_active || 0)) < 60000 && s.login_status === 'LOGGED_IN').length;
+                                          const pcDevices = deviceSessions.filter(s => s.device_type === 'Desktop').length;
+                                          const mobileDevices = deviceSessions.filter(s => s.device_type === 'Mobile' || s.device_type === 'Tablet').length;
+
+                                          return (
+                                             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                                                <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm flex items-center justify-between">
+                                                   <div>
+                                                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Total Sesi Perangkat</p>
+                                                      <h4 className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white">{totalDevices}</h4>
+                                                      <p className="text-[11px] text-gray-400 mt-0.5">Semua hardware terdata</p>
+                                                   </div>
+                                                   <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                                                      <Smartphone size={24} />
+                                                   </div>
+                                                </div>
+
+                                                <div className="bg-white dark:bg-gray-800 rounded-2xl border border-emerald-200 dark:border-emerald-800/40 p-4 shadow-sm flex items-center justify-between">
+                                                   <div>
+                                                      <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                                                         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                                                         Perangkat Online
+                                                      </p>
+                                                      <h4 className="text-2xl sm:text-3xl font-black text-emerald-600 dark:text-emerald-400">{onlineDevices}</h4>
+                                                      <p className="text-[11px] text-emerald-500/80 mt-0.5">Aktif dalam 60 dtk</p>
+                                                   </div>
+                                                   <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                                                      <CheckCircle size={24} />
+                                                   </div>
+                                                </div>
+
+                                                <div className="bg-white dark:bg-gray-800 rounded-2xl border border-indigo-200 dark:border-indigo-800/40 p-4 shadow-sm flex items-center justify-between">
+                                                   <div>
+                                                      <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-1">PC / Laptop</p>
+                                                      <h4 className="text-2xl sm:text-3xl font-black text-indigo-600 dark:text-indigo-400">{pcDevices}</h4>
+                                                      <p className="text-[11px] text-gray-400 mt-0.5">Windows, Mac, Linux</p>
+                                                   </div>
+                                                   <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                                                      <Laptop size={24} />
+                                                   </div>
+                                                </div>
+
+                                                <div className="bg-white dark:bg-gray-800 rounded-2xl border border-amber-200 dark:border-amber-800/40 p-4 shadow-sm flex items-center justify-between">
+                                                   <div>
+                                                      <p className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-1">HP & Tablet</p>
+                                                      <h4 className="text-2xl sm:text-3xl font-black text-amber-600 dark:text-amber-400">{mobileDevices}</h4>
+                                                      <p className="text-[11px] text-gray-400 mt-0.5">Android, iPhone, iPad</p>
+                                                   </div>
+                                                   <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                                                      <Smartphone size={24} />
+                                                   </div>
+                                                </div>
+                                             </div>
                                           );
-                                       })}
+                                       })()}
+
+                                       {/* FILTER & SEARCH CONTROLS */}
+                                       <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+                                          <div className="relative flex-1">
+                                             <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                                             <input
+                                                type="text"
+                                                value={deviceSearchTerm}
+                                                onChange={(e) => setDeviceSearchTerm(e.target.value)}
+                                                placeholder="Cari user (cth: admin2), email, ID Device, atau tipe..."
+                                                className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                             />
+                                             {deviceSearchTerm && (
+                                                <button
+                                                   onClick={() => setDeviceSearchTerm('')}
+                                                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                                >
+                                                   <X size={16} />
+                                                </button>
+                                             )}
+                                          </div>
+
+                                          <div className="flex flex-wrap items-center gap-2">
+                                             {/* Filter Status */}
+                                             <select
+                                                value={deviceFilterStatus}
+                                                onChange={(e) => setDeviceFilterStatus(e.target.value as any)}
+                                                className="px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                             >
+                                                <option value="ALL">Semua Status</option>
+                                                <option value="ONLINE">🟢 Hanya Online</option>
+                                                <option value="OFFLINE">⚪ Offline / Logout</option>
+                                             </select>
+
+                                             {/* Filter Device Type */}
+                                             <select
+                                                value={deviceFilterType}
+                                                onChange={(e) => setDeviceFilterType(e.target.value as any)}
+                                                className="px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                             >
+                                                <option value="ALL">Semua Perangkat</option>
+                                                <option value="Desktop">💻 PC / Laptop</option>
+                                                <option value="Mobile">📱 HP / Smartphone</option>
+                                                <option value="Tablet">📟 Tablet</option>
+                                             </select>
+
+                                             {(deviceSearchTerm || deviceFilterStatus !== 'ALL' || deviceFilterType !== 'ALL') && (
+                                                <button
+                                                   onClick={() => {
+                                                      setDeviceSearchTerm('');
+                                                      setDeviceFilterStatus('ALL');
+                                                      setDeviceFilterType('ALL');
+                                                   }}
+                                                   className="px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-bold hover:bg-gray-200"
+                                                >
+                                                   Reset Filter
+                                                </button>
+                                             )}
+                                          </div>
+                                       </div>
+
+                                       {/* QUICK USER FILTER SHORTCUTS */}
+                                       {(() => {
+                                          const uniqueUsers = Array.from(new Set(deviceSessions.map(s => s.user_email).filter(Boolean)));
+                                          if (uniqueUsers.length <= 1) return null;
+                                          return (
+                                             <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                                                <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mr-1">Filter Cepat User:</span>
+                                                {uniqueUsers.map(email => {
+                                                   const isSelected = deviceSearchTerm.toLowerCase() === email.toLowerCase();
+                                                   const userDevs = deviceSessions.filter(s => s.user_email === email);
+                                                   const onlineCount = userDevs.filter(s => (Date.now() - (s.last_active || 0)) < 60000 && s.login_status === 'LOGGED_IN').length;
+                                                   return (
+                                                      <button
+                                                         key={email}
+                                                         onClick={() => setDeviceSearchTerm(isSelected ? '' : email)}
+                                                         className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:border-blue-400'}`}
+                                                      >
+                                                         <span>{email}</span>
+                                                         <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${onlineCount > 0 ? 'bg-emerald-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>
+                                                            {userDevs.length}
+                                                         </span>
+                                                      </button>
+                                                   );
+                                                })}
+                                             </div>
+                                          );
+                                       })()}
+
+                                       {/* USER-GROUPED DEVICE SESSIONS LIST */}
+                                       {(() => {
+                                          // 1. Filter sessions
+                                          const filtered = deviceSessions.filter(s => {
+                                             const matchesSearch = !deviceSearchTerm.trim() ||
+                                                (s.user_email && s.user_email.toLowerCase().includes(deviceSearchTerm.toLowerCase())) ||
+                                                (s.employee_name && s.employee_name.toLowerCase().includes(deviceSearchTerm.toLowerCase())) ||
+                                                (s.device_id && s.device_id.toLowerCase().includes(deviceSearchTerm.toLowerCase())) ||
+                                                (s.device_label && s.device_label.toLowerCase().includes(deviceSearchTerm.toLowerCase())) ||
+                                                (s.os && s.os.toLowerCase().includes(deviceSearchTerm.toLowerCase())) ||
+                                                (s.browser && s.browser.toLowerCase().includes(deviceSearchTerm.toLowerCase()));
+
+                                             if (!matchesSearch) return false;
+
+                                             const isOnline = (Date.now() - (s.last_active || 0)) < 60000 && s.login_status === 'LOGGED_IN';
+                                             if (deviceFilterStatus === 'ONLINE' && !isOnline) return false;
+                                             if (deviceFilterStatus === 'OFFLINE' && isOnline) return false;
+
+                                             if (deviceFilterType !== 'ALL' && s.device_type !== deviceFilterType) return false;
+
+                                             return true;
+                                          });
+
+                                          if (filtered.length === 0) {
+                                             return (
+                                                <div className="bg-white dark:bg-gray-800 rounded-3xl border border-gray-200 dark:border-gray-700 p-12 text-center text-gray-400 shadow-sm">
+                                                   <Smartphone size={48} className="mx-auto mb-3 opacity-30 text-blue-500" />
+                                                   <h5 className="font-bold text-gray-700 dark:text-gray-200 text-base">Tidak ada perangkat ditemukan</h5>
+                                                   <p className="text-xs text-gray-400 mt-1 max-w-md mx-auto">
+                                                      {deviceSearchTerm || deviceFilterStatus !== 'ALL' || deviceFilterType !== 'ALL'
+                                                         ? 'Tidak ada perangkat yang sesuai dengan kata kunci atau filter yang dipilih.'
+                                                         : 'Belum ada sesi perangkat terdeteksi. Sesi perangkat akan otomatis muncul saat user atau admin login.'}
+                                                   </p>
+                                                </div>
+                                             );
+                                          }
+
+                                          // 2. Group by user_email
+                                          const userGroups: Record<string, { user_email: string; employee_name: string; role: string; devices: UserDeviceSession[]; onlineCount: number }> = {};
+                                          filtered.forEach(d => {
+                                             const emailKey = d.user_email || 'unknown';
+                                             if (!userGroups[emailKey]) {
+                                                userGroups[emailKey] = {
+                                                   user_email: emailKey,
+                                                   employee_name: d.employee_name || emailKey,
+                                                   role: d.role || 'STAFF',
+                                                   devices: [],
+                                                   onlineCount: 0
+                                                };
+                                             }
+                                             userGroups[emailKey].devices.push(d);
+                                             const isOnline = (Date.now() - (d.last_active || 0)) < 60000 && d.login_status === 'LOGGED_IN';
+                                             if (isOnline) userGroups[emailKey].onlineCount += 1;
+                                          });
+
+                                          // 3. Sort groups (groups with online devices first, then count desc)
+                                          const sortedGroups = Object.values(userGroups).sort((a, b) => {
+                                             if (b.onlineCount !== a.onlineCount) return b.onlineCount - a.onlineCount;
+                                             return b.devices.length - a.devices.length;
+                                          });
+
+                                          return (
+                                             <div className="space-y-6">
+                                                {sortedGroups.map((group) => {
+                                                   const hasOnline = group.onlineCount > 0;
+                                                   return (
+                                                      <div
+                                                         key={group.user_email}
+                                                         className="bg-white dark:bg-gray-800 rounded-3xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden"
+                                                      >
+                                                         {/* USER GROUP HEADER */}
+                                                         <div className="p-4 sm:p-5 bg-gradient-to-r from-gray-50 to-blue-50/30 dark:from-gray-800 dark:to-gray-800/80 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                                                            <div className="flex items-center gap-3.5">
+                                                               <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white font-black text-lg shadow-sm shrink-0 ${hasOnline ? 'bg-gradient-to-br from-emerald-500 to-teal-600 ring-4 ring-emerald-500/20' : 'bg-gray-400 dark:bg-gray-600'}`}>
+                                                                  {group.employee_name?.charAt(0).toUpperCase() || group.user_email?.charAt(0).toUpperCase() || 'U'}
+                                                               </div>
+                                                               <div>
+                                                                  <div className="flex items-center gap-2 flex-wrap">
+                                                                     <h4 className="font-extrabold text-base sm:text-lg text-gray-900 dark:text-white">
+                                                                        {group.employee_name || group.user_email}
+                                                                     </h4>
+                                                                     <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                                                                        {group.role}
+                                                                     </span>
+                                                                     {group.user_email.startsWith('admin') && (
+                                                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
+                                                                           ADMIN ACCOUNT
+                                                                        </span>
+                                                                     )}
+                                                                  </div>
+                                                                  <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                                                                     <span className="font-medium text-gray-700 dark:text-gray-300">{group.user_email}</span>
+                                                                     <span>•</span>
+                                                                     <span className="font-bold text-gray-900 dark:text-white">
+                                                                        {group.devices.length} Perangkat Terhubung
+                                                                     </span>
+                                                                     <span>•</span>
+                                                                     <span className={`font-bold ${hasOnline ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`}>
+                                                                        {hasOnline ? `${group.onlineCount} Online Sekarang` : 'Semua Offline'}
+                                                                     </span>
+                                                                  </div>
+                                                               </div>
+                                                            </div>
+
+                                                            <div className="flex items-center gap-2 w-full sm:w-auto">
+                                                               <button
+                                                                  onClick={() => handleKickAllUserDevices(group.user_email, group.devices.length)}
+                                                                  disabled={!hasOnline}
+                                                                  className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-red-50 text-red-600 hover:bg-red-600 hover:text-white dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-600 dark:hover:text-white border border-red-200 dark:border-red-800 transition-all font-bold text-xs flex items-center justify-center gap-2 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                                                                  title={`Logout semua perangkat milik ${group.user_email}`}
+                                                               >
+                                                                  <LogOut size={14} />
+                                                                  Logout Semua Perangkat ({group.devices.length})
+                                                               </button>
+                                                            </div>
+                                                         </div>
+
+                                                         {/* DEVICE CARDS SUB-GRID */}
+                                                         <div className="p-4 sm:p-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 bg-gray-50/50 dark:bg-gray-900/30">
+                                                            {group.devices.map((device) => {
+                                                               const isCurrentDev = device.device_id === myCurrentDeviceId;
+                                                               const isOnline = (Date.now() - (device.last_active || 0)) < 60000 && device.login_status === 'LOGGED_IN';
+                                                               const isLoggedOut = device.login_status === 'LOGGED_OUT';
+                                                               const secondsAgo = Math.max(0, Math.round((Date.now() - (device.last_active || 0)) / 1000));
+
+                                                               return (
+                                                                  <div
+                                                                     key={device.id}
+                                                                     className={`bg-white dark:bg-gray-800 rounded-2xl border ${isCurrentDev ? 'border-blue-500 ring-2 ring-blue-500/30 shadow-md' : 'border-gray-200 dark:border-gray-700'} shadow-sm p-4 flex flex-col justify-between transition-all hover:shadow-md relative overflow-hidden`}
+                                                                  >
+                                                                     {isCurrentDev && (
+                                                                        <div className="absolute top-0 right-0 bg-blue-600 text-white text-[9px] font-black uppercase tracking-wider px-3 py-0.5 rounded-bl-xl shadow-sm">
+                                                                           Perangkat Ini
+                                                                        </div>
+                                                                     )}
+
+                                                                     {/* Top Row: Icon + ID + Status */}
+                                                                     <div>
+                                                                        <div className="flex items-center justify-between gap-2 mb-3">
+                                                                           <div className="flex items-center gap-2.5">
+                                                                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${device.device_type === 'Mobile' ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400' : (device.device_type === 'Tablet' ? 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400' : 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400')}`}>
+                                                                                 {device.device_type === 'Mobile' ? <Smartphone size={20} /> : (device.device_type === 'Tablet' ? <Tablet size={20} /> : <Laptop size={20} />)}
+                                                                              </div>
+                                                                              <div>
+                                                                                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">ID Perangkat</span>
+                                                                                 <div className="flex items-center gap-1.5">
+                                                                                    <span className="font-mono font-black text-xs sm:text-sm text-gray-900 dark:text-white">
+                                                                                       {device.device_id}
+                                                                                    </span>
+                                                                                    <button
+                                                                                       onClick={() => {
+                                                                                          navigator.clipboard?.writeText(device.device_id);
+                                                                                          setSuccessToast(`ID ${device.device_id} disalin!`);
+                                                                                       }}
+                                                                                       className="text-gray-400 hover:text-blue-600 transition-colors p-0.5"
+                                                                                       title="Salin ID"
+                                                                                    >
+                                                                                       <Copy size={12} />
+                                                                                    </button>
+                                                                                 </div>
+                                                                              </div>
+                                                                           </div>
+
+                                                                           <div className="text-right">
+                                                                              <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider inline-flex items-center gap-1.5 ${isOnline ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : (isLoggedOut ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400')}`}>
+                                                                                 <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'}`}></span>
+                                                                                 {isOnline ? 'Online' : (isLoggedOut ? 'Logged Out' : 'Offline')}
+                                                                              </span>
+                                                                           </div>
+                                                                        </div>
+
+                                                                        {/* Info Details */}
+                                                                        <div className="space-y-2 py-2 border-t border-b border-gray-100 dark:border-gray-700/60 my-2 text-xs">
+                                                                           <div>
+                                                                              <p className="text-[10px] font-bold text-gray-400 uppercase">Hardware & Browser</p>
+                                                                              <p className="font-semibold text-gray-800 dark:text-gray-200 text-xs">
+                                                                                 {device.device_label || `${device.os} • ${device.browser}`}
+                                                                              </p>
+                                                                           </div>
+
+                                                                           <div className="grid grid-cols-2 gap-2 text-[11px]">
+                                                                              <div>
+                                                                                 <span className="text-gray-400 block text-[10px] uppercase font-bold">Layar</span>
+                                                                                 <span className="font-medium text-gray-700 dark:text-gray-300">{device.screen_res || '-'}</span>
+                                                                              </div>
+                                                                              <div>
+                                                                                 <span className="text-gray-400 block text-[10px] uppercase font-bold">Terakhir Aktif</span>
+                                                                                 <span className={`font-medium ${isOnline ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-gray-700 dark:text-gray-300'}`}>
+                                                                                    {isOnline ? `${secondsAgo} dtk lalu` : (device.last_active ? new Date(device.last_active).toLocaleTimeString('id-ID') : '-')}
+                                                                                 </span>
+                                                                              </div>
+                                                                           </div>
+
+                                                                           <div className="text-[10px] text-gray-400 flex justify-between items-center pt-1">
+                                                                              <span>Waktu Login:</span>
+                                                                              <span className="text-gray-600 dark:text-gray-400 font-mono">
+                                                                                 {device.login_time ? new Date(device.login_time).toLocaleString('id-ID') : '-'}
+                                                                              </span>
+                                                                           </div>
+                                                                        </div>
+                                                                     </div>
+
+                                                                     {/* Action Buttons */}
+                                                                     <div className="flex items-center gap-2 pt-2">
+                                                                        <button
+                                                                           onClick={() => handleKickDevice(device)}
+                                                                           disabled={isLoggedOut}
+                                                                           className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${isLoggedOut ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-red-50 text-red-600 hover:bg-red-600 hover:text-white dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-600 dark:hover:text-white shadow-sm active:scale-95'}`}
+                                                                           title="Putus sesi dan logout paksa perangkat ini"
+                                                                        >
+                                                                           <LogOut size={13} />
+                                                                           Logout Perangkat
+                                                                        </button>
+                                                                        {!isOnline && (
+                                                                           <button
+                                                                              onClick={() => handleDeleteDeviceRecord(device.id, device.device_id)}
+                                                                              className="p-2 rounded-xl text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                                                              title="Hapus riwayat sesi perangkat ini dari database"
+                                                                           >
+                                                                              <Trash2 size={14} />
+                                                                           </button>
+                                                                        )}
+                                                                     </div>
+                                                                  </div>
+                                                               );
+                                                            })}
+                                                         </div>
+                                                      </div>
+                                                   );
+                                                })}
+                                             </div>
+                                          );
+                                       })()}
+                                    </div>
+                                 ) : (
+                                    /* ACCOUNTS TAB (PREVIOUS USER ACTIVITY VIEW) */
+                                    <div>
+                                       {/* SUMMARY STATS CARDS FOR USER MONITORING */}
+                                       {(() => {
+                                          const totalUsers = userActivityData.length;
+                                          const activeUsers = userActivityData.filter(user => {
+                                             const lastActiveDate = new Date(user.last_active);
+                                             return (Date.now() - lastActiveDate.getTime()) < 60000 && user.login_status === 'LOGGED_IN';
+                                          }).length;
+                                          const offlineUsers = totalUsers - activeUsers;
+
+                                          return (
+                                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                                                {/* Card 1: Total User */}
+                                                <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4 sm:p-5 shadow-sm flex items-center justify-between">
+                                                   <div>
+                                                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Total User</p>
+                                                      <h4 className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white">{totalUsers.toLocaleString()}</h4>
+                                                      <p className="text-[11px] text-gray-400 mt-0.5">Terdaftar di sistem</p>
+                                                   </div>
+                                                   <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                                                      <Users size={24} />
+                                                   </div>
+                                                </div>
+
+                                                {/* Card 2: User Aktif (Online) */}
+                                                <div className="bg-white dark:bg-gray-800 rounded-2xl border border-emerald-200 dark:border-emerald-800/40 p-4 sm:p-5 shadow-sm flex items-center justify-between">
+                                                   <div>
+                                                      <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                                                         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                                                         User Aktif (Online)
+                                                      </p>
+                                                      <h4 className="text-2xl sm:text-3xl font-black text-emerald-600 dark:text-emerald-400">{activeUsers.toLocaleString()}</h4>
+                                                      <p className="text-[11px] text-gray-400 mt-0.5">Sedang beraktivitas</p>
+                                                   </div>
+                                                   <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                                                      <CheckCircle size={24} />
+                                                   </div>
+                                                </div>
+
+                                                {/* Card 3: User Offline / Tidak Aktif */}
+                                                <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4 sm:p-5 shadow-sm flex items-center justify-between">
+                                                   <div>
+                                                      <p className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">User Offline</p>
+                                                      <h4 className="text-2xl sm:text-3xl font-black text-gray-700 dark:text-gray-300">{offlineUsers.toLocaleString()}</h4>
+                                                      <p className="text-[11px] text-gray-400 mt-0.5">Tidak aktif / Logged out</p>
+                                                   </div>
+                                                   <div className="w-12 h-12 rounded-2xl bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 flex items-center justify-center shrink-0">
+                                                      <UserX size={24} />
+                                                   </div>
+                                                </div>
+                                             </div>
+                                          );
+                                       })()}
+
+                                       {userActivityData.length === 0 ? (
+                                          <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+                                             <Info size={48} className="mb-4 opacity-50" />
+                                             <p>Belum ada data aktivitas user.</p>
+                                          </div>
+                                       ) : (
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                                             {userActivityData.map((user) => {
+                                                const lastActiveDate = new Date(user.last_active);
+                                                const isActive = (Date.now() - lastActiveDate.getTime()) < 60000 && user.login_status === 'LOGGED_IN';
+                                                const isLoggedOut = user.login_status === 'LOGGED_OUT';
+
+                                                return (
+                                                   <div
+                                                      key={user.id}
+                                                      onClick={() => toggleMonitoringSelection(user.user_email)}
+                                                      className={`bg-white dark:bg-gray-800 rounded-2xl sm:rounded-3xl border ${selectedUserMonitoring.includes(user.user_email) ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-gray-200 dark:border-gray-700'} shadow-sm overflow-hidden flex flex-col transition-all hover:shadow-md cursor-pointer`}
+                                                   >
+                                                      <div className="p-4 sm:p-5 border-b border-gray-100 dark:border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                                                         <div className="flex items-center gap-3">
+                                                            <div className={`w-5 h-5 sm:w-6 sm:h-6 rounded border flex items-center justify-center transition-colors shrink-0 ${selectedUserMonitoring.includes(user.user_email) ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-300 dark:border-gray-600'}`}>
+                                                               {selectedUserMonitoring.includes(user.user_email) && <Check size={14} />}
+                                                            </div>
+                                                            <div className="flex items-center gap-2.5 min-w-0">
+                                                               <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl flex items-center justify-center text-white font-bold text-base sm:text-lg shrink-0 ${isActive ? 'bg-green-500 shadow-md shadow-green-500/30' : 'bg-gray-400 dark:bg-gray-700'}`}>
+                                                                  {user.employee_name?.charAt(0) || user.user_email?.charAt(0) || '?'}
+                                                               </div>
+                                                               <div className="min-w-0">
+                                                                  <h4 className="font-bold text-sm sm:text-base text-gray-900 dark:text-white truncate" title={user.employee_name}>{user.employee_name || 'Anonymous'}</h4>
+                                                                  <p className="text-xs text-gray-400 truncate" title={user.user_email}>{user.user_email}</p>
+                                                               </div>
+                                                            </div>
+                                                         </div>
+                                                         <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto gap-1">
+                                                            <div className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 ${isActive ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
+                                                               <div className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></div>
+                                                               {isActive ? 'Aktif Sekarang' : 'Tidak Aktif'}
+                                                            </div>
+                                                            <div className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${isLoggedOut ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'}`}>
+                                                               {isLoggedOut ? 'Sudah Logout' : 'Masih Login'}
+                                                            </div>
+                                                         </div>
+                                                      </div>
+
+                                                      <div className="p-4 sm:p-5 space-y-3 sm:space-y-4 flex-1">
+                                                         <div className="grid grid-cols-2 gap-3 sm:gap-4">
+                                                            <div>
+                                                               <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Role Terakhir</p>
+                                                               <p className="text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded inline-block">{user.role || '-'}</p>
+                                                            </div>
+                                                            <div>
+                                                               <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Aktivitas Terakhir</p>
+                                                               <p className="text-xs font-medium text-gray-700 dark:text-gray-200">{new Date(user.last_active).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</p>
+                                                            </div>
+                                                         </div>
+
+                                                         <div className="space-y-1.5 sm:space-y-2">
+                                                            <div className="flex justify-between items-center text-[11px]">
+                                                               <span className="text-gray-400 font-medium">Login Timestamp</span>
+                                                               <span className="text-gray-600 dark:text-gray-300 font-bold">{user.last_login ? new Date(user.last_login).toLocaleString('id-ID') : '-'}</span>
+                                                            </div>
+                                                            <div className="flex justify-between items-center text-[11px]">
+                                                               <span className="text-gray-400 font-medium">Logout Timestamp</span>
+                                                               <span className="text-gray-600 dark:text-gray-300 font-bold">{user.last_logout ? new Date(user.last_logout).toLocaleString('id-ID') : (user.login_status === 'LOGGED_IN' ? 'Sedang Online' : '-')}</span>
+                                                            </div>
+                                                         </div>
+                                                      </div>
+
+                                                      <div className="p-3.5 sm:p-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-100 dark:border-gray-700">
+                                                         <button
+                                                            onClick={(e) => {
+                                                               e.stopPropagation();
+                                                               handleForceLogoutUser(user.user_email);
+                                                            }}
+                                                            disabled={isLoggedOut}
+                                                            className={`w-full py-2 sm:py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${isLoggedOut ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-red-50 text-red-600 hover:bg-red-600 hover:text-white dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-600 dark:hover:text-white shadow-sm active:scale-95'}`}
+                                                         >
+                                                            <LogOut size={14} />
+                                                            Force Logout User
+                                                         </button>
+                                                      </div>
+                                                   </div>
+                                                );
+                                             })}
+                                          </div>
+                                       )}
                                     </div>
                                  )}
                               </div>

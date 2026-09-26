@@ -1,5 +1,5 @@
 const { initializeApp } = require('firebase/app');
-const { getFirestore, collection, query, where, getDocs, limit } = require('firebase/firestore');
+const { getFirestore, collection, getDocs, limit, query, where } = require('firebase/firestore');
 
 const firebaseConfig = {
   apiKey: "AIzaSyCyt5XTwrSIK0aWlZXkUw4wdaMrMZsfbP4",
@@ -11,14 +11,14 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const db = getFirestore(app, "project-ks");
+const db = getFirestore(app, 'project-ks');
 
-async function checkFields() {
+async function checkFs() {
+  console.log('Querying Firestore project-ks -> scanned_items...');
   const q = query(collection(db, 'scanned_items'), limit(5));
   const snap = await getDocs(q);
-  snap.docs.forEach((doc, i) => {
-    console.log(`Doc ${i + 1} (${doc.id}):`, doc.data());
-  });
+  console.log('Docs found in scanned_items:', snap.size);
+  snap.forEach(d => console.log(d.id, d.data().barcode, d.data().role, d.data().timestamp, new Date(d.data().timestamp).toLocaleDateString()));
 }
 
-checkFields().then(() => process.exit(0)).catch(err => { console.error(err); process.exit(1); });
+checkFs();
