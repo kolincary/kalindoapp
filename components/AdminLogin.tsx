@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, ArrowLeft, User, Loader2, Eye, EyeOff, Shield, AlertCircle, Monitor, Box, Package } from 'lucide-react';
+import { Lock, ArrowLeft, User, Loader2, Eye, EyeOff, Shield, AlertCircle, Monitor, Box, Package, ShieldAlert, Copy, Check } from 'lucide-react';
+import { getDeviceId } from '../services/deviceTracker';
+import { checkDeviceAccess } from '../services/deviceSecurityService';
 import { supabase } from '../services/supabaseClient';
 import { AdminUser } from '../types';
 
@@ -17,6 +19,18 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
   const [showPinModal, setShowPinModal] = useState(false);
   const [guestPin, setGuestPin] = useState('');
   const [adminLockoutSeconds, setAdminLockoutSeconds] = useState(0);
+  const [deviceBlockedModal, setDeviceBlockedModal] = useState<{
+    isOpen: boolean;
+    username: string;
+    deviceId: string;
+    reason: string;
+  }>({
+    isOpen: false,
+    username: '',
+    deviceId: '',
+    reason: ''
+  });
+  const [copiedDevId, setCopiedDevId] = useState(false);
 
   const MAX_ADMIN_ATTEMPTS = 5;
   const ADMIN_LOCKOUT_SEC = 60;
@@ -86,6 +100,23 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
     setIsLoading(true);
 
     try {
+      const validateAndProceed = async (adminUser: AdminUser) => {
+        const currentDevId = getDeviceId();
+        const check = await checkDeviceAccess(adminUser.username, currentDevId);
+        if (!check.allowed) {
+          setDeviceBlockedModal({
+            isOpen: true,
+            username: adminUser.username,
+            deviceId: currentDevId,
+            reason: check.reason || 'Perangkat ini belum diizinkan atau telah diblokir untuk login ke akun ini.'
+          });
+          return false;
+        }
+        clearAdminFailedAttempts();
+        onSuccess(adminUser);
+        return true;
+      };
+
       // 1. Try secure Postgres RPC function verify_admin_login
       try {
         const { data: rpcData, error: rpcError } = await supabase.rpc('verify_admin_login', {
@@ -94,13 +125,12 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
         });
 
         if (!rpcError && rpcData && rpcData.id) {
-          clearAdminFailedAttempts();
           const adminUser: AdminUser = {
             id: rpcData.id,
             username: rpcData.username,
             permissions: rpcData.permissions || []
           };
-          onSuccess(adminUser);
+          await validateAndProceed(adminUser);
           return;
         }
       } catch (rpcErr) {
@@ -127,13 +157,12 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
       }
 
       if (data) {
-        clearAdminFailedAttempts();
         const adminUser: AdminUser = {
           id: data.id,
           username: data.username,
           permissions: data.permissions || []
         };
-        onSuccess(adminUser);
+        await validateAndProceed(adminUser);
       }
     } catch (err: any) {
       console.error("Admin Login Error:", err);
@@ -500,6 +529,61 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
           </div>
         </div>
       )}
+
+      {/* MODAL PERANGKAT DIBLOKIR / BELUM DIIZINKAN */}
+      {deviceBlockedModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-4 animate-[fadeIn_0.2s_ease-out]">
+          <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-2xl p-6 sm:p-7 w-full max-w-md border border-red-200 dark:border-red-900/50 text-center relative overflow-hidden">
+            <div className="w-16 h-16 rounded-2xl bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 mx-auto flex items-center justify-center mb-4 shadow-inner">
+              <ShieldAlert size={36} />
+            </div>
+
+            <h3 className="text-xl font-black text-gray-900 dark:text-white mb-2">
+              Akses Perangkat Ditolak
+            </h3>
+
+            <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 mb-4 leading-relaxed">
+              {deviceBlockedModal.reason}
+            </p>
+
+            <div className="bg-gray-50 dark:bg-gray-800/80 rounded-2xl p-4 border border-gray-200 dark:border-gray-700 mb-4 text-left">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">
+                ID Perangkat Anda
+              </span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono font-bold text-sm sm:text-base text-gray-900 dark:text-white truncate">
+                  {deviceBlockedModal.deviceId}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(deviceBlockedModal.deviceId);
+                    setCopiedDevId(true);
+                    setTimeout(() => setCopiedDevId(false), 2000);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 shadow-sm"
+                >
+                  {copiedDevId ? <Check size={14} /> : <Copy size={14} />}
+                  <span>{copiedDevId ? 'Tersalin!' : 'Salin ID'}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 rounded-xl mb-5 text-[11px] text-amber-800 dark:text-amber-300 text-left">
+              💡 <strong>Tips:</strong> Salin ID Perangkat di atas dan kirimkan ke <strong>Admin Utama</strong> agar perangkat ini didaftarkan ke daftar perangkat yang diizinkan untuk akun <strong>{deviceBlockedModal.username}</strong>.
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setDeviceBlockedModal(prev => ({ ...prev, isOpen: false }))}
+              className="w-full py-3 bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 font-bold rounded-xl text-sm transition-all shadow-md"
+            >
+              Saya Mengerti & Tutup
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
