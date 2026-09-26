@@ -3132,7 +3132,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       } else {
          current = [...current, roleKey];
       }
-      const allIndividualRoles = ['PICKER', 'CHECKER', 'PACKING', 'LOGISTIK'];
+      const allIndividualRoles = ['PICKER', 'CHECKER', 'PACKING', 'PACKING_2', 'LOGISTIK'];
       if (current.length === 0 || current.length === allIndividualRoles.length) {
          setMassSearchRoles(['ALL']);
       } else {
@@ -11114,18 +11114,19 @@ if (filterPackingShift !== 'ALL') {
          const chunkSize = 100;
          for (let i = 0; i < barcodes.length; i += chunkSize) {
             const chunk = barcodes.slice(i, i + chunkSize);
-            let query = supabase.from('scans').select('*').in('barcode', chunk);
+            let query = supabase.from('scanned_items').select('*').in('barcode', chunk);
 
-            if (massSearchRoles.length > 0) {
+            if (massSearchRoles.length > 0 && !massSearchRoles.includes('ALL')) {
                const targetDbRoles: string[] = [];
-               if (massSearchRoles.includes('ALL')) {}
-               if (massSearchRoles.includes('SORTIR')) targetDbRoles.push('SORTIR');
+               if (massSearchRoles.includes('PICKER')) targetDbRoles.push('PICKER', 'PICKER_2');
+               if (massSearchRoles.includes('CHECKER')) targetDbRoles.push('CHECKER');
                if (massSearchRoles.includes('PACKING')) targetDbRoles.push('PACKING');
                if (massSearchRoles.includes('PACKING_2')) targetDbRoles.push('PACKING_2');
                if (massSearchRoles.includes('LOGISTIK')) targetDbRoles.push('LOGISTIK', 'OJOL', 'SORTIR');
+               if (massSearchRoles.includes('SORTIR')) targetDbRoles.push('SORTIR', 'SORTIR_BATCH');
 
                if (targetDbRoles.length > 0) {
-                  query = query.in('role', targetDbRoles);
+                  query = query.in('role', Array.from(new Set(targetDbRoles)));
                }
             }
 
@@ -19086,16 +19087,18 @@ INV-789012`}
                                                           <td className="p-3 font-mono text-sm font-bold text-gray-900 dark:text-gray-100">{item.barcode}</td>
                                                           <td className="p-3">
                                                              <span className={`px-2 py-1 text-[10px] font-bold rounded-md uppercase tracking-wider ${
-                                                                item.role === 'PICKER' ? 'bg-indigo-100 text-indigo-700' :
+                                                                item.role === 'PICKER' || item.role === 'PICKER_2' ? 'bg-indigo-100 text-indigo-700' :
                                                                 item.role === 'CHECKER' ? 'bg-blue-100 text-blue-700' :
                                                                 item.role === 'PACKING' ? 'bg-emerald-100 text-emerald-700' :
+                                                                item.role === 'PACKING_2' ? 'bg-teal-100 text-teal-700' :
+                                                                item.role === 'LOGISTIK' || item.role === 'OJOL' ? 'bg-amber-100 text-amber-700' :
                                                                 'bg-gray-100 text-gray-700'
                                                              }`}>
                                                                 {item.role}
                                                              </span>
                                                           </td>
                                                           <td className="p-3 text-sm text-gray-700 dark:text-gray-300">{item.employee_name}</td>
-                                                          <td className="p-3 text-xs text-gray-500">{new Date(item.timestamp).toLocaleString('id-ID')}</td>
+                                                          <td className="p-3 text-xs text-gray-500">{item.timestamp ? new Date(Number(item.timestamp)).toLocaleString('id-ID') : '-'}</td>
                                                           <td className="p-3 text-center">
                                                              {item.status === 'COMPLETED' ? (
                                                                 <span className="text-green-500 font-bold text-xs">OK</span>
@@ -20990,16 +20993,18 @@ INV-789012`}
                                                           <td className="p-3 font-mono text-sm font-bold text-gray-900 dark:text-gray-100">{item.barcode}</td>
                                                           <td className="p-3">
                                                              <span className={`px-2 py-1 text-[10px] font-bold rounded-md uppercase tracking-wider ${
-                                                                item.role === 'PICKER' ? 'bg-indigo-100 text-indigo-700' :
+                                                                item.role === 'PICKER' || item.role === 'PICKER_2' ? 'bg-indigo-100 text-indigo-700' :
                                                                 item.role === 'CHECKER' ? 'bg-blue-100 text-blue-700' :
                                                                 item.role === 'PACKING' ? 'bg-emerald-100 text-emerald-700' :
+                                                                item.role === 'PACKING_2' ? 'bg-teal-100 text-teal-700' :
+                                                                item.role === 'LOGISTIK' || item.role === 'OJOL' ? 'bg-amber-100 text-amber-700' :
                                                                 'bg-gray-100 text-gray-700'
                                                              }`}>
                                                                 {item.role}
                                                              </span>
                                                           </td>
                                                           <td className="p-3 text-sm text-gray-700 dark:text-gray-300">{item.employee_name}</td>
-                                                          <td className="p-3 text-xs text-gray-500">{new Date(item.timestamp).toLocaleString('id-ID')}</td>
+                                                          <td className="p-3 text-xs text-gray-500">{item.timestamp ? new Date(Number(item.timestamp)).toLocaleString('id-ID') : '-'}</td>
                                                           <td className="p-3 text-center">
                                                              {item.status === 'COMPLETED' ? (
                                                                 <span className="text-green-500 font-bold text-xs">OK</span>
