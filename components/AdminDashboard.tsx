@@ -9821,6 +9821,10 @@ Data yang dihapus tidak dapat dipulihkan.`)) {
    const [failedScansSearch, setFailedScansSearch] = useState('');
    const [failedScansStaffFilter, setFailedScansStaffFilter] = useState('ALL');
    const [failedScansRoleFilter, setFailedScansRoleFilter] = useState('ALL');
+   const [failedScansMassInput, setFailedScansMassInput] = useState('');
+   const [failedScansMassBarcodes, setFailedScansMassBarcodes] = useState<string[]>([]);
+   const [isFailedScansMassModalOpen, setIsFailedScansMassModalOpen] = useState(false);
+   const [failedScansIgnoreDateFilter, setFailedScansIgnoreDateFilter] = useState(false);
 
    // Filtered Fail Messages for Searchable Dropdown
    const filteredFailMessages = useMemo(() => {
@@ -9838,11 +9842,14 @@ Data yang dihapus tidak dapat dipulihkan.`)) {
          const end = new Date(effectiveDate + 'T23:59:59.999').getTime();
 
          // We fetch distinct messages for the currently selected date context
-         const { data, error } = await supabase
-            .from('failed_scans')
-            .select('fail_message')
-            .gte('timestamp', start)
-            .lte('timestamp', end);
+         let msgQuery = supabase.from('failed_scans').select('fail_message');
+         if (!failedScansIgnoreDateFilter) {
+            msgQuery = msgQuery.gte('timestamp', start).lte('timestamp', end);
+         }
+         if (failedScansMassBarcodes.length > 0) {
+            msgQuery = msgQuery.in('barcode', failedScansMassBarcodes.slice(0, 1000));
+         }
+         const { data, error } = await msgQuery;
 
          if (error) throw error;
 
@@ -9863,20 +9870,35 @@ Data yang dihapus tidak dapat dipulihkan.`)) {
       }
    }, [filterDate]);
 
-   // Fetch Scans whenever Date, Page, or Pagination changes
+   // Fetch Scans whenever Date, Page, Pagination, or Mass Search changes
    useEffect(() => {
       if (hasPermission('view_failed_scans')) {
          fetchFailedScansFilters();
          fetchFailedScans();
       }
-   }, [filterDate, failedScansPage, failedScansRowsPerPage, failedScansRoleFilter, failedScansStaffFilter, failedScansSearch, failedScansMessageFilter]);
+   }, [
+      filterDate,
+      failedScansPage,
+      failedScansRowsPerPage,
+      failedScansRoleFilter,
+      failedScansStaffFilter,
+      failedScansSearch,
+      failedScansMessageFilter,
+      failedScansMassBarcodes,
+      failedScansIgnoreDateFilter
+   ]);
 
    const fetchFailedScansFilters = async () => {
       try {
+         const effectiveDate = filterDate || getTodayString();
+         const start = new Date(effectiveDate + 'T00:00:00').getTime();
+         const end = new Date(effectiveDate + 'T23:59:59.999').getTime();
+
          // Get Distinct Staff Names from failed_scans
-         const { data: staffData } = await supabase
-            .from('failed_scans')
-            .select('employee_name');
+         let staffQ = supabase.from('failed_scans').select('employee_name');
+         if (!failedScansIgnoreDateFilter) staffQ = staffQ.gte('timestamp', start).lte('timestamp', end);
+         if (failedScansMassBarcodes.length > 0) staffQ = staffQ.in('barcode', failedScansMassBarcodes.slice(0, 1000));
+         const { data: staffData } = await staffQ;
 
          if (staffData) {
             const uniqueStaff = Array.from(new Set(staffData.map(d => d.employee_name).filter(Boolean))).sort();
@@ -9884,9 +9906,10 @@ Data yang dihapus tidak dapat dipulihkan.`)) {
          }
 
          // Get Distinct Roles from failed_scans
-         const { data: roleData } = await supabase
-            .from('failed_scans')
-            .select('role');
+         let roleQ = supabase.from('failed_scans').select('role');
+         if (!failedScansIgnoreDateFilter) roleQ = roleQ.gte('timestamp', start).lte('timestamp', end);
+         if (failedScansMassBarcodes.length > 0) roleQ = roleQ.in('barcode', failedScansMassBarcodes.slice(0, 1000));
+         const { data: roleData } = await roleQ;
 
          if (roleData) {
             const uniqueRoles = Array.from(new Set(roleData.map(d => d.role).filter(Boolean))).sort();
@@ -9910,9 +9933,16 @@ Data yang dihapus tidak dapat dipulihkan.`)) {
 
          let query = supabase
             .from('failed_scans')
-            .select('*', { count: 'exact' })
-            .gte('timestamp', start)
-            .lte('timestamp', end);
+            .select('*', { count: 'exact' });
+
+         if (!failedScansIgnoreDateFilter) {
+            query = query.gte('timestamp', start).lte('timestamp', end);
+         }
+
+         // Mass Barcode Search Filter
+         if (failedScansMassBarcodes.length > 0) {
+            query = query.in('barcode', failedScansMassBarcodes.slice(0, 1000));
+         }
 
          // Apply Message Filter
          if (failedScansMessageFilter !== 'ALL') {
@@ -13376,13 +13406,35 @@ if (filterPackingShift !== 'ALL') {
                                     )}
 
                                     {/* 2. Search */}
-                                    <div className="relative flex-1 w-full sm:w-auto sm:min-w-[200px]">
-                                       <SearchInput
-                                          value={activeView === 'OJOL_DATA' ? ojolSearch : (activeView === 'FAILED_SCANS' ? failedScansSearch : packingSearch)}
-                                          onChange={activeView === 'OJOL_DATA' ? setOjolSearch : (activeView === 'FAILED_SCANS' ? setFailedScansSearch : setPackingSearch)}
-                                          placeholder={`Search ${activeView === 'OJOL_DATA' ? 'Ojol' : (activeView === 'SORTIR_DATA' ? 'Sortir' : (activeView === 'GUDANG_PENDING' ? 'Pending Scans (LT3)' : (activeView === 'GUDANG_REPORT' ? 'Gudang Report' : (activeView === 'GUDANG_BUNDLING' ? 'Data Bundling' : (activeView === 'SCAN_ALL' ? 'All Data' : (activeView === 'FAILED_SCANS' ? 'Failed Scans' : 'Packing'))))))}...`}
-                                          className="w-full"
-                                       />
+                                    <div className="relative flex-1 w-full sm:w-auto sm:min-w-[200px] flex items-center gap-2">
+                                       <div className="relative flex-1">
+                                          <SearchInput
+                                             value={activeView === 'OJOL_DATA' ? ojolSearch : (activeView === 'FAILED_SCANS' ? failedScansSearch : packingSearch)}
+                                             onChange={activeView === 'OJOL_DATA' ? setOjolSearch : (activeView === 'FAILED_SCANS' ? setFailedScansSearch : setPackingSearch)}
+                                             placeholder={`Search ${activeView === 'OJOL_DATA' ? 'Ojol' : (activeView === 'SORTIR_DATA' ? 'Sortir' : (activeView === 'GUDANG_PENDING' ? 'Pending Scans (LT3)' : (activeView === 'GUDANG_REPORT' ? 'Gudang Report' : (activeView === 'GUDANG_BUNDLING' ? 'Data Bundling' : (activeView === 'SCAN_ALL' ? 'All Data' : (activeView === 'FAILED_SCANS' ? 'Failed Scans' : 'Packing'))))))}...`}
+                                             className="w-full"
+                                          />
+                                       </div>
+                                       {activeView === 'FAILED_SCANS' && (
+                                          <button
+                                             type="button"
+                                             onClick={() => setIsFailedScansMassModalOpen(true)}
+                                             className={`h-11 px-3.5 flex items-center gap-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap border cursor-pointer select-none shrink-0 ${
+                                                failedScansMassBarcodes.length > 0
+                                                   ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-md shadow-amber-500/20'
+                                                   : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700 shadow-sm'
+                                             }`}
+                                             title="Pencarian Data Barcode Massal (Paste banyak barcode)"
+                                          >
+                                             <Layers size={16} className={failedScansMassBarcodes.length > 0 ? 'text-white' : 'text-amber-500'} />
+                                             <span className="hidden sm:inline">Cari Massal</span>
+                                             {failedScansMassBarcodes.length > 0 ? (
+                                                <span className="px-1.5 py-0.5 bg-white/25 rounded-full text-[10px] font-extrabold">
+                                                   {failedScansMassBarcodes.length}
+                                                </span>
+                                             ) : null}
+                                          </button>
+                                       )}
                                     </div>
 
                                     {/* 3. Shift Filter */}
@@ -13602,6 +13654,40 @@ if (filterPackingShift !== 'ALL') {
                                           </>
                                        )}
 
+                                       {/* Tombol Khusus Pencarian Barcode Massal pada Scans Gagal */}
+                                       {activeView === 'FAILED_SCANS' && (
+                                          <>
+                                             <button
+                                                type="button"
+                                                onClick={() => setIsFailedScansMassModalOpen(true)}
+                                                className={`h-11 px-4 flex items-center justify-center gap-2 rounded-xl text-xs font-bold shadow-sm whitespace-nowrap cursor-pointer border transition-all ${
+                                                   failedScansMassBarcodes.length > 0
+                                                      ? 'bg-amber-600 hover:bg-amber-700 text-white border-amber-500/30 shadow-amber-600/20'
+                                                      : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white border-amber-500/30'
+                                                }`}
+                                                title="Buka form input barcode massal untuk memfilter scan gagal"
+                                             >
+                                                <Layers size={16} />
+                                                <span>Cari Barcode Massal {failedScansMassBarcodes.length > 0 ? `(${failedScansMassBarcodes.length})` : ''}</span>
+                                             </button>
+                                             {failedScansMassBarcodes.length > 0 && (
+                                                <button
+                                                   type="button"
+                                                   onClick={() => {
+                                                      setFailedScansMassInput('');
+                                                      setFailedScansMassBarcodes([]);
+                                                      setFailedScansPage(1);
+                                                   }}
+                                                   className="h-11 px-3 flex items-center justify-center gap-1.5 rounded-xl text-xs font-bold bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 transition-all cursor-pointer"
+                                                   title="Reset Pencarian Barcode Massal"
+                                                >
+                                                   <RotateCcw size={14} />
+                                                   <span>Reset Massal</span>
+                                                </button>
+                                             )}
+                                          </>
+                                       )}
+
                                        {(activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') && (
                                           <>
                                              {/* Layout View Switcher */}
@@ -13746,7 +13832,7 @@ if (filterPackingShift !== 'ALL') {
 
                                        <button onClick={() => {
                                           if (activeView === 'OJOL_DATA') { setFilterOjolShift('ALL'); setFilterOjolStaff('ALL'); setOjolSearch(''); }
-                                          else if (activeView === 'FAILED_SCANS') { setFailedScansStaffFilter('ALL'); setFailedScansRoleFilter('ALL'); setFailedScansSearch(''); setFailedScansMessageFilter('ALL'); }
+                                          else if (activeView === 'FAILED_SCANS') { setFailedScansStaffFilter('ALL'); setFailedScansRoleFilter('ALL'); setFailedScansSearch(''); setFailedScansMessageFilter('ALL'); setFailedScansMassBarcodes([]); setFailedScansMassInput(''); }
                                           else { handleResetPackingFilters(); }
                                        }} className="h-11 w-11 flex items-center justify-center bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-xl text-gray-500 dark:text-gray-300 transition-all active:scale-95 shadow-sm border border-transparent hover:border-gray-300 dark:hover:border-gray-500" title="Reset Filters"><RotateCcw size={18} /></button>
 
@@ -24034,11 +24120,16 @@ LXAD-1234567890`}
                                           <AlertTriangle size={24} />
                                        </div>
                                        <div>
-                                          <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                                          <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2 flex-wrap">
                                              DATA SCAN GAGAL
                                              <span className="px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 text-xs font-bold">
                                                 TOTAL: {failedScansTotalRows.toLocaleString()}
                                              </span>
+                                             {failedScansMassBarcodes.length > 0 && (
+                                                <span className="px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 text-xs font-bold flex items-center gap-1 border border-amber-300 dark:border-amber-700">
+                                                   <Layers size={12} /> {failedScansMassBarcodes.length} Barcode Massal
+                                                </span>
+                                             )}
                                           </h3>
                                        </div>
                                     </div>
@@ -24058,6 +24149,48 @@ LXAD-1234567890`}
                                        </div>
                                     )}
                                  </div>
+
+                                 {/* Banner Filter Massal Aktif */}
+                                 {failedScansMassBarcodes.length > 0 && (
+                                    <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/40 dark:to-orange-950/30 border-b border-amber-200 dark:border-amber-800/60 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0">
+                                       <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200 font-semibold">
+                                          <Layers size={16} className="text-amber-600 dark:text-amber-400 shrink-0" />
+                                          <span>
+                                             Filter Massal Aktif: Ditemukan <b>{failedScansTotalRows.toLocaleString()}</b> scan gagal dari <b>{failedScansMassBarcodes.length}</b> barcode yang dicari.
+                                          </span>
+                                          {failedScansIgnoreDateFilter ? (
+                                             <span className="px-2 py-0.5 rounded-full bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100 text-[10px] font-bold">
+                                                Semua Tanggal
+                                             </span>
+                                          ) : (
+                                             <span className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 text-[10px] font-bold border border-amber-200 dark:border-amber-800">
+                                                Tanggal: {filterDate || 'Hari ini'}
+                                             </span>
+                                          )}
+                                       </div>
+                                       <div className="flex items-center gap-2">
+                                          <button
+                                             type="button"
+                                             onClick={() => setIsFailedScansMassModalOpen(true)}
+                                             className="px-2.5 py-1 bg-amber-200/80 hover:bg-amber-200 dark:bg-amber-800/80 dark:hover:bg-amber-800 text-amber-900 dark:text-amber-100 rounded-lg font-bold transition-all cursor-pointer"
+                                          >
+                                             Ubah Barcode ({failedScansMassBarcodes.length})
+                                          </button>
+                                          <button
+                                             type="button"
+                                             onClick={() => {
+                                                setFailedScansMassInput('');
+                                                setFailedScansMassBarcodes([]);
+                                                setFailedScansPage(1);
+                                             }}
+                                             className="px-2.5 py-1 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1"
+                                          >
+                                             <RotateCcw size={12} />
+                                             Reset
+                                          </button>
+                                       </div>
+                                    </div>
+                                 )}
 
                                  {/* Table Container - Full Height/Width */}
                                  {isLoadingFailedScans ? (
@@ -25876,6 +26009,150 @@ LXAD-1234567890`}
                         {isDeletingLogistikDupes ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
                         <span>Hapus ({selectedLogistikDupeDeleteIds.length.toLocaleString()}) Data Duplikat</span>
                      </button>
+                  </div>
+               </div>
+            </div>
+         )}
+
+         {/* MODAL PENCARIAN BARCODE MASSAL (SCANS GAGAL) */}
+         {isFailedScansMassModalOpen && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center px-4">
+               <div
+                  className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                  onClick={() => setIsFailedScansMassModalOpen(false)}
+               ></div>
+               <div className="bg-white dark:bg-gray-800 w-full max-w-2xl rounded-3xl shadow-2xl relative z-10 p-6 sm:p-8 border border-gray-200 dark:border-gray-700 animate-[popIn_0.25s_ease-out] flex flex-col gap-5 max-h-[90vh] overflow-y-auto">
+                  {/* Header */}
+                  <div className="flex items-start justify-between gap-4">
+                     <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-2xl flex items-center justify-center shadow-xs border border-amber-100 dark:border-amber-800 shrink-0">
+                           <Layers size={24} />
+                        </div>
+                        <div>
+                           <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                              Pencarian Barcode Massal
+                           </h3>
+                           <p className="text-gray-500 dark:text-gray-400 text-xs">
+                              Tempel banyak barcode (satu per baris / koma / dari kolom Excel) untuk filter data scan gagal.
+                           </p>
+                        </div>
+                     </div>
+                     <button
+                        onClick={() => setIsFailedScansMassModalOpen(false)}
+                        className="p-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors cursor-pointer"
+                     >
+                        <X size={20} />
+                     </button>
+                  </div>
+
+                  {/* Body */}
+                  <div className="flex flex-col gap-3">
+                     <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                           Daftar Barcode:
+                        </label>
+                        <div className="flex items-center gap-2">
+                           {getParsedMassBarcodes(failedScansMassInput).length > 0 && (
+                              <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
+                                 {getParsedMassBarcodes(failedScansMassInput).length} Barcode Terdeteksi
+                              </span>
+                           )}
+                           <button
+                              type="button"
+                              onClick={async () => {
+                                 try {
+                                    const text = await navigator.clipboard.readText();
+                                    if (text) {
+                                       setFailedScansMassInput(prev => prev ? prev + '\n' + text : text);
+                                    }
+                                 } catch (err) {
+                                    alert("Izin clipboard tidak diberikan atau tidak didukung di browser ini.");
+                                 }
+                              }}
+                              className="px-2.5 py-1 text-xs font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                           >
+                              <Clipboard size={12} /> Tempel dari Clipboard
+                           </button>
+                        </div>
+                     </div>
+
+                     <textarea
+                        value={failedScansMassInput}
+                        onChange={(e) => setFailedScansMassInput(e.target.value)}
+                        rows={8}
+                        placeholder={`Tempel barcode di sini (satu per baris)...\n\nContoh:\n6TL7282608607\nJY1823133100\nLXAD-5123043232\nSPXID0680444613889`}
+                        className="w-full p-4 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-2xl focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none font-mono text-xs text-gray-900 dark:text-gray-100 resize-y shadow-inner leading-relaxed"
+                     />
+
+                     {/* Option Checkbox */}
+                     <div className="p-3 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center gap-3">
+                        <input
+                           type="checkbox"
+                           id="failed-scans-ignore-date"
+                           checked={failedScansIgnoreDateFilter}
+                           onChange={(e) => setFailedScansIgnoreDateFilter(e.target.checked)}
+                           className="w-4 h-4 text-amber-600 rounded focus:ring-amber-500 cursor-pointer accent-amber-600"
+                        />
+                        <label htmlFor="failed-scans-ignore-date" className="text-xs font-semibold text-gray-700 dark:text-gray-300 cursor-pointer select-none">
+                           Cari di <b>Semua Tanggal</b> (Abaikan filter tanggal: <i>{filterDate || 'Hari ini'}</i>)
+                        </label>
+                     </div>
+                  </div>
+
+                  {/* Footer */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+                     <div className="flex items-center gap-2 w-full sm:w-auto">
+                        {failedScansMassInput && (
+                           <button
+                              type="button"
+                              onClick={() => setFailedScansMassInput('')}
+                              className="px-3 py-2 text-xs font-bold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors cursor-pointer"
+                           >
+                              Bersihkan Input
+                           </button>
+                        )}
+                        {failedScansMassBarcodes.length > 0 && (
+                           <button
+                              type="button"
+                              onClick={() => {
+                                 setFailedScansMassInput('');
+                                 setFailedScansMassBarcodes([]);
+                                 setFailedScansPage(1);
+                                 setIsFailedScansMassModalOpen(false);
+                              }}
+                              className="px-3 py-2 text-xs font-bold text-red-600 hover:text-red-700 dark:hover:text-red-400 transition-colors cursor-pointer"
+                           >
+                              Hapus Filter Massal
+                           </button>
+                        )}
+                     </div>
+                     <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                        <button
+                           type="button"
+                           onClick={() => setIsFailedScansMassModalOpen(false)}
+                           className="px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 text-xs font-bold transition-all cursor-pointer"
+                        >
+                           Batal
+                        </button>
+                        <button
+                           type="button"
+                           onClick={() => {
+                              const parsed = getParsedMassBarcodes(failedScansMassInput);
+                              if (parsed.length === 0) {
+                                 alert("Silakan masukkan setidaknya 1 barcode valid.");
+                                 return;
+                              }
+                              setFailedScansMassBarcodes(parsed);
+                              setFailedScansPage(1);
+                              setIsFailedScansMassModalOpen(false);
+                           }}
+                           disabled={getParsedMassBarcodes(failedScansMassInput).length === 0}
+                           className="flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl shadow-md shadow-amber-500/20 active:scale-98 transition-all cursor-pointer"
+                        >
+                           <Search size={14} />
+                           <span>Terapkan Pencarian ({getParsedMassBarcodes(failedScansMassInput).length})</span>
+                        </button>
+                     </div>
                   </div>
                </div>
             </div>
