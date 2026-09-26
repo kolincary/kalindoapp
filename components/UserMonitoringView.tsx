@@ -27,7 +27,8 @@ import {
   Plus,
   Lock,
   Unlock,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Pencil
 } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 import {
@@ -39,6 +40,12 @@ import {
   UserDeviceSession
 } from '../services/deviceTracker';
 import { DeviceFeatureModal } from './DeviceFeatureModal';
+import { EditDeviceNameModal } from './EditDeviceNameModal';
+import {
+  DeviceCustomName,
+  fetchDeviceCustomNames,
+  subscribeDeviceCustomNames
+} from '../services/deviceCustomNameService';
 import {
   DeviceAccessRule,
   UserSecuritySetting,
@@ -82,6 +89,20 @@ export const UserMonitoringView: React.FC<UserMonitoringViewProps> = ({
   const [isAddDeviceModalOpen, setIsAddDeviceModalOpen] = useState(false);
   const [isManageRulesModalOpen, setIsManageRulesModalOpen] = useState(false);
   const [featureModalAdmin, setFeatureModalAdmin] = useState<string | null>(null);
+  const [customDeviceNames, setCustomDeviceNames] = useState<Record<string, DeviceCustomName>>({});
+  const [editingCustomNameDevice, setEditingCustomNameDevice] = useState<{
+    deviceId: string;
+    currentName?: string;
+    currentNote?: string;
+  } | null>(null);
+
+  // Subscribe ke custom nama perangkat di Supabase
+  useEffect(() => {
+    const unsub = subscribeDeviceCustomNames((names) => {
+      setCustomDeviceNames(names);
+    });
+    return () => unsub();
+  }, []);
   const [rulesSearchTerm, setRulesSearchTerm] = useState('');
 
   // Form State for Manual Device Registration
@@ -543,11 +564,17 @@ export const UserMonitoringView: React.FC<UserMonitoringViewProps> = ({
 
       // Search match
       if (term) {
+        const customItem = customDeviceNames[devId];
+        const customNameLower = customItem?.custom_name?.toLowerCase() || '';
+        const customNoteLower = customItem?.note?.toLowerCase() || '';
+
         const matches =
           (s.user_email && s.user_email.toLowerCase().includes(term)) ||
           (s.employee_name && s.employee_name.toLowerCase().includes(term)) ||
           (s.device_id && s.device_id.toLowerCase().includes(term)) ||
           (s.device_label && s.device_label.toLowerCase().includes(term)) ||
+          (customNameLower && customNameLower.includes(term)) ||
+          (customNoteLower && customNoteLower.includes(term)) ||
           (s.os && s.os.toLowerCase().includes(term)) ||
           (s.browser && s.browser.toLowerCase().includes(term)) ||
           (rule?.note && rule.note.toLowerCase().includes(term));
@@ -1324,11 +1351,49 @@ export const UserMonitoringView: React.FC<UserMonitoringViewProps> = ({
                                       )}
                                     </div>
                                     <div>
-                                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
-                                        ID Perangkat
-                                      </span>
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="font-mono font-black text-xs sm:text-sm text-gray-900 dark:text-white">
+                                      {customDeviceNames[(device.device_id || '').trim()]?.custom_name ? (
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span className="font-black text-xs sm:text-sm text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50 px-2 py-0.5 rounded-lg border border-blue-200 dark:border-blue-800">
+                                            {customDeviceNames[(device.device_id || '').trim()].custom_name}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setEditingCustomNameDevice({
+                                                deviceId: device.device_id,
+                                                currentName: customDeviceNames[(device.device_id || '').trim()].custom_name,
+                                                currentNote: customDeviceNames[(device.device_id || '').trim()].note
+                                              })
+                                            }
+                                            className="p-1 rounded-md text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                                            title="Ubah Nama Perangkat (Supabase)"
+                                          >
+                                            <Pencil size={11} />
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                                            ID Perangkat
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setEditingCustomNameDevice({
+                                                deviceId: device.device_id,
+                                                currentName: '',
+                                                currentNote: ''
+                                              })
+                                            }
+                                            className="inline-flex items-center gap-0.5 text-[10px] font-extrabold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                                            title="Beri nama custom perangkat ini (simpan ke Supabase)"
+                                          >
+                                            <Pencil size={10} /> + Nama
+                                          </button>
+                                        </div>
+                                      )}
+                                      <div className="flex items-center gap-1.5 mt-0.5">
+                                        <span className="font-mono font-bold text-xs text-gray-600 dark:text-gray-300">
                                           {device.device_id}
                                         </span>
                                         <button
@@ -1336,7 +1401,7 @@ export const UserMonitoringView: React.FC<UserMonitoringViewProps> = ({
                                             navigator.clipboard?.writeText(device.device_id);
                                             showToast(`ID ${device.device_id} disalin!`);
                                           }}
-                                          className="text-gray-400 hover:text-blue-600 transition-colors p-0.5"
+                                          className="text-gray-400 hover:text-blue-600 transition-colors p-0.5 cursor-pointer"
                                           title="Salin ID"
                                         >
                                           <Copy size={12} />
@@ -1393,6 +1458,11 @@ export const UserMonitoringView: React.FC<UserMonitoringViewProps> = ({
                                     {rule?.note && (
                                       <p className="text-[11px] text-blue-600 dark:text-blue-400 italic mt-0.5">
                                         Catatan: {rule.note}
+                                      </p>
+                                    )}
+                                    {customDeviceNames[(device.device_id || '').trim()]?.note && (
+                                      <p className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold mt-0.5">
+                                        📍 Lokasi/Label: {customDeviceNames[(device.device_id || '').trim()].note}
                                       </p>
                                     )}
                                   </div>
@@ -1466,6 +1536,22 @@ export const UserMonitoringView: React.FC<UserMonitoringViewProps> = ({
                                       <span>Izinkan (WL)</span>
                                     </button>
                                   )}
+
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setEditingCustomNameDevice({
+                                        deviceId: device.device_id,
+                                        currentName: customDeviceNames[(device.device_id || '').trim()]?.custom_name || '',
+                                        currentNote: customDeviceNames[(device.device_id || '').trim()]?.note || ''
+                                      })
+                                    }
+                                    className="py-1.5 px-2 rounded-xl text-xs font-bold bg-blue-50 hover:bg-blue-600 hover:text-white dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 transition-all flex items-center justify-center gap-1 shadow-2xs active:scale-95 cursor-pointer"
+                                    title="Beri / Ubah Nama Custom Perangkat ini (Supabase)"
+                                  >
+                                    <Pencil size={12} />
+                                    <span>Nama</span>
+                                  </button>
 
                                   <button
                                     onClick={() => setFeatureModalAdmin(group.user_email)}
@@ -2185,6 +2271,37 @@ export const UserMonitoringView: React.FC<UserMonitoringViewProps> = ({
           adminUsername={featureModalAdmin}
           deviceRules={deviceRules}
           onToast={(msg) => onShowToast?.(msg)}
+        />
+      )}
+
+      {/* MODAL UBAH NAMA CUSTOM PERANGKAT (SUPABASE) */}
+      {editingCustomNameDevice && (
+        <EditDeviceNameModal
+          isOpen={!!editingCustomNameDevice}
+          onClose={() => setEditingCustomNameDevice(null)}
+          deviceId={editingCustomNameDevice.deviceId}
+          initialName={editingCustomNameDevice.currentName}
+          initialNote={editingCustomNameDevice.currentNote}
+          onSaved={(devId, newName, newNote) => {
+            setCustomDeviceNames(prev => ({
+              ...prev,
+              [devId]: {
+                device_id: devId,
+                custom_name: newName,
+                note: newNote || '',
+                updated_at: new Date().toISOString()
+              }
+            }));
+            onShowToast?.(`Nama perangkat ${devId} disimpan sebagai "${newName}"`);
+          }}
+          onDeleted={(devId) => {
+            setCustomDeviceNames(prev => {
+              const copy = { ...prev };
+              delete copy[devId];
+              return copy;
+            });
+            onShowToast?.(`Nama custom perangkat ${devId} dihapus.`);
+          }}
         />
       )}
     </div>

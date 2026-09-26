@@ -25,6 +25,7 @@ import {
   toggleDeviceSpecialFeature
 } from '../services/deviceSecurityService';
 import { getDeviceId } from '../services/deviceTracker';
+import { DeviceCustomName, fetchDeviceCustomNames } from '../services/deviceCustomNameService';
 
 const copyToClipboard = async (text: string): Promise<boolean> => {
   if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
@@ -72,6 +73,13 @@ export const DeviceFeatureModal: React.FC<DeviceFeatureModalProps> = ({
   const [newDeviceLabel, setNewDeviceLabel] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [customDeviceNames, setCustomDeviceNames] = useState<Record<string, DeviceCustomName>>({});
+
+  React.useEffect(() => {
+    if (isOpen) {
+      fetchDeviceCustomNames().then(setCustomDeviceNames);
+    }
+  }, [isOpen]);
 
   const cleanAdminKey = useMemo(() => getCleanEmailKey(adminUsername), [adminUsername]);
   const myCurrentDeviceId = useMemo(() => getDeviceId(), []);
@@ -377,8 +385,13 @@ export const DeviceFeatureModal: React.FC<DeviceFeatureModalProps> = ({
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-gray-100 dark:border-gray-700">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-extrabold text-sm text-gray-900 dark:text-white">
-                              {rule.device_label || 'Perangkat Tanpa Nama'}
+                            <span className="font-extrabold text-sm text-gray-900 dark:text-white flex items-center gap-1.5 flex-wrap">
+                              {customDeviceNames[(rule.device_id || '').trim()]?.custom_name && (
+                                <span className="text-blue-600 dark:text-blue-400 font-black bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-md text-xs">
+                                  {customDeviceNames[(rule.device_id || '').trim()].custom_name}
+                                </span>
+                              )}
+                              <span>{rule.device_label || 'Perangkat'}</span>
                             </span>
                             {isCurrent && (
                               <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300">
