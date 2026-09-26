@@ -4419,7 +4419,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
 
       // Data Refresh on View Switch
-      if (['EMPLOYEES', 'PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'LEADER_2_DATA', 'LEADER_PENDING_ADMIN', 'GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_REPORT', 'SCAN_ALL'].includes(activeView)) fetchEmployees();
+      if (['EMPLOYEES', 'PACKING_DATA', 'PACKING_2_DATA', 'SORTIR_DATA', 'PICKER_DATA', 'CHECKER_DATA', 'LOGISTIK_DATA', 'LEADER_2_DATA', 'LEADER_PENDING_ADMIN', 'GUDANG_PENDING', 'GUDANG_READY', 'GUDANG_CANCEL', 'GUDANG_REPORT', 'GUDANG_BUNDLING', 'OJOL_DATA', 'SCAN_ALL'].includes(activeView)) fetchEmployees();
       if (activeView === 'ADMIN_MANAGEMENT') fetchAdmins();
       if (activeView === 'ACCESS') fetchBlockedStatus();
       if (activeView === 'ACCESS') fetchBlockedStatus();
@@ -5463,33 +5463,253 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }, [isBatchConfirmModalOpen]);
 
 
-   // 5. Dynamic Staff List Logic (Data Driven + Shift Filter)
-   // OPTIMIZED: Uses pre-loaded employees list directly for instant (0ms) response without network lag
-   useEffect(() => {
-      if (activeView !== 'PACKING_DATA' && activeView !== 'PACKING_2_DATA' && activeView !== 'SORTIR_DATA' && (activeView !== 'PICKER_DATA' && activeView !== 'CHECKER_DATA') && activeView !== 'LEADER_2_DATA' && activeView !== 'LEADER_PENDING_ADMIN' && activeView !== 'GUDANG_PENDING' && activeView !== 'GUDANG_READY' && activeView !== 'GUDANG_CANCEL' && activeView !== 'GUDANG_REPORT' && activeView !== 'SCAN_ALL') return;
+   // Helper untuk mencocokkan shift staf aktif
+   const checkEmployeeMatchesShift = useCallback((empShift: string | null | undefined, filterShift: string): boolean => {
+      if (!filterShift || filterShift === 'ALL') return true;
+      if (!empShift) return false;
+      if (empShift === filterShift) return true;
+      return empShift.toLowerCase().includes(filterShift.toLowerCase());
+   }, []);
 
-      if (employees && employees.length > 0) {
-         let filtered = employees;
-         if (filterPackingShift !== 'ALL') {
-            filtered = filtered.filter(e => e.shift === filterPackingShift);
-         }
-         const names = filtered.map(e => e.name).filter(Boolean).sort((a, b) => a.localeCompare(b));
-         setPackingStaffList(Array.from(new Set(names)));
-         return;
+   // 5. Dynamic Active Staff List Logic (HANYA STAF YANG SCAN PADA HARI / TANGGAL TERPILIH)
+   useEffect(() => {
+      const SUPPORTED_STAFF_VIEWS: AdminView[] = [
+         'PACKING_DATA',
+         'PACKING_2_DATA',
+         'SORTIR_DATA',
+         'PICKER_DATA',
+         'CHECKER_DATA',
+         'LEADER_2_DATA',
+         'LEADER_PENDING_ADMIN',
+         'GUDANG_PENDING',
+         'GUDANG_READY',
+         'GUDANG_CANCEL',
+         'GUDANG_REPORT',
+         'GUDANG_BUNDLING',
+         'LOGISTIK_DATA',
+         'SCAN_ALL'
+      ];
+
+      if (!SUPPORTED_STAFF_VIEWS.includes(activeView)) return;
+
+      let isCancelled = false;
+
+      // 1. Ambil master employees (state atau localStorage cache) untuk mapping shift
+      let baseEmployees = employees;
+      if (!baseEmployees || baseEmployees.length === 0) {
+         try {
+            const cached = localStorage.getItem('app_employees_cache');
+            if (cached) baseEmployees = JSON.parse(cached);
+         } catch (e) {}
       }
 
-      // Fallback only if employees not loaded yet
-      supabase.from('employees').select('name, shift').then(({ data }) => {
-         if (data) {
-            let filtered = data;
-            if (filterPackingShift !== 'ALL') {
-               filtered = filtered.filter((e: any) => e.shift === filterPackingShift);
-            }
-            const names = filtered.map((e: any) => e.name).filter(Boolean).sort((a: any, b: any) => a.localeCompare(b));
-            setPackingStaffList(Array.from(new Set(names)));
+      const empShiftMap = new Map<string, string>();
+      if (baseEmployees && baseEmployees.length > 0) {
+         baseEmployees.forEach(e => {
+            if (e.name) empShiftMap.set(e.name.trim().toLowerCase(), e.shift || '');
+         });
+      }
+
+      const staffSet = new Set<string>();
+
+      // Helper untuk validasi dan menambahkan nama yang cocok dengan filter shift
+      const addStaffIfMatches = (rawName: string | null | undefined) => {
+         if (!rawName || typeof rawName !== 'string') return;
+         const trimmed = rawName.trim();
+         if (!trimmed || trimmed === '-' || trimmed === 'Unknown' || trimmed === 'null' || trimmed === 'undefined') return;
+         const empShift = empShiftMap.get(trimmed.toLowerCase());
+         if (checkEmployeeMatchesShift(empShift, filterPackingShift)) {
+            staffSet.add(trimmed);
          }
-      }).catch(() => {});
-   }, [activeView, filterPackingShift, employees]);
+      };
+
+      // 2. Tampilkan instan nama dari data halaman saat ini agar tidak delay/kosong di UI
+      if (packingData && packingData.length > 0) {
+         packingData.forEach((item: any) => {
+            addStaffIfMatches(item.employee_name);
+            addStaffIfMatches(item.leader_name);
+            addStaffIfMatches(item.leader_profile);
+            if (Array.isArray(item.team_members)) {
+               item.team_members.forEach((m: any) => {
+                  const mName = typeof m === 'string' ? m : m?.name;
+                  addStaffIfMatches(mName);
+               });
+            }
+         });
+         if (staffSet.size > 0) {
+            setPackingStaffList(Array.from(staffSet).sort((a, b) => a.localeCompare(b)));
+         }
+      }
+
+      // 3. Tentukan rentang tanggal
+      const isRange = canUse7DaysRangeFilter && dateFilterMode === 'RANGE' && hasExecutedRangeSearch;
+      const startDateStr = isRange ? (appliedRangeStartDate || rangeStartDate) : (canManageDate ? filterDate : getTodayString());
+      const endDateStr = isRange ? (appliedRangeEndDate || rangeEndDate) : startDateStr;
+      const startMs = new Date(`${startDateStr}T00:00:00`).getTime();
+      const endMs = new Date(`${endDateStr}T23:59:59.999`).getTime();
+
+      // 4. Jika ada data di Firestore cache untuk tanggal tersebut, langsung ekstrak stafnya
+      if (firestoreDayDataCache.has(startDateStr)) {
+         const dayDocs = firestoreDayDataCache.get(startDateStr) || [];
+         dayDocs.forEach((d: any) => {
+            const r = (d.role || '').toUpperCase();
+            let isRoleMatch = false;
+            if (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') {
+               isRoleMatch = (r === 'PACKING' || r.includes('PACK'));
+            } else if (activeView === 'SORTIR_DATA') {
+               isRoleMatch = (r === 'SORTIR');
+            } else if (activeView === 'PICKER_DATA') {
+               isRoleMatch = (r === 'PICKER' || r.includes('PICK'));
+            } else if (activeView === 'CHECKER_DATA') {
+               isRoleMatch = (r === 'CHECKER' || r.includes('CHECK'));
+            } else if (activeView === 'LOGISTIK_DATA') {
+               isRoleMatch = (r === 'LOGISTIK');
+            } else if (activeView.startsWith('GUDANG')) {
+               isRoleMatch = (r === 'GUDANG' || r.includes('GUDANG'));
+            } else {
+               isRoleMatch = (filterPackingRole === 'ALL' || r === filterPackingRole);
+            }
+
+            if (isRoleMatch) {
+               addStaffIfMatches(d.employee_name || d.admin_name || d.leader_name);
+            }
+         });
+      }
+
+      // 5. Query Supabase secara async di background untuk seluruh staf aktif (semua pagination)
+      const fetchActiveStaff = async () => {
+         try {
+            let effectiveTable = 'scanned_items';
+            const isLeader2 = activeView === 'LEADER_2_DATA';
+            const isLeaderPending = activeView === 'LEADER_PENDING_ADMIN';
+            if (isLeader2) effectiveTable = 'leader_scan_2';
+            else if (isLeaderPending) effectiveTable = 'leader_pending_scans';
+
+            let effectiveRole = filterPackingRole;
+            if (activeView === 'PACKING_DATA' || activeView === 'PACKING_2_DATA') effectiveRole = 'PACKING';
+            else if (activeView.startsWith('GUDANG')) effectiveRole = 'GUDANG';
+            else if (activeView === 'SORTIR_DATA') effectiveRole = 'SORTIR';
+            else if (activeView === 'PICKER_DATA') effectiveRole = 'PICKER';
+            else if (activeView === 'LOGISTIK_DATA') effectiveRole = 'LOGISTIK';
+            else if (activeView === 'CHECKER_DATA') effectiveRole = 'CHECKER';
+
+            let menuContext: string | null = null;
+            if (activeView === 'GUDANG_CANCEL') menuContext = 'CANCEL';
+            else if (activeView === 'GUDANG_PENDING') menuContext = 'PENDING';
+            else if (activeView === 'GUDANG_READY') menuContext = 'READY';
+            else if (activeView === 'GUDANG_REPORT') menuContext = 'REPORT';
+            else if (activeView === 'GUDANG_BUNDLING') menuContext = 'BUNDLING';
+
+            const selectCols = (isLeader2 || isLeaderPending) ? 'leader_name, leader_profile' : 'employee_name, team_members';
+
+            // Hitung total scan untuk menentukan chunk pagination (cepat, HEAD request)
+            let countQuery = supabase
+               .from(effectiveTable)
+               .select('id', { count: 'exact', head: true })
+               .gte('timestamp', startMs)
+               .lte('timestamp', endMs);
+
+            if (effectiveRole !== 'ALL' && !isLeader2 && !isLeaderPending) {
+               countQuery = countQuery.eq('role', effectiveRole);
+            }
+            if (menuContext) {
+               countQuery = countQuery.eq('menu_context', menuContext);
+            }
+
+            const { count } = await countQuery;
+            if (isCancelled) return;
+
+            const totalCount = count || 0;
+            if (totalCount > 0) {
+               const chunkSize = 1000;
+               // Ambil sampai 50 chunk (50.000 data per hari) secara paralel
+               const numChunks = Math.min(50, Math.ceil(totalCount / chunkSize));
+               const chunkPromises = [];
+
+               for (let i = 0; i < numChunks; i++) {
+                  const from = i * chunkSize;
+                  const to = from + chunkSize - 1;
+                  let q = supabase
+                     .from(effectiveTable)
+                     .select(selectCols)
+                     .gte('timestamp', startMs)
+                     .lte('timestamp', endMs);
+
+                  if (effectiveRole !== 'ALL' && !isLeader2 && !isLeaderPending) {
+                     q = q.eq('role', effectiveRole);
+                  }
+                  if (menuContext) {
+                     q = q.eq('menu_context', menuContext);
+                  }
+                  chunkPromises.push(q.range(from, to));
+               }
+
+               const results = await Promise.all(chunkPromises);
+               if (isCancelled) return;
+
+               results.forEach(res => {
+                  if (res.data) {
+                     res.data.forEach((row: any) => {
+                        addStaffIfMatches(row.employee_name);
+                        addStaffIfMatches(row.leader_name);
+                        addStaffIfMatches(row.leader_profile);
+                        if (Array.isArray(row.team_members)) {
+                           row.team_members.forEach((m: any) => {
+                              const mName = typeof m === 'string' ? m : m?.name;
+                              addStaffIfMatches(mName);
+                           });
+                        }
+                     });
+                  }
+               });
+            }
+
+            if (!isCancelled) {
+               const sortedList = Array.from(staffSet).sort((a, b) => a.localeCompare(b));
+               setPackingStaffList(sortedList);
+               if (filterPackingStaff !== 'ALL' && sortedList.length > 0 && !sortedList.includes(filterPackingStaff)) {
+                  setFilterPackingStaff('ALL');
+               }
+            }
+         } catch (err) {
+            console.error("Error loading active staff list:", err);
+         }
+      };
+
+      fetchActiveStaff();
+
+      // Fallback: Jika master employees masih kosong di memori, load dari DB di background tanpa lag
+      if ((!baseEmployees || baseEmployees.length === 0) && !isCancelled) {
+         supabase.from('employees').select('*').order('name').then(({ data }) => {
+            if (data && !isCancelled) {
+               setEmployees(data as Employee[]);
+               try {
+                  localStorage.setItem('app_employees_cache', JSON.stringify(data));
+               } catch (e) {}
+            }
+         }).catch(() => {});
+      }
+
+      return () => {
+         isCancelled = true;
+      };
+   }, [
+      activeView,
+      filterPackingShift,
+      filterPackingRole,
+      filterDate,
+      canManageDate,
+      dateFilterMode,
+      canUse7DaysRangeFilter,
+      appliedRangeStartDate,
+      appliedRangeEndDate,
+      rangeStartDate,
+      rangeEndDate,
+      hasExecutedRangeSearch,
+      forcedDataSource,
+      employees,
+      checkEmployeeMatchesShift
+   ]);
 
    // --- MEMOIZED FILTERS ---
    const allUsers = useMemo(() =>
@@ -9359,7 +9579,7 @@ Data yang dihapus tidak dapat dipulihkan.`)) {
 
    const fetchEmployees = async () => {
       // Permission guards
-      if (!hasPermission('manage_employees') && !hasPermission('view_packing') && !hasPermission('view_sortir') && !hasPermission('view_scan_all') && !hasPermission('view_ojol')) return;
+      if (!hasPermission('manage_employees') && !hasPermission('view_packing') && !hasPermission('view_sortir') && !hasPermission('view_picker') && !hasPermission('view_checker') && !hasPermission('view_scan_all') && !hasPermission('view_ojol') && !hasPermission('view_leader') && !hasPermission('view_gudang') && !hasPermission('view_logistik')) return;
 
       // CACHE: Try loading from LocalStorage first
       try {
@@ -11090,7 +11310,7 @@ if (filterPackingShift !== 'ALL') {
          // 1. Get Shift/Map Info
          const { data: empData } = await activeClient.from('employees').select('name, shift');
          const shiftToNamesMap: Record<string, string[]> = {};
-         const staffList: string[] = [];
+         const shiftMap = new Map<string, string>();
 
          if (empData) {
             empData.forEach((e: any) => {
@@ -11098,20 +11318,87 @@ if (filterPackingShift !== 'ALL') {
                   if (!shiftToNamesMap[e.shift]) shiftToNamesMap[e.shift] = [];
                   shiftToNamesMap[e.shift].push(e.name);
                }
-               if (e.name) staffList.push(e.name);
+               if (e.name) shiftMap.set(e.name.trim().toLowerCase(), e.shift);
             });
          }
 
-         // APPLY SHIFT FILTER TO STAFF LIST
-         let visibleStaff = staffList;
-         if (filterOjolShift !== 'ALL') {
-            visibleStaff = shiftToNamesMap[filterOjolShift] || [];
-         }
-         setOjolStaffList(Array.from(new Set(visibleStaff)).sort());
+         // APPLY ACTIVE OJOL STAFF LIST FOR SELECTED DATE (HANYA STAF YANG SCAN PADA HARI TERSEBUT)
+         const ojolStaffSet = new Set<string>();
 
-         const shiftMap = new Map<string, string>();
-         if (empData) {
-            empData.forEach((e: any) => shiftMap.set(e.name, e.shift));
+         // 1. Cek cache Firestore jika ada
+         if (firestoreDayDataCache.has(effectiveDate)) {
+            const cachedDocs = firestoreDayDataCache.get(effectiveDate) || [];
+            cachedDocs.forEach((d: any) => {
+               const r = (d.role || '').toUpperCase();
+               if (r === 'OJOL' || r === 'OJOL_DATA') {
+                  const sName = (d.employee_name || d.admin_name || '').trim();
+                  if (sName && sName !== '-' && sName !== 'Unknown') {
+                     ojolStaffSet.add(sName);
+                  }
+               }
+            });
+         }
+
+         // 2. Query Supabase untuk staf yang scan OJOL pada tanggal tersebut (semua pagination)
+         try {
+            const startOfDayMs = new Date(`${effectiveDate}T00:00:00`).getTime();
+            const endOfDayMs = new Date(`${effectiveDate}T23:59:59.999`).getTime();
+
+            const { count: ojolCount } = await activeClient
+               .from('scanned_items')
+               .select('id', { count: 'exact', head: true })
+               .gte('timestamp', startOfDayMs)
+               .lte('timestamp', endOfDayMs)
+               .in('role', ['OJOL', 'Ojol']);
+
+            if (ojolCount && ojolCount > 0) {
+               const chunkSize = 1000;
+               const numChunks = Math.min(20, Math.ceil(ojolCount / chunkSize));
+               const chunkPromises = [];
+               for (let i = 0; i < numChunks; i++) {
+                  const from = i * chunkSize;
+                  const to = from + chunkSize - 1;
+                  chunkPromises.push(
+                     activeClient
+                        .from('scanned_items')
+                        .select('employee_name, team_members')
+                        .gte('timestamp', startOfDayMs)
+                        .lte('timestamp', endOfDayMs)
+                        .in('role', ['OJOL', 'Ojol'])
+                        .range(from, to)
+                  );
+               }
+               const results = await Promise.all(chunkPromises);
+               results.forEach(res => {
+                  if (res.data) {
+                     res.data.forEach((row: any) => {
+                        const sName = (row.employee_name || '').trim();
+                        if (sName && sName !== '-' && sName !== 'Unknown' && sName !== 'null') {
+                           ojolStaffSet.add(sName);
+                        }
+                     });
+                  }
+               });
+            }
+         } catch (e) {
+            console.error("Error fetching active ojol staff:", e);
+         }
+
+         // Filter staf OJOL aktif berdasarkan shift terpilih
+         let visibleStaff: string[] = [];
+         ojolStaffSet.forEach(name => {
+            const empShift = shiftMap.get(name.toLowerCase());
+            if (filterOjolShift === 'ALL') {
+               visibleStaff.push(name);
+            } else if (empShift && (empShift === filterOjolShift || empShift.toLowerCase().includes(filterOjolShift.toLowerCase()))) {
+               visibleStaff.push(name);
+            }
+         });
+
+         const sortedOjolStaff = Array.from(new Set(visibleStaff)).sort((a, b) => a.localeCompare(b));
+         setOjolStaffList(sortedOjolStaff);
+         if (filterOjolShift !== 'ALL' && sortedOjolStaff.length > 0 && !sortedOjolStaff.includes(filterOjolShift)) {
+            setFilterOjolStaff('ALL');
          }
 
          // FIRESTORE BRANCH FOR OJOL
