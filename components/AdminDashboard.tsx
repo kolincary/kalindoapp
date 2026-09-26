@@ -1142,10 +1142,12 @@ const PackingCard = React.memo(({
 
 const GlobalSearchCard = React.memo(({
    item,
-   onCopyBarcode
+   onCopyBarcode,
+   showTime = false
 }: {
    item: any,
-   onCopyBarcode?: (barcode: string) => void
+   onCopyBarcode?: (barcode: string) => void,
+   showTime?: boolean
 }) => {
    const staffName = item.employee_name || item.staff || item.user_email || '-';
    const staffInitial = staffName.charAt(0).toUpperCase();
@@ -1214,7 +1216,7 @@ const GlobalSearchCard = React.memo(({
                <div className="min-w-0 flex-1">
                   <span className="font-bold text-xs text-gray-900 dark:text-white block truncate">{staffName}</span>
                   <span className="text-[11px] text-gray-400 font-mono">
-                     {item.timestamp ? new Date(item.timestamp).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}
+                     {item.timestamp ? (showTime ? new Date(item.timestamp).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : new Date(item.timestamp).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })) : '-'}
                   </span>
                </div>
             </div>
@@ -1243,10 +1245,12 @@ const GlobalSearchCard = React.memo(({
 
 const FirestoreSearchCard = React.memo(({
    item,
-   onCopyBarcode
+   onCopyBarcode,
+   showTime = false
 }: {
    item: any,
-   onCopyBarcode?: (barcode: string) => void
+   onCopyBarcode?: (barcode: string) => void,
+   showTime?: boolean
 }) => {
    const staffName = item.employee_name || item.staff || item.user_email || '-';
    const staffInitial = staffName.charAt(0).toUpperCase();
@@ -1287,7 +1291,7 @@ const FirestoreSearchCard = React.memo(({
                <div className="min-w-0 flex-1">
                   <span className="font-bold text-xs text-gray-900 dark:text-white block truncate">{staffName}</span>
                   <span className="text-[11px] text-gray-400 font-mono">
-                     {item.timestamp ? new Date(item.timestamp).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}
+                     {item.timestamp ? (showTime ? new Date(item.timestamp).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : new Date(item.timestamp).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })) : '-'}
                   </span>
                </div>
             </div>
@@ -1785,6 +1789,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
      const [globalSearchTermFs, setGlobalSearchTermFs] = useState('');
      const [globalSearchResultsFs, setGlobalSearchResultsFs] = useState<any[]>([]);
      const [isGlobalSearchingFs, setIsGlobalSearchingFs] = useState(false);
+   const [showSearchTimestampTime, setShowSearchTimestampTime] = useState(false);
 
    // 3d. Admin Shift & Urgent Notes State
    const [adminNotes, setAdminNotes] = useState<AdminShiftNote[]>([]);
@@ -2676,13 +2681,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
    };
 
-   // Secret key listener for Search Data 2 DevMode (typing 'devmodenew')
+   // Secret key listener for Search Data and Search Data 2 DevMode (typing 'devmodenew')
    useEffect(() => {
       const sequence = ['d', 'e', 'v', 'm', 'o', 'd', 'e', 'n', 'e', 'w'];
       let currentIndex = 0;
 
       const handleKeyDown = (e: KeyboardEvent) => {
-         if (activeView !== 'SEARCH_ALL_FIRESTORE') return;
+         if (activeView !== 'SEARCH_ALL' && activeView !== 'SEARCH_ALL_FIRESTORE') return;
          const target = e.target as HTMLElement;
          if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
             return;
@@ -2691,11 +2696,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          if (e.key.toLowerCase() === sequence[currentIndex]) {
             currentIndex++;
             if (currentIndex === sequence.length) {
-               setShowFsSyncDevMode(prev => {
+               setShowSearchTimestampTime(prev => {
                   const newState = !prev;
-                  setSuccessToast(newState ? "⚡ Dev Mode Rahasia Activated!" : "Dev Mode Rahasia Deactivated");
+                  setSuccessToast(newState ? "⚡ Waktu Timestamp Ditampilkan (DevMode)!" : "Waktu Timestamp Disembunyikan");
                   return newState;
                });
+               if (activeView === 'SEARCH_ALL_FIRESTORE') {
+                  setShowFsSyncDevMode(prev => !prev);
+               }
                currentIndex = 0;
             }
          } else {
@@ -9825,6 +9833,40 @@ Data yang dihapus tidak dapat dipulihkan.`)) {
    const [failedScansMassBarcodes, setFailedScansMassBarcodes] = useState<string[]>([]);
    const [isFailedScansMassModalOpen, setIsFailedScansMassModalOpen] = useState(false);
    const [failedScansIgnoreDateFilter, setFailedScansIgnoreDateFilter] = useState(false);
+   const [failedScansUniqueOnly, setFailedScansUniqueOnly] = useState(false);
+
+   // Helper: Generate unique key based strictly on barcode, user (employee_name), role, email (user_email), reason (fail_reason), message error (fail_message)
+   const getFailedScanUniqueKey = (item: any): string => {
+      const barcode = (item?.barcode ?? '').toString().trim().toUpperCase();
+      const user = (item?.employee_name ?? '').toString().trim().toLowerCase();
+      const role = (item?.role ?? '').toString().trim().toUpperCase();
+      const email = (item?.user_email ?? '').toString().trim().toLowerCase();
+      const reason = (item?.fail_reason ?? '').toString().trim().toUpperCase();
+      const message = (item?.fail_message ?? '').toString().trim().toLowerCase();
+      return `${barcode}|||${user}|||${role}|||${email}|||${reason}|||${message}`;
+   };
+
+   // Memoized list filtering duplicates by the 6 specified columns
+   const { displayedFailedScansData, failedScansDuplicateCount } = useMemo(() => {
+      const seen = new Set<string>();
+      let duplicates = 0;
+      const uniqueList: any[] = [];
+
+      for (const item of failedScansData) {
+         const key = getFailedScanUniqueKey(item);
+         if (seen.has(key)) {
+            duplicates++;
+         } else {
+            seen.add(key);
+            uniqueList.push(item);
+         }
+      }
+
+      return {
+         displayedFailedScansData: failedScansUniqueOnly ? uniqueList : failedScansData,
+         failedScansDuplicateCount: duplicates
+      };
+   }, [failedScansData, failedScansUniqueOnly]);
 
    // Filtered Fail Messages for Searchable Dropdown
    const filteredFailMessages = useMemo(() => {
@@ -9987,22 +10029,33 @@ Data yang dihapus tidak dapat dipulihkan.`)) {
 
       setIsResending(true);
       try {
-         const itemsToResend = failedScansData.filter((i: any) => selectedFailedScanIds.includes(i.id));
+         const itemsToResend = displayedFailedScansData.filter((i: any) => selectedFailedScanIds.includes(i.id));
          const successfulIds: string[] = [];
          const newAlerts: string[] = [];
+         const processedKeysInBatch = new Set<string>();
 
          for (const item of itemsToResend) {
-            // Check if it already exists as success in scanned_items (Duplicate check)
+            const batchKey = `${(item.barcode || '').trim().toUpperCase()}___${(item.role || '').trim().toUpperCase()}`;
+
+            // If another failed scan for this same barcode and role was already resent in this current batch
+            if (processedKeysInBatch.has(batchKey)) {
+               // Clean up duplicate failed scan from failed_scans without re-inserting duplicate into scanned_items
+               await supabase.from('failed_scans').delete().eq('id', item.id);
+               successfulIds.push(item.id);
+               continue;
+            }
+
+            // Check if it already exists as success in scanned_items for THIS SPECIFIC ROLE (Duplicate check)
             const { data: duplicate } = await supabase
                .from('scanned_items')
                .select('employee_name')
                .eq('barcode', item.barcode)
-               //.eq('role', item.role) // Optional: strict role check or just barcode check? Usually barcode+role matters.
+               .eq('role', item.role)
                .limit(1)
                .maybeSingle();
 
             if (duplicate) {
-               newAlerts.push(`${item.barcode}: Already exists (Duplicate).`);
+               newAlerts.push(`${item.barcode}: Sudah ada di database untuk role ${item.role} (${duplicate.employee_name || 'Staff'}).`);
                continue;
             }
 
@@ -10011,7 +10064,7 @@ Data yang dihapus tidak dapat dipulihkan.`)) {
             // Insert into scanned_items
             const { error: insertError } = await supabase.from('scanned_items').insert([{
                id: newId,
-               timestamp: Date.now(), // Use NOW for resend, as it is a new valid transaction
+               timestamp: item.timestamp || Date.now(), // Preserve original scan timestamp if available
                barcode: item.barcode,
                role: item.role,
                user_email: item.user_email,
@@ -10023,6 +10076,7 @@ Data yang dihapus tidak dapat dipulihkan.`)) {
             }]);
 
             if (!insertError) {
+               processedKeysInBatch.add(batchKey);
                // Delete from failed_scans
                await supabase.from('failed_scans').delete().eq('id', item.id);
                successfulIds.push(item.id);
@@ -13686,6 +13740,25 @@ if (filterPackingShift !== 'ALL') {
                                                    <span>Reset Massal</span>
                                                 </button>
                                              )}
+
+                                             {/* Tombol Khusus Hanya Data Unik */}
+                                             <button
+                                                type="button"
+                                                onClick={() => setFailedScansUniqueOnly(prev => !prev)}
+                                                className={`h-11 px-4 flex items-center justify-center gap-2 rounded-xl text-xs font-bold shadow-sm whitespace-nowrap cursor-pointer border transition-all ${
+                                                   failedScansUniqueOnly
+                                                      ? 'bg-purple-600 hover:bg-purple-700 text-white border-purple-500 shadow-purple-600/30 ring-2 ring-purple-400'
+                                                      : 'bg-white dark:bg-gray-800 hover:bg-purple-50 dark:hover:bg-gray-700 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-700'
+                                                }`}
+                                                title="Hanya menampilkan data unik jika barcode, user, role, email, reason, dan message error sama"
+                                             >
+                                                <Sparkles size={16} className={failedScansUniqueOnly ? 'text-amber-300 animate-pulse' : 'text-purple-600 dark:text-purple-400'} />
+                                                <span>
+                                                   {failedScansUniqueOnly
+                                                      ? `Data Unik Aktif (${displayedFailedScansData.length})`
+                                                      : `Hanya Data Unik ${failedScansDuplicateCount > 0 ? `(${failedScansDuplicateCount} Duplikat)` : ''}`}
+                                                </span>
+                                             </button>
                                           </>
                                        )}
 
@@ -13833,7 +13906,7 @@ if (filterPackingShift !== 'ALL') {
 
                                        <button onClick={() => {
                                           if (activeView === 'OJOL_DATA') { setFilterOjolShift('ALL'); setFilterOjolStaff('ALL'); setOjolSearch(''); }
-                                          else if (activeView === 'FAILED_SCANS') { setFailedScansStaffFilter('ALL'); setFailedScansRoleFilter('ALL'); setFailedScansSearch(''); setFailedScansMessageFilter('ALL'); setFailedScansMassBarcodes([]); setFailedScansMassInput(''); }
+                                          else if (activeView === 'FAILED_SCANS') { setFailedScansStaffFilter('ALL'); setFailedScansRoleFilter('ALL'); setFailedScansSearch(''); setFailedScansMessageFilter('ALL'); setFailedScansMassBarcodes([]); setFailedScansMassInput(''); setFailedScansUniqueOnly(false); }
                                           else { handleResetPackingFilters(); }
                                        }} className="h-11 w-11 flex items-center justify-center bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-xl text-gray-500 dark:text-gray-300 transition-all active:scale-95 shadow-sm border border-transparent hover:border-gray-300 dark:hover:border-gray-500" title="Reset Filters"><RotateCcw size={18} /></button>
 
@@ -15330,7 +15403,9 @@ if (filterPackingShift !== 'ALL') {
                                                             </td>
                                                             <td className="px-4 py-3.5 text-xs font-mono text-gray-500 dark:text-gray-400">
                                                                <div>{item.timestamp ? new Date(item.timestamp).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}</div>
-                                                               <div className="text-[11px] text-gray-400">{item.timestamp ? new Date(item.timestamp).toLocaleTimeString('id-ID') : ''}</div>
+                                                               {showSearchTimestampTime && item.timestamp && (
+                                                                  <div className="text-[11px] text-gray-400">{new Date(item.timestamp).toLocaleTimeString('id-ID')}</div>
+                                                               )}
                                                             </td>
                                                             <td className="px-4 py-3.5 text-xs sm:text-sm font-semibold text-gray-800 dark:text-gray-200">
                                                                <div className="flex items-center gap-2.5">
@@ -15798,7 +15873,9 @@ if (filterPackingShift !== 'ALL') {
                                                             </td>
                                                             <td className="px-4 py-3.5 text-xs font-mono text-gray-500 dark:text-gray-400">
                                                                <div>{item.timestamp ? new Date(item.timestamp).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}</div>
-                                                               <div className="text-[11px] text-gray-400">{item.timestamp ? new Date(item.timestamp).toLocaleTimeString('id-ID') : ''}</div>
+                                                               {showSearchTimestampTime && item.timestamp && (
+                                                                  <div className="text-[11px] text-gray-400">{new Date(item.timestamp).toLocaleTimeString('id-ID')}</div>
+                                                               )}
                                                             </td>
                                                             <td className="px-4 py-3.5 text-xs sm:text-sm font-semibold text-gray-800 dark:text-gray-200">
                                                                <div className="flex items-center gap-2.5">
@@ -24135,6 +24212,21 @@ LXAD-1234567890`}
                                                    <Layers size={12} /> {failedScansMassBarcodes.length} Barcode Massal
                                                 </span>
                                              )}
+                                             <button
+                                                type="button"
+                                                onClick={() => setFailedScansUniqueOnly(prev => !prev)}
+                                                className={`px-2.5 py-0.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border ${
+                                                   failedScansUniqueOnly
+                                                      ? 'bg-purple-600 text-white border-purple-500 shadow-sm'
+                                                      : 'bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 dark:hover:bg-purple-900/50 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800'
+                                                }`}
+                                                title="Klik untuk beralih mode hanya menampilkan data unik (barcode, user, role, email, reason, error sama)"
+                                             >
+                                                <Sparkles size={12} className={failedScansUniqueOnly ? 'text-amber-300' : 'text-purple-600 dark:text-purple-400'} />
+                                                {failedScansUniqueOnly
+                                                   ? `Mode Unik Aktif (${displayedFailedScansData.length} Data • ${failedScansDuplicateCount} Duplikat Disembunyikan)`
+                                                   : `Tampilkan Data Unik ${failedScansDuplicateCount > 0 ? `(${failedScansDuplicateCount} Duplikat)` : ''}`}
+                                             </button>
                                           </h3>
                                        </div>
                                     </div>
@@ -24161,7 +24253,7 @@ LXAD-1234567890`}
                                        <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200 font-semibold">
                                           <Layers size={16} className="text-amber-600 dark:text-amber-400 shrink-0" />
                                           <span>
-                                             Filter Massal Aktif: Ditemukan <b>{failedScansTotalRows.toLocaleString()}</b> scan gagal dari <b>{failedScansMassBarcodes.length}</b> barcode yang dicari.
+                                             Filter Massal Aktif: Ditemukan <b>{failedScansUniqueOnly ? displayedFailedScansData.length : failedScansTotalRows.toLocaleString()}</b> scan gagal {failedScansUniqueOnly && <span className="text-purple-600 dark:text-purple-400 font-bold">(Unik)</span>} dari <b>{failedScansMassBarcodes.length}</b> barcode yang dicari.
                                           </span>
                                           {failedScansIgnoreDateFilter ? (
                                              <span className="px-2 py-0.5 rounded-full bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100 text-[10px] font-bold">
@@ -24174,6 +24266,18 @@ LXAD-1234567890`}
                                           )}
                                        </div>
                                        <div className="flex items-center gap-2">
+                                          <button
+                                             type="button"
+                                             onClick={() => setFailedScansUniqueOnly(prev => !prev)}
+                                             className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1.5 text-xs border ${
+                                                failedScansUniqueOnly
+                                                   ? 'bg-purple-600 hover:bg-purple-700 text-white border-purple-500 shadow-sm'
+                                                   : 'bg-white dark:bg-gray-800 hover:bg-purple-50 dark:hover:bg-gray-700 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-700'
+                                             }`}
+                                          >
+                                             <Sparkles size={13} className={failedScansUniqueOnly ? 'text-amber-300' : 'text-purple-600'} />
+                                             {failedScansUniqueOnly ? `Unik: ${displayedFailedScansData.length}` : `Hanya Unik (${failedScansDuplicateCount} Duplikat)`}
+                                          </button>
                                           <button
                                              type="button"
                                              onClick={() => setIsFailedScansMassModalOpen(true)}
@@ -24203,10 +24307,12 @@ LXAD-1234567890`}
                                        <Loader2 size={40} className="mb-4 animate-spin text-red-500" />
                                        <p>Loading records...</p>
                                     </div>
-                                 ) : failedScansData.length === 0 ? (
+                                 ) : displayedFailedScansData.length === 0 ? (
                                     <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
                                        <CheckCircle size={48} className="mb-4 text-green-500 opacity-50" />
-                                       <p className="font-medium text-gray-600 dark:text-gray-300">Tidak ada data gagal scan.</p>
+                                       <p className="font-medium text-gray-600 dark:text-gray-300">
+                                          {failedScansData.length > 0 ? "Tidak ada data unik yang memenuhi kriteria." : "Tidak ada data gagal scan."}
+                                       </p>
                                     </div>
                                  ) : (
                                     <div className="flex-1 overflow-hidden relative flex flex-col">
@@ -24221,12 +24327,12 @@ LXAD-1234567890`}
                                                          <input
                                                             type="checkbox"
                                                             className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                                                            checked={selectedFailedScanIds.length === failedScansData.length && failedScansData.length > 0}
+                                                            checked={selectedFailedScanIds.length === displayedFailedScansData.length && displayedFailedScansData.length > 0}
                                                             onChange={() => {
-                                                               if (selectedFailedScanIds.length === failedScansData.length) {
+                                                               if (selectedFailedScanIds.length === displayedFailedScansData.length) {
                                                                   setSelectedFailedScanIds([]);
                                                                } else {
-                                                                  setSelectedFailedScanIds(failedScansData.map(d => d.id));
+                                                                  setSelectedFailedScanIds(displayedFailedScansData.map(d => d.id));
                                                                }
                                                             }}
                                                          />
@@ -24242,7 +24348,7 @@ LXAD-1234567890`}
                                                 </tr>
                                              </thead>
                                              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                                                {failedScansData.map((item: any, idx: number) => {
+                                                {displayedFailedScansData.map((item: any, idx: number) => {
                                                    const isSelected = selectedFailedScanIds.includes(item.id);
                                                    return (
                                                       <tr
@@ -24280,8 +24386,8 @@ LXAD-1234567890`}
                                        </div>
                                        {/* Pagination at Bottom Fixed */}
                                        <div className="p-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 shrink-0 flex flex-col sm:flex-row items-center justify-between gap-4 z-10">
-                                          <div className="flex items-center gap-2"><span className="text-xs text-gray-500 dark:text-gray-400">Rows:</span><select value={failedScansRowsPerPage} onChange={(e) => { setFailedScansRowsPerPage(Number(e.target.value)); setFailedScansPage(1); setTimeout(() => fetchFailedScans(), 100); }} className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-xs px-2 py-1 focus:outline-none"><option value={100}>100</option><option value={200}>200</option><option value={500}>500</option></select></div>
-                                          <div className="flex items-center gap-4"><span className="text-xs text-gray-500 dark:text-gray-400">Page {failedScansPage} of {Math.ceil(failedScansTotalRows / failedScansRowsPerPage) || 1} ({failedScansTotalRows} Total)</span><div className="flex items-center gap-1"><button onClick={() => { setFailedScansPage(p => Math.max(1, p - 1)); setTimeout(() => fetchFailedScans(), 100); }} disabled={failedScansPage === 1} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 text-gray-600 dark:text-gray-300"><ChevronLeft size={18} /></button><button onClick={() => { setFailedScansPage(p => (p * failedScansRowsPerPage < failedScansTotalRows ? p + 1 : p)); setTimeout(() => fetchFailedScans(), 100); }} disabled={failedScansPage * failedScansRowsPerPage >= failedScansTotalRows} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 text-gray-600 dark:text-gray-300"><ChevronRight size={18} /></button></div></div>
+                                          <div className="flex items-center gap-2"><span className="text-xs text-gray-500 dark:text-gray-400">Rows:</span><select value={failedScansRowsPerPage} onChange={(e) => { setFailedScansRowsPerPage(Number(e.target.value)); setFailedScansPage(1); setTimeout(() => fetchFailedScans(), 100); }} className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-xs px-2 py-1 focus:outline-none"><option value={100}>100</option><option value={200}>200</option><option value={500}>500</option><option value={1000}>1000</option></select></div>
+                                          <div className="flex items-center gap-4"><span className="text-xs text-gray-500 dark:text-gray-400">Page {failedScansPage} of {Math.ceil(failedScansTotalRows / failedScansRowsPerPage) || 1} ({failedScansTotalRows} Total{failedScansUniqueOnly ? ` • ${displayedFailedScansData.length} Unik Ditampilkan` : ''})</span><div className="flex items-center gap-1"><button onClick={() => { setFailedScansPage(p => Math.max(1, p - 1)); setTimeout(() => fetchFailedScans(), 100); }} disabled={failedScansPage === 1} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 text-gray-600 dark:text-gray-300"><ChevronLeft size={18} /></button><button onClick={() => { setFailedScansPage(p => (p * failedScansRowsPerPage < failedScansTotalRows ? p + 1 : p)); setTimeout(() => fetchFailedScans(), 100); }} disabled={failedScansPage * failedScansRowsPerPage >= failedScansTotalRows} className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 text-gray-600 dark:text-gray-300"><ChevronRight size={18} /></button></div></div>
                                        </div>
                                     </div>
                                  )}
