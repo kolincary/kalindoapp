@@ -6620,9 +6620,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           const { data: batchData } = await supabase.from('batches').select('excel_filename, created_at').eq('id', batchId).maybeSingle();
           const { data: batchItems } = await supabase.from('batch_items').select('*').eq('batch_id', batchId);
           if (!batchItems || batchItems.length === 0) {
-             await supabase.from('batch_items').delete().eq('batch_id', batchId);
-             await supabase.from('batches').delete().eq('id', batchId);
-             setBatchSummaryData(prev => prev.filter(b => b.id !== batchId));
              return;
           }
 
@@ -6635,9 +6632,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           const existingSet = new Set((existingScans || []).map(s => s.barcode.trim().toUpperCase()));
           const toAutoScan = batchItems.filter(it => !existingSet.has(it.barcode.trim().toUpperCase()));
 
+          let assignedStaff = 'Admin Auto-Complete';
           if (toAutoScan.length > 0) {
              // Look up staff assigned to this batch by the leader
-             let assignedStaff = 'Admin Auto-Complete';
              if (batchData?.excel_filename) {
                 const baseName = batchData.excel_filename.toLowerCase().replace(/\.(xlsx|xls|pdf|csv)\s*$/i, '').trim();
                 const safeSearch = baseName.replace(/"/g, '').replace(/\s+/g, '%').replace(/,/g, '');
@@ -6689,12 +6686,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
              await supabase.from('scanned_items').insert(bulkItems);
           }
 
-          // Delete from batch_items and batches
-          await supabase.from('batch_items').delete().eq('batch_id', batchId);
-          await supabase.from('batches').delete().eq('id', batchId);
-
-          // Remove from admin state so it disappears from UI immediately
-          setBatchSummaryData(prev => prev.filter(b => b.id !== batchId));
+          // Update local progress so it marks completed in UI, but DO NOT delete batches or batch_items
+          setBatchProgressMap(prev => ({
+             ...prev,
+             [batchId]: {
+                ...(prev[batchId] || {}),
+                total: barcodes.length,
+                scanned: barcodes.length,
+                staff: assignedStaff,
+                loading: false
+             }
+          }));
        } catch (err) {
           console.error('Error auto-completing batch in admin:', err);
        }
@@ -6706,9 +6708,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          const { data: batchData } = await supabase.from('batches').select('excel_filename, created_at').eq('id', batchId).single();
          const { data: items } = await supabase.from('batch_items').select('barcode').eq('batch_id', batchId);
          if (!items || items.length === 0) {
-            await supabase.from('batch_items').delete().eq('batch_id', batchId);
-            await supabase.from('batches').delete().eq('id', batchId);
-            setBatchSummaryData(prev => prev.filter(b => b.id !== batchId));
             setBatchProgressMap(prev => ({ ...prev, [batchId]: { total: 0, scanned: 0, staff: '-', loading: false } }));
             return;
          }
@@ -6742,11 +6741,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          } catch (e) {}
 
          const scannedCount = Math.max(sbScannedCount || 0, fsScannedCount);
-
-         if (scannedCount >= 3 || (total > 0 && scannedCount >= total)) {
-            await autoCompleteBatchInAdmin(batchId);
-            return;
-         }
 
          let staffStr = '-';
          if (batchData?.excel_filename) {
@@ -6898,9 +6892,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                .select('id, barcode, batch_id, created_at, msku, qty, order_id')
                .in('batch_id', chunk);
 
-            if (!batchSearch) {
-               q = q.gte('created_at', startOfDay.toISOString()).lte('created_at', endOfDay.toISOString());
-            }
+            // batch_items is already filtered by in('batch_id', chunk)
             return Promise.resolve(q).catch(() => ({ data: [] }));
          });
 
@@ -7785,10 +7777,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const tok1 = parts[1].trim().toUpperCase();
 
       const isBarcodePattern = (t: string) => {
-         return /^(SPXID|SPX|JP|JT|JX|JY|LXAD|JNAP|JNEB|00|10|11|12|TK|ID|NLID|CM|TJNT|SOC|BDG|JKT|SUB)/i.test(t) ||
+         return /^(SPXID|SPX|JP|JT|JX|JY|JZ|GTL|TKP|BLI|LXAD|LEX|JNAP|JNEB|00|10|11|12|TK|ID|NJV|NLID|CM|TJNT|SOC|BDG|JKT|SUB)/i.test(t) ||
                 /\.(PDF|JPG|PNG)$/i.test(t) ||
                 (/^00\d{8,12}$/.test(t)) ||
-                (/^\d{10}$/.test(t) && /^[4-9]/.test(t));
+                (/^\d{10}$/.test(t) && /^[4-9]/.test(t)) ||
+                (/^\d{12}$/.test(t));
       };
 
       const isOrderIdPattern = (t: string) => {

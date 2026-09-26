@@ -83,6 +83,39 @@ export const SOUND_LIBRARY = {
    }
 };
 
+export const getBarcodeCandidates = (raw: string): string[] => {
+   let clean = (raw || '').trim().toUpperCase();
+   if (!clean) return [];
+
+   const candidates = new Set<string>();
+   candidates.add(clean);
+
+   // 1. Without hyphens / spaces / punctuation
+   const unhyphenated = clean.replace(/[^A-Z0-9]/g, '');
+   if (unhyphenated) candidates.add(unhyphenated);
+
+   // 2. Known prefixes with hyphen vs without hyphen (LXAD, JNAP, JNEB)
+   for (const p of ['LXAD', 'JNAP', 'JNEB']) {
+      if (clean.startsWith(p)) {
+         const rest = clean.slice(p.length).replace(/^-+/, '');
+         if (rest.length > 0) {
+            candidates.add(`${p}-${rest}`);
+            candidates.add(`${p}${rest}`);
+         }
+      }
+   }
+
+   // 3. Leading zero padding variations (e.g. SiCepat 10-digit vs 12-digit with 00)
+   if (/^\d{10}$/.test(clean)) {
+      candidates.add('00' + clean);
+   } else if (/^00\d{10}$/.test(clean)) {
+      candidates.add(clean.slice(2));
+   }
+
+   return Array.from(candidates).filter(Boolean);
+};
+
+
 // --- MEMOIZED COMPONENTS ---
 
 const ScanCard = React.memo(({ item, theme, index, onClick, isActuallyCancelled, role }: { item: ScannedItem, theme: any, index: number, onClick?: () => void, isActuallyCancelled?: boolean, role?: string }) => {
@@ -2112,6 +2145,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
        if (strictResiMode || role === UserRole.GUDANG || role === UserRole.OJOL) {
           try {
              const cleanBc = result.barcode.trim().toUpperCase();
+             const candidates = getBarcodeCandidates(result.barcode);
 
              // 1. Role: PICKER
              if ([UserRole.PICKER, UserRole.PICKER_2].includes(role)) {
@@ -2119,7 +2153,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 const { data: scans, error: scansErr } = await supabase
                    .from('scanned_items')
                    .select('employee_name, user_email, role')
-                   .eq('barcode', cleanBc)
+                   .in('barcode', candidates)
                    .in('role', [UserRole.PICKER, UserRole.PICKER_2]);
 
                 if (scansErr) throw scansErr;
@@ -2145,52 +2179,42 @@ export const Dashboard: React.FC<DashboardProps> = ({
                    return;
                 }
 
-                // If not duplicate, check if it is in an active batch (with robust fallbacks)
+                // If not duplicate, check if it is in an active batch (with robust candidate matching)
                 let isValidInBatch = false;
-                const altBc = cleanBc.startsWith('00') ? cleanBc.slice(2) : ('00' + cleanBc);
                 
+                // Priority 1: Supabase batch_items
                 const { data: adminData } = await supabase
                    .from('batch_items')
                    .select('barcode')
-                   .eq('barcode', cleanBc)
+                   .in('barcode', candidates)
                    .limit(1)
                    .maybeSingle();
 
                 if (adminData) {
                    isValidInBatch = true;
+                   result.barcode = adminData.barcode;
                 } else {
-                   // Fallback 1: Check alternate zero padding (e.g. without 00 or with 00)
-                   const { data: altAdmin } = await supabase
-                      .from('batch_items')
-                      .select('barcode')
-                      .eq('barcode', altBc)
-                      .limit(1)
-                      .maybeSingle();
-                   if (altAdmin) {
-                      isValidInBatch = true;
-                      result.barcode = altAdmin.barcode;
-                   }
-
-                   // Fallback 2: Check if already auto-moved from batch_items into scanned_items
+                   // Fallback 1: Check if already auto-moved from batch_items into scanned_items
                    if (!isValidInBatch) {
                       const { data: movedScan } = await supabase
                          .from('scanned_items')
-                         .select('id')
-                         .or(`barcode.eq.${cleanBc},barcode.eq.${altBc}`)
+                         .select('id, barcode')
+                         .in('barcode', candidates)
                          .ilike('description', '%AUTO-BATCH%')
                          .limit(1)
                          .maybeSingle();
                       if (movedScan) {
                          isValidInBatch = true;
+                         if (movedScan.barcode) result.barcode = movedScan.barcode;
                       }
                    }
 
-                   // Fallback 3: Check if it is a Leader assignment / Packing list
+                   // Fallback 2: Check if it is a Leader assignment / Packing list
                    if (!isValidInBatch) {
                       const { data: leaderRow } = await supabase
                          .from('leader_scan_2')
-                         .select('id')
-                         .or(`barcode.eq.${cleanBc},barcode.eq.${altBc}`)
+                         .select('id, barcode')
+                         .in('barcode', candidates)
                          .limit(1)
                          .maybeSingle();
                       if (leaderRow) {
@@ -2198,26 +2222,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       }
                    }
 
-                   // Fallback 4: Check Firestore admin_batch_imports
+                   // Fallback 3: Check Firestore admin_batch_imports across all candidate formats
                    if (!isValidInBatch) {
                       try {
-                         const qFs = query(
-                            collection(db, 'admin_batch_imports'),
-                            where('barcodes', 'array-contains', cleanBc),
-                            limit(1)
-                         );
-                         const snapFs = await getDocs(qFs);
-                         if (!snapFs.empty) {
-                            isValidInBatch = true;
-                         } else if (altBc) {
-                            const qFsAlt = query(
+                         for (const cand of candidates) {
+                            const qFs = query(
                                collection(db, 'admin_batch_imports'),
-                               where('barcodes', 'array-contains', altBc),
+                               where('barcodes', 'array-contains', cand),
                                limit(1)
                             );
-                            const snapFsAlt = await getDocs(qFsAlt);
-                            if (!snapFsAlt.empty) {
+                            const snapFs = await getDocs(qFs);
+                            if (!snapFs.empty) {
                                isValidInBatch = true;
+                               result.barcode = cand;
+                               break;
                             }
                          }
                       } catch (fsErr) {
@@ -2243,62 +2261,47 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
              // 2. Role: OJOL (Strict Validation: Must exist in Batch Management Admin or Auto-Batch)
              else if (role === UserRole.OJOL) {
+                const candidates = getBarcodeCandidates(result.barcode);
                 let isValidInBatch = false;
-                const altBc = cleanBc.startsWith('00') ? cleanBc.slice(2) : ('00' + cleanBc);
 
                 const { data: adminData } = await supabase
                    .from('batch_items')
                    .select('barcode')
-                   .eq('barcode', cleanBc)
+                   .in('barcode', candidates)
                    .limit(1)
                    .maybeSingle();
 
                 if (adminData) {
                    isValidInBatch = true;
+                   result.barcode = adminData.barcode;
                 } else {
-                   const { data: altAdmin } = await supabase
-                      .from('batch_items')
-                      .select('barcode')
-                      .eq('barcode', altBc)
-                      .limit(1)
-                      .maybeSingle();
-                   if (altAdmin) {
-                      isValidInBatch = true;
-                      result.barcode = altAdmin.barcode;
-                   }
-
                    if (!isValidInBatch) {
                       const { data: movedScan } = await supabase
                          .from('scanned_items')
-                         .select('id')
-                         .or(`barcode.eq.${cleanBc},barcode.eq.${altBc}`)
+                         .select('id, barcode')
+                         .in('barcode', candidates)
                          .ilike('description', '%AUTO-BATCH%')
                          .limit(1)
                          .maybeSingle();
                       if (movedScan) {
                          isValidInBatch = true;
+                         if (movedScan.barcode) result.barcode = movedScan.barcode;
                       }
                    }
 
                    if (!isValidInBatch) {
                       try {
-                         const qFs = query(
-                            collection(db, 'admin_batch_imports'),
-                            where('barcodes', 'array-contains', cleanBc),
-                            limit(1)
-                         );
-                         const snapFs = await getDocs(qFs);
-                         if (!snapFs.empty) {
-                            isValidInBatch = true;
-                         } else if (altBc) {
-                            const qFsAlt = query(
+                         for (const cand of candidates) {
+                            const qFs = query(
                                collection(db, 'admin_batch_imports'),
-                               where('barcodes', 'array-contains', altBc),
+                               where('barcodes', 'array-contains', cand),
                                limit(1)
                             );
-                            const snapFsAlt = await getDocs(qFsAlt);
-                            if (!snapFsAlt.empty) {
+                            const snapFs = await getDocs(qFs);
+                            if (!snapFs.empty) {
                                isValidInBatch = true;
+                               result.barcode = cand;
+                               break;
                             }
                          }
                       } catch (fsErr) {
@@ -2324,10 +2327,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
              // 3. Role: GUDANG (Strict Validation: Must be scanned by Picker first)
              else if (role === UserRole.GUDANG) {
+                const candidates = getBarcodeCandidates(result.barcode);
                 const { data: pickerData, error: pickerErr } = await supabase
                    .from('scanned_items')
                    .select('barcode')
-                   .eq('barcode', cleanBc)
+                   .in('barcode', candidates)
                    .in('role', [UserRole.PICKER, UserRole.PICKER_2])
                    .limit(1)
                    .maybeSingle();
@@ -2350,10 +2354,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
              // 4. Role: CHECKER
              else if (role === UserRole.CHECKER) {
+                const candidates = getBarcodeCandidates(result.barcode);
                 const { data: pickerOjolData, error: pickerOjolErr } = await supabase
                    .from('scanned_items')
                    .select('barcode')
-                   .eq('barcode', cleanBc)
+                   .in('barcode', candidates)
                    .in('role', [UserRole.PICKER, UserRole.PICKER_2, UserRole.OJOL])
                    .limit(1)
                    .maybeSingle();
@@ -2368,6 +2373,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                    await recordFail('FORBIDDEN', `Resi belum discan oleh Picker/Ojol: ${result.barcode}`);
                    if (isContinuousScan) {
                       updateContinuousStatus('error', 'Ditolak (Picker/Ojol)');
+                      triggerCameraToast(msg, 'error');
                    } else {
                       setErrorToast(msg);
                       setTimeout(() => setErrorToast(null), 5000);
@@ -2386,10 +2392,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
              // 5. Role: PACKING & PACKING_2
              else if (role === UserRole.PACKING || role === UserRole.PACKING_2) {
+                const candidates = getBarcodeCandidates(result.barcode);
                 const { data: checkerData, error: checkerErr } = await supabase
                    .from('scanned_items')
                    .select('barcode')
-                   .eq('barcode', cleanBc)
+                   .in('barcode', candidates)
                    .eq('role', UserRole.CHECKER)
                    .limit(1)
                    .maybeSingle();
@@ -2420,7 +2427,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 }
              }
           } catch (err: any) {
-             console.error("Strict Resi validation failed:", err);
              playError();
              const msg = "Gagal Validasi Resi Ketat (Network)";
              recordFail('NETWORK', msg);
