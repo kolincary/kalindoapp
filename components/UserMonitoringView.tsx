@@ -38,6 +38,7 @@ import {
   subscribeDeviceSessions,
   UserDeviceSession
 } from '../services/deviceTracker';
+import { DeviceFeatureModal } from './DeviceFeatureModal';
 import {
   DeviceAccessRule,
   UserSecuritySetting,
@@ -80,6 +81,7 @@ export const UserMonitoringView: React.FC<UserMonitoringViewProps> = ({
   const [userSecuritySettings, setUserSecuritySettings] = useState<Record<string, UserSecuritySetting>>({});
   const [isAddDeviceModalOpen, setIsAddDeviceModalOpen] = useState(false);
   const [isManageRulesModalOpen, setIsManageRulesModalOpen] = useState(false);
+  const [featureModalAdmin, setFeatureModalAdmin] = useState<string | null>(null);
   const [rulesSearchTerm, setRulesSearchTerm] = useState('');
 
   // Form State for Manual Device Registration
@@ -1465,6 +1467,15 @@ export const UserMonitoringView: React.FC<UserMonitoringViewProps> = ({
                                     </button>
                                   )}
 
+                                  <button
+                                    onClick={() => setFeatureModalAdmin(group.user_email)}
+                                    className="py-1.5 px-2 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-600 hover:text-white dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition-all flex items-center justify-center gap-1 shadow-2xs active:scale-95 cursor-pointer"
+                                    title="Kelola hak akses fitur khusus (tombol salin, dsb) untuk akun ini"
+                                  >
+                                    <SlidersHorizontal size={12} />
+                                    <span>Fitur</span>
+                                  </button>
+
                                   {isBlocked ? (
                                     <button
                                       onClick={() => handleDeleteRule(group.user_email, device.device_id)}
@@ -2129,6 +2140,14 @@ export const UserMonitoringView: React.FC<UserMonitoringViewProps> = ({
                           </button>
                         )}
                         <button
+                          onClick={() => setFeatureModalAdmin(rule.user_email)}
+                          className="px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-600 hover:text-white dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                          title="Atur Hak Akses Fitur Khusus untuk Akun Ini"
+                        >
+                          <SlidersHorizontal size={12} />
+                          <span>Fitur</span>
+                        </button>
+                        <button
                           onClick={() => handleDeleteRule(rule.user_email, rule.device_id)}
                           className="p-1.5 rounded-xl text-gray-400 hover:text-red-600 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
                           title="Hapus aturan ini"
@@ -2156,6 +2175,17 @@ export const UserMonitoringView: React.FC<UserMonitoringViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL FITUR KHUSUS BERBASIS PERANGKAT */}
+      {featureModalAdmin && (
+        <DeviceFeatureModal
+          isOpen={!!featureModalAdmin}
+          onClose={() => setFeatureModalAdmin(null)}
+          adminUsername={featureModalAdmin}
+          deviceRules={deviceRules}
+          onToast={(msg) => onShowToast?.(msg)}
+        />
       )}
     </div>
   );

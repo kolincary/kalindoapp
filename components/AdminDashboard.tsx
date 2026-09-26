@@ -129,7 +129,12 @@ import {
    subscribeDeviceSessions,
    UserDeviceSession
 } from '../services/deviceTracker';
-
+import { DeviceFeatureModal } from './DeviceFeatureModal';
+import {
+   DeviceAccessRule,
+   subscribeAllDeviceRules,
+   checkDeviceHasFeature
+} from '../services/deviceSecurityService';
 
 // --- TYPES & CONSTANTS ---
 
@@ -1400,11 +1405,13 @@ const OjolCard = React.memo(({
 const AdminTableRow = React.memo(({
    admin,
    onEdit,
-   onDelete
+   onDelete,
+   onManageDeviceFeatures
 }: {
    admin: AdminUser,
    onEdit: (admin: AdminUser) => void,
-   onDelete: (id: number) => void
+   onDelete: (id: number) => void,
+   onManageDeviceFeatures: (admin: AdminUser) => void
 }) => (
    <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
       <td className="p-4 font-medium">{admin.username}</td>
@@ -1423,6 +1430,14 @@ const AdminTableRow = React.memo(({
       </td>
       <td className="p-4 text-right">
          <div className="flex items-center justify-end gap-2">
+            <button
+               type="button"
+               onClick={() => onManageDeviceFeatures(admin)}
+               className="p-2 text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors cursor-pointer"
+               title="Kelola ID Perangkat & Fitur Khusus"
+            >
+               <Laptop size={16} />
+            </button>
             <button onClick={() => onEdit(admin)} className="p-2 text-blue-600 bg-blue-50 dark:bg-blue-900/20 rounded hover:bg-blue-100"><Pencil size={16} /></button>
             <button onClick={() => onDelete(admin.id)} className="p-2 text-red-600 bg-red-50 dark:bg-red-900/20 rounded hover:bg-red-100"><Trash2 size={16} /></button>
          </div>
@@ -2291,6 +2306,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [isBulkAccessModalOpen, setIsBulkAccessModalOpen] = useState(false);
    const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
    const [adminPermSearch, setAdminPermSearch] = useState('');
+   const [adminForDeviceFeatures, setAdminForDeviceFeatures] = useState<AdminUser | null>(null);
+   const [deviceSecurityRules, setDeviceSecurityRules] = useState<DeviceAccessRule[]>([]);
+
+   // Subscribe ke aturan keamanan perangkat & hak akses fitur khusus
+   useEffect(() => {
+      const unsub = subscribeAllDeviceRules((rules) => {
+         setDeviceSecurityRules(rules);
+      });
+      return () => unsub();
+   }, []);
+
+   const deviceRulesMap = useMemo(() => {
+      const map = new Map<string, DeviceAccessRule>();
+      for (let i = 0; i < deviceSecurityRules.length; i++) {
+         const r = deviceSecurityRules[i];
+         map.set(r.id, r);
+      }
+      return map;
+   }, [deviceSecurityRules]);
 
    // Supabase Config State
    const [supaUrl, setSupaUrl] = useState(localStorage.getItem('supabase_url') || '');
@@ -3995,8 +4029,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return true;
    }, []);
 
+   // Cek apakah perangkat aktif saat ini memiliki izin Auto DevMode
+   const hasAutoDevModeFromDevice = useMemo(() => {
+      if (!currentAdmin?.username) return false;
+      const myDevId = getDeviceId();
+      return checkDeviceHasFeature(deviceRulesMap, currentAdmin.username, myDevId, 'devmode_auto_unlock');
+   }, [currentAdmin, deviceRulesMap]);
+
    // Universal DevMode Check (devmodenew)
    const isDevModeNew = Boolean(
+      hasAutoDevModeFromDevice ||
       showSecretMenu ||
       showFsSyncDevMode ||
       (typeof window !== 'undefined' && (
@@ -4017,6 +4059,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const username = currentAdmin.username.toLowerCase();
       return username === 'admin' || username === 'superdev' || username.includes('dev');
    }, [currentAdmin]);
+
+   // Evaluasi Izin Fitur Khusus: Salin Komparasi Logistik (Picker vs Logistik)
+   const canCopyComparison = useMemo(() => {
+      if (isDevModeNew) return true;
+      if (isSuperAdmin) return true;
+      if (!currentAdmin?.username) return false;
+      const myDevId = getDeviceId();
+      return checkDeviceHasFeature(deviceRulesMap, currentAdmin.username, myDevId, 'copy_logistik_comparison');
+   }, [isDevModeNew, isSuperAdmin, currentAdmin, deviceRulesMap]);
 
    // Determine if date filter is unrestricted (No 2-3 day restriction for SuperAdmin, view_gudang permission, or admin3)
    const isDateFilterUnrestricted = useMemo(() => {
@@ -16097,7 +16148,7 @@ if (filterPackingShift !== 'ALL') {
                         {activeView === 'ADMIN_MANAGEMENT' && (
                            <div className="w-full h-full bg-white dark:bg-gray-800 flex flex-col">
                               {isLoadingAdmins ? <div className="p-10 text-center flex-1 flex items-center justify-center"><Loader2 className="animate-spin mx-auto mb-2" /> Loading...</div> : (
-                                 <div className="flex-1 overflow-auto"><table className="w-full text-left whitespace-nowrap"><thead className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10"><tr><th className="p-4 text-xs font-bold text-gray-500 uppercase bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Username</th><th className="p-4 text-xs font-bold text-gray-500 uppercase bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Permissions</th><th className="p-4 text-xs font-bold text-gray-500 uppercase text-right bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Actions</th></tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-700">{filteredAdmins.map(admin => <AdminTableRow key={admin.id} admin={admin} onEdit={handleOpenAdminModal} onDelete={handleDeleteAdmin} />)}</tbody></table></div>
+                                 <div className="flex-1 overflow-auto"><table className="w-full text-left whitespace-nowrap"><thead className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10"><tr><th className="p-4 text-xs font-bold text-gray-500 uppercase bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Username</th><th className="p-4 text-xs font-bold text-gray-500 uppercase bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Permissions</th><th className="p-4 text-xs font-bold text-gray-500 uppercase text-right bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">Actions</th></tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-700">{filteredAdmins.map(admin => <AdminTableRow key={admin.id} admin={admin} onEdit={handleOpenAdminModal} onDelete={handleDeleteAdmin} onManageDeviceFeatures={(adm) => setAdminForDeviceFeatures(adm)} />)}</tbody></table></div>
                               )}
                            </div>
                         )}
@@ -17380,7 +17431,7 @@ if (filterPackingShift !== 'ALL') {
                                                  <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">
                                                     <div className="flex items-center gap-2">
                                                        <span>Barcode / Resi</span>
-                                                       {isDevModeNew && filteredPickerComparisonList.length > 0 && (
+                                                       {canCopyComparison && filteredPickerComparisonList.length > 0 && (
                                                           <button
                                                              onClick={async () => {
                                                                 const textToCopy = filteredPickerComparisonList.map(item => item.barcode).join('\n');
@@ -17436,15 +17487,15 @@ if (filterPackingShift !== 'ALL') {
                                                            {new Date(item.timestamp).toLocaleTimeString('id-ID')}
                                                         </td>
                                                         <td 
-                                                            className={`px-3 py-2 font-mono font-bold text-gray-900 dark:text-gray-100 ${isDevModeNew ? 'select-text cursor-text' : 'select-none cursor-default'}`}
-                                                            onContextMenu={(e) => { if (!isDevModeNew) e.preventDefault(); }}
-                                                            onCopy={(e) => { if (!isDevModeNew) e.preventDefault(); }}
-                                                            onMouseDown={(e) => { if (!isDevModeNew && e.detail > 1) e.preventDefault(); }}
+                                                            className={`px-3 py-2 font-mono font-bold text-gray-900 dark:text-gray-100 ${canCopyComparison ? 'select-text cursor-text' : 'select-none cursor-default'}`}
+                                                            onContextMenu={(e) => { if (!canCopyComparison) e.preventDefault(); }}
+                                                            onCopy={(e) => { if (!canCopyComparison) e.preventDefault(); }}
+                                                            onMouseDown={(e) => { if (!canCopyComparison && e.detail > 1) e.preventDefault(); }}
                                                          >
                                                             <div className="flex items-center gap-1.5 flex-wrap">
                                                               <span 
-                                                                 className={isDevModeNew ? "inline-block select-text" : "select-none pointer-events-none inline-block"} 
-                                                                 style={isDevModeNew ? {} : { userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}
+                                                                 className={canCopyComparison ? "inline-block select-text" : "select-none pointer-events-none inline-block"} 
+                                                                 style={canCopyComparison ? {} : { userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}
                                                               >
                                                                  {item.barcode}
                                                               </span>
@@ -17458,7 +17509,7 @@ if (filterPackingShift !== 'ALL') {
                                                                     PENDING LT3
                                                                  </span>
                                                               )}
-                                                              {isDevModeNew && (
+                                                              {canCopyComparison && (
                                                                  <button
                                                                     onClick={async () => {
                                                                        const ok = await copyToClipboard(item.barcode);
@@ -17729,7 +17780,7 @@ if (filterPackingShift !== 'ALL') {
                                                  <th className="px-3 py-2.5 font-bold text-gray-500 dark:text-gray-400">
                                                     <div className="flex items-center gap-2">
                                                        <span>Barcode / Resi Logistik</span>
-                                                       {isDevModeNew && filteredLogistikComparisonList.length > 0 && (
+                                                       {canCopyComparison && filteredLogistikComparisonList.length > 0 && (
                                                           <button
                                                              onClick={async () => {
                                                                 const textToCopy = filteredLogistikComparisonList.map(item => item.barcode).join('\n');
@@ -17788,15 +17839,15 @@ if (filterPackingShift !== 'ALL') {
                                                           {new Date(item.timestamp).toLocaleTimeString('id-ID')}
                                                        </td>
                                                        <td 
-                                                           className={`px-3 py-2 font-mono font-bold text-gray-900 dark:text-gray-100 ${isDevModeNew ? 'select-text cursor-text' : 'select-none cursor-default'}`}
-                                                           onContextMenu={(e) => { if (!isDevModeNew) e.preventDefault(); }}
-                                                           onCopy={(e) => { if (!isDevModeNew) e.preventDefault(); }}
-                                                           onMouseDown={(e) => { if (!isDevModeNew && e.detail > 1) e.preventDefault(); }}
+                                                           className={`px-3 py-2 font-mono font-bold text-gray-900 dark:text-gray-100 ${canCopyComparison ? 'select-text cursor-text' : 'select-none cursor-default'}`}
+                                                           onContextMenu={(e) => { if (!canCopyComparison) e.preventDefault(); }}
+                                                           onCopy={(e) => { if (!canCopyComparison) e.preventDefault(); }}
+                                                           onMouseDown={(e) => { if (!canCopyComparison && e.detail > 1) e.preventDefault(); }}
                                                         >
                                                            <div className="flex items-center gap-1.5 flex-wrap">
                                                               <span 
-                                                                 className={isDevModeNew ? "inline-block select-text" : "select-none pointer-events-none inline-block"} 
-                                                                 style={isDevModeNew ? {} : { userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}
+                                                                 className={canCopyComparison ? "inline-block select-text" : "select-none pointer-events-none inline-block"} 
+                                                                 style={canCopyComparison ? {} : { userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}
                                                               >
                                                                  {item.barcode}
                                                               </span>
@@ -17805,7 +17856,7 @@ if (filterPackingShift !== 'ALL') {
                                                                     CANCEL
                                                                  </span>
                                                               )}
-                                                              {isDevModeNew && (
+                                                              {canCopyComparison && (
                                                                  <button
                                                                     onClick={async () => {
                                                                        const ok = await copyToClipboard(item.barcode);
@@ -26232,6 +26283,17 @@ LXAD-1234567890`}
                </div>
             )
          }
+
+         {/* MODAL KELOLA ID PERANGKAT & FITUR KHUSUS */}
+         {adminForDeviceFeatures && (
+            <DeviceFeatureModal
+               isOpen={!!adminForDeviceFeatures}
+               onClose={() => setAdminForDeviceFeatures(null)}
+               adminUsername={adminForDeviceFeatures.username}
+               deviceRules={deviceSecurityRules}
+               onToast={(msg) => setSuccessToast(msg)}
+            />
+         )}
 
          {
             isInvoiceImportModalOpen && (

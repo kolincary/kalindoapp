@@ -17,11 +17,34 @@ export interface DeviceAccessRule {
   device_id: string;
   device_label?: string;
   status: 'ALLOWED' | 'BLOCKED';
+  special_features?: string[]; // Hak akses fitur khusus untuk kombinasi akun + perangkat ini
   note?: string;
   created_at: number;
   created_by?: string;
   updated_at?: number;
 }
+
+export interface SpecialFeatureItem {
+  id: string;
+  label: string;
+  description: string;
+  badge?: string;
+}
+
+export const SPECIAL_ADMIN_FEATURES: SpecialFeatureItem[] = [
+  {
+    id: 'copy_logistik_comparison',
+    label: 'Tombol Salin Komparasi Logistik',
+    description: 'Menampilkan tombol Salin di kolom Picker/Ojol & Logistik pada menu Data Logistik, serta membuka izin seleksi barcode tanpa perlu ketik devmodenew.',
+    badge: 'Data Logistik'
+  },
+  {
+    id: 'devmode_auto_unlock',
+    label: 'Auto DevMode Universal',
+    description: 'Membuka otomatis semua fitur rahasia DevMode untuk perangkat ini tanpa perlu mengetik kata sandi devmodenew.',
+    badge: 'Full DevMode'
+  }
+];
 
 export interface UserSecuritySetting {
   user_email: string;
@@ -282,4 +305,83 @@ export const subscribeAllUserSecuritySettings = (
       if (onError) onError(err);
     }
   );
+};
+
+/**
+ * Perbarui daftar fitur khusus untuk kombinasi akun + ID perangkat
+ */
+export const updateDeviceSpecialFeatures = async (
+  userEmail: string,
+  deviceId: string,
+  features: string[],
+  deviceLabel?: string,
+  updatedBy: string = 'admin'
+): Promise<boolean> => {
+  if (!userEmail || !deviceId) return false;
+  const cleanEmail = getCleanEmailKey(userEmail);
+  const ruleDocId = getDeviceRuleDocId(userEmail, deviceId);
+  const ruleRef = doc(db, 'device_access_rules', ruleDocId);
+
+  const payload: Partial<DeviceAccessRule> = {
+    id: ruleDocId,
+    user_email: userEmail.toLowerCase().trim(),
+    device_id: deviceId.trim(),
+    status: 'ALLOWED', // Otomatis pastikan status ALLOWED saat fitur diberikan
+    special_features: features,
+    updated_at: Date.now()
+  };
+
+  if (deviceLabel) {
+    payload.device_label = deviceLabel;
+  }
+
+  await setDoc(ruleRef, payload, { merge: true });
+  return true;
+};
+
+/**
+ * Toggle (aktif/nonaktif) satu fitur khusus pada suatu perangkat
+ */
+export const toggleDeviceSpecialFeature = async (
+  userEmail: string,
+  deviceId: string,
+  featureId: string,
+  currentFeatures: string[] = [],
+  deviceLabel?: string
+): Promise<boolean> => {
+  const hasFeature = currentFeatures.includes(featureId);
+  const nextFeatures = hasFeature
+    ? currentFeatures.filter(f => f !== featureId)
+    : [...currentFeatures, featureId];
+
+  return updateDeviceSpecialFeatures(userEmail, deviceId, nextFeatures, deviceLabel);
+};
+
+/**
+ * Cek apakah perangkat saat ini memiliki izin untuk fitur khusus tertentu
+ */
+export const checkDeviceHasFeature = (
+  rules: DeviceAccessRule[] | Map<string, DeviceAccessRule> | undefined | null,
+  userEmail: string | undefined | null,
+  deviceId: string | undefined | null,
+  featureKey: string
+): boolean => {
+  if (!rules || !userEmail || !deviceId || !featureKey) return false;
+
+  const cleanEmail = getCleanEmailKey(userEmail);
+  const cleanDeviceId = deviceId.trim();
+  const ruleDocId = `${cleanEmail}_${cleanDeviceId}`;
+
+  let rule: DeviceAccessRule | undefined;
+  if (rules instanceof Map) {
+    rule = rules.get(ruleDocId);
+  } else if (Array.isArray(rules)) {
+    rule = rules.find(r => r.id === ruleDocId || (r.user_email?.toLowerCase().trim() === cleanEmail && r.device_id?.trim() === cleanDeviceId));
+  }
+
+  if (!rule || rule.status === 'BLOCKED') return false;
+
+  const features = rule.special_features || [];
+  // Izin granted jika fitur spesifik ada atau jika memiliki devmode_auto_unlock
+  return features.includes(featureKey) || features.includes('devmode_auto_unlock');
 };
