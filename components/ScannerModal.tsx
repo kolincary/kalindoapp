@@ -1,6 +1,6 @@
 
 import React, { useEffect, useRef, useState } from 'react';
-import { X, Zap, Loader2, CheckCircle2, XCircle, AlertCircle, Infinity, Repeat } from 'lucide-react';
+import { X, Zap, Loader2, CheckCircle2, XCircle, AlertCircle, Infinity, Repeat, Pause } from 'lucide-react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats, Html5QrcodeScannerState } from "html5-qrcode";
 
 interface RecentScan {
@@ -20,6 +20,7 @@ interface ScannerModalProps {
    recentScans?: RecentScan[];
    toastMessage?: { message: string, type: 'error' | 'success' } | null;
    scanSpeed?: 'SLOW' | 'NORMAL' | 'FAST' | 'TURBO'; // New Prop
+   isPaused?: boolean; // Auto-pause scanning when confirmation/acknowledgment is active
 }
 
 export const ScannerModal: React.FC<ScannerModalProps> = ({
@@ -31,7 +32,8 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
    onToggleContinuous,
    recentScans = [],
    toastMessage,
-   scanSpeed = 'NORMAL' // Default
+   scanSpeed = 'NORMAL', // Default
+   isPaused = false
 }) => {
    const [permissionError, setPermissionError] = useState(false);
    const readerId = "reader-canvas";
@@ -40,11 +42,16 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
    // CRITICAL FIX: Use a Ref for the callback to prevent the useEffect from
    // re-triggering (restarting camera) whenever the parent component updates.
    const onCaptureRef = useRef(onCapture);
+   const isPausedRef = useRef(isPaused);
 
-   // Update the ref whenever the parent function changes
+   // Update the refs whenever the parent values change
    useEffect(() => {
       onCaptureRef.current = onCapture;
    }, [onCapture]);
+
+   useEffect(() => {
+      isPausedRef.current = isPaused;
+   }, [isPaused]);
 
    useEffect(() => {
       let isMounted = true;
@@ -104,6 +111,8 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                config,
                (decodedText) => {
                   if (isMounted) {
+                     // Check paused state before triggering capture
+                     if (isPausedRef.current) return;
                      // Use the REF current value, not the prop directly
                      onCaptureRef.current(decodedText);
                   }
@@ -180,6 +189,14 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                <div className="w-full h-full relative">
                   <div id={readerId} className="w-full h-full"></div>
 
+                  {/* Paused Indicator Overlay Badge */}
+                  {isPaused && (
+                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 bg-amber-500 text-black px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-xl border-2 border-amber-300 animate-pulse pointer-events-none">
+                        <Pause size={14} className="fill-black" />
+                        <span>Scanner Dijeda (Wajib Konfirmasi)</span>
+                     </div>
+                  )}
+
                   {/* Toast Overlay */}
                   {toastMessage && (
                      <div className="absolute top-24 left-1/2 -translate-x-1/2 z-50 animate-[shake_0.4s_ease-in-out] w-[90%] max-w-sm flex justify-center pointer-events-none">
@@ -194,13 +211,13 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                   <div className="absolute inset-0 bg-black/40 pointer-events-none z-10">
                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[70%] aspect-square max-w-xs bg-transparent rounded-3xl shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]">
                         {/* Corner Markers */}
-                        <div className="absolute top-0 left-0 w-12 h-12 border-t-4 border-l-4 border-white rounded-tl-3xl"></div>
-                        <div className="absolute top-0 right-0 w-12 h-12 border-t-4 border-r-4 border-white rounded-tr-3xl"></div>
-                        <div className="absolute bottom-0 left-0 w-12 h-12 border-b-4 border-l-4 border-white rounded-bl-3xl"></div>
-                        <div className="absolute bottom-0 right-0 w-12 h-12 border-b-4 border-r-4 border-white rounded-br-3xl"></div>
+                        <div className={`absolute top-0 left-0 w-12 h-12 border-t-4 border-l-4 rounded-tl-3xl transition-colors ${isPaused ? 'border-amber-400' : 'border-white'}`}></div>
+                        <div className={`absolute top-0 right-0 w-12 h-12 border-t-4 border-r-4 rounded-tr-3xl transition-colors ${isPaused ? 'border-amber-400' : 'border-white'}`}></div>
+                        <div className={`absolute bottom-0 left-0 w-12 h-12 border-b-4 border-l-4 rounded-bl-3xl transition-colors ${isPaused ? 'border-amber-400' : 'border-white'}`}></div>
+                        <div className={`absolute bottom-0 right-0 w-12 h-12 border-b-4 border-r-4 rounded-br-3xl transition-colors ${isPaused ? 'border-amber-400' : 'border-white'}`}></div>
 
-                        {/* Scanning Animation Line (Only show if NOT continuous, or keep it always for effect) */}
-                        {(!isProcessing || isContinuousScan) && (
+                        {/* Scanning Animation Line (Hide when paused) */}
+                        {(!isProcessing || isContinuousScan) && !isPaused && (
                            <div className={`absolute top-0 left-2 right-2 h-0.5 bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.8)] animate-scan-line opacity-80 ${scanSpeed === 'TURBO' ? 'duration-700' : scanSpeed === 'FAST' ? 'duration-1000' : scanSpeed === 'SLOW' ? 'duration-[3000ms]' : 'duration-[2000ms]'}`}></div>
                         )}
                      </div>
@@ -243,7 +260,16 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
 
          {/* Bottom Status */}
          <div className={`bg-black/90 p-8 flex flex-col items-center justify-center relative z-20 rounded-t-3xl transition-all ${isContinuousScan ? 'pb-8 pt-4' : 'pb-10'}`}>
-            {isProcessing && !isContinuousScan ? (
+            {isPaused ? (
+               <div className="flex flex-col items-center">
+                  <p className="text-amber-400 text-xs font-bold uppercase tracking-widest animate-pulse mb-1">
+                     ⚠️ SCANNER DIJEDA (MENUNGGU KONFIRMASI)
+                  </p>
+                  <span className="text-[10px] text-gray-400">
+                     Konfirmasi peringatan untuk melanjutkan scan
+                  </span>
+               </div>
+            ) : isProcessing && !isContinuousScan ? (
                <div className="flex flex-col items-center gap-2">
                   <Loader2 size={32} className="animate-spin text-white" />
                   <p className="text-white font-medium">Processing...</p>

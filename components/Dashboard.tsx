@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { UserRole, ScannedItem, FailedItem } from '../types';
-import { ScanLine, Settings, Search, Zap, CheckCircle2, Clock, Package, Monitor, User, AlertCircle, Menu, History, FileText, ArrowRight, X, ListOrdered, ArrowLeft, Wifi, WifiOff, CloudOff, CloudCog, Lock, Target, ChevronDown, ChevronUp, Calendar, AlertTriangle, RefreshCw, CheckSquare, Square, Trash2, ChevronRight, XCircle, Layers, Check, Save, Star, ShieldCheck, Truck } from 'lucide-react';
+import { ScanLine, Settings, Search, Zap, CheckCircle2, Clock, Package, Monitor, User, AlertCircle, Menu, History, FileText, ArrowRight, X, ListOrdered, ArrowLeft, Wifi, WifiOff, CloudOff, CloudCog, Lock, Target, ChevronDown, ChevronUp, Calendar, AlertTriangle, RefreshCw, CheckSquare, Square, Trash2, ChevronRight, XCircle, Layers, Check, Save, Star, ShieldCheck, Truck, AlertOctagon } from 'lucide-react';
 import { ScannerModal } from './ScannerModal';
 import { SettingsModal } from './SettingsModal';
 import { RunningTextBanner } from './RunningTextBanner';
@@ -464,6 +464,48 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return `${year}-${month}-${day}`;
    });
    const dateInputRef = useRef<HTMLInputElement>(null);
+
+   // AUTO-PAUSE & WAJIB ACKNOWLEDGE STATE (UNTUK CHECKER & PACKING)
+   const [sequenceAlertModal, setSequenceAlertModal] = useState<{
+      barcode: string;
+      role: UserRole;
+      targetRole: string;
+      message: string;
+   } | null>(null);
+   const hasActiveSequenceAlertRef = useRef(false);
+   const ignoredCooldownRef = useRef<{ code: string; until: number } | null>(null);
+
+   const handleAcknowledgeSequenceAlert = () => {
+      if (!sequenceAlertModal) return;
+      const ackBarcode = sequenceAlertModal.barcode;
+      // Cooldown 4 detik untuk barcode ini agar saat staf memindahkan paket tidak kena scan ulang
+      ignoredCooldownRef.current = {
+         code: ackBarcode,
+         until: Date.now() + 4000
+      };
+      if (lastScannedRef.current) {
+         lastScannedRef.current = { code: ackBarcode, timestamp: Date.now() + 4000 };
+      }
+      hasActiveSequenceAlertRef.current = false;
+      setSequenceAlertModal(null);
+      // Jika di single scan mode, kamera ditutup setelah acknowledge
+      if (!isContinuousScan) {
+         setIsCameraOpen(false);
+      }
+   };
+
+   // Listen for keyboard Enter / Space / Escape to acknowledge modal
+   useEffect(() => {
+      if (!sequenceAlertModal) return;
+      const handleKeyDown = (e: KeyboardEvent) => {
+         if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') {
+            e.preventDefault();
+            handleAcknowledgeSequenceAlert();
+         }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+   }, [sequenceAlertModal, isContinuousScan]);
 
    // Sync order filter with global selected leader profile
    useEffect(() => {
@@ -1318,6 +1360,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
          return;
       }
 
+      if (hasActiveSequenceAlertRef.current) return;
       if (!manualInput.trim()) return;
 
       // DevMode toggle: typing 'devmode' or 'devmodenew' activates hidden menus
@@ -1382,6 +1425,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
    };
 
    const handleCameraCapture = async (barcode: string) => {
+      // If sequence alert modal is active, completely ignore incoming scans
+      if (hasActiveSequenceAlertRef.current) return;
+
+      // Check if barcode is in grace period cooldown after acknowledgment
+      if (ignoredCooldownRef.current && ignoredCooldownRef.current.code === barcode && Date.now() < ignoredCooldownRef.current.until) {
+         return;
+      }
+
       if (role === UserRole.GUDANG && currentView === 'REPORT') {
          setPendingReportScan(barcode);
          return;
@@ -1435,7 +1486,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                destination: 'N/A',
                priority: 'NORMAL'
             });
-            setIsCameraOpen(false); // Close camera after scan
+            // If sequence alert was triggered, keep camera open so user sees paused state behind acknowledge modal
+            if (!hasActiveSequenceAlertRef.current) {
+               setIsCameraOpen(false); // Close camera after scan
+            }
          } catch (error) {
             // handled
          } finally {
@@ -2307,15 +2361,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 if (pickerOjolErr) throw pickerOjolErr;
                 if (!pickerOjolData) {
                    playError();
+                   if (navigator.vibrate) {
+                      try { navigator.vibrate([300, 150, 300, 150, 600]); } catch (e) {}
+                   }
                    const msg = `⛔ DITOLAK!\nResi "${result.barcode}" belum discan oleh Picker/Ojol.`;
                    await recordFail('FORBIDDEN', `Resi belum discan oleh Picker/Ojol: ${result.barcode}`);
                    if (isContinuousScan) {
-                      updateContinuousStatus('error', 'Ditolak (Picker)');
-                      triggerCameraToast(msg, 'error');
+                      updateContinuousStatus('error', 'Ditolak (Picker/Ojol)');
                    } else {
                       setErrorToast(msg);
                       setTimeout(() => setErrorToast(null), 5000);
                    }
+                   // AUTO-PAUSE & WAJIB ACKNOWLEDGE
+                   hasActiveSequenceAlertRef.current = true;
+                   setSequenceAlertModal({
+                      barcode: result.barcode,
+                      role: role,
+                      targetRole: 'Picker / Ojol',
+                      message: `Resi "${result.barcode}" belum discan oleh Picker / Ojol!`
+                   });
                    return;
                 }
              }
@@ -2333,15 +2397,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 if (checkerErr) throw checkerErr;
                 if (!checkerData) {
                    playError();
+                   if (navigator.vibrate) {
+                      try { navigator.vibrate([300, 150, 300, 150, 600]); } catch (e) {}
+                   }
                    const msg = `⛔ DITOLAK!\nResi "${result.barcode}" belum discan oleh Checker.`;
                    await recordFail('FORBIDDEN', `Resi belum discan oleh Checker: ${result.barcode}`);
                    if (isContinuousScan) {
                       updateContinuousStatus('error', 'Ditolak (Checker)');
-                      triggerCameraToast(msg, 'error');
                    } else {
                       setErrorToast(msg);
                       setTimeout(() => setErrorToast(null), 5000);
                    }
+                   // AUTO-PAUSE & WAJIB ACKNOWLEDGE
+                   hasActiveSequenceAlertRef.current = true;
+                   setSequenceAlertModal({
+                      barcode: result.barcode,
+                      role: role,
+                      targetRole: 'Checker',
+                      message: `Resi "${result.barcode}" belum discan oleh Checker!`
+                   });
                    return;
                 }
              }
@@ -5387,7 +5461,80 @@ export const Dashboard: React.FC<DashboardProps> = ({
             recentScans={recentScans}
             toastMessage={cameraToast}
             scanSpeed={scanSpeed} // Pass Scan Speed
+            isPaused={!!sequenceAlertModal}
          />
+
+         {/* AUTO-PAUSE & WAJIB ACKNOWLEDGE MODAL (UNTUK CHECKER & PACKING) */}
+         {sequenceAlertModal && (
+            <div className="fixed inset-0 z-[999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-[fadeIn_0.2s_ease-out]">
+               <div className="bg-gray-900 border-2 border-red-500 rounded-3xl max-w-md w-full overflow-hidden shadow-[0_0_60px_rgba(239,68,68,0.5)] animate-[popIn_0.25s_ease-out]">
+                  {/* Danger Header */}
+                  <div className="bg-gradient-to-r from-red-600 via-rose-600 to-red-700 p-6 text-white text-center relative overflow-hidden">
+                     <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl -mr-16 -mt-16 pointer-events-none"></div>
+                     <div className="inline-flex p-3 bg-white/20 backdrop-blur-sm rounded-2xl mb-3 shadow-inner border border-white/20 animate-bounce">
+                        <AlertOctagon size={40} className="text-white" />
+                     </div>
+                     <div className="inline-block px-3 py-1 bg-black/30 rounded-full text-[11px] font-black tracking-widest uppercase mb-1">
+                        PERINGATAN RESI DITOLAK
+                     </div>
+                     <h2 className="text-2xl font-black tracking-tight uppercase">
+                        ⛔ Urutan Belum Lengkap!
+                     </h2>
+                  </div>
+
+                  {/* Modal Content */}
+                  <div className="p-6 space-y-5">
+                     {/* Barcode Display Box */}
+                     <div className="bg-black/50 border border-gray-700 rounded-2xl p-4 text-center">
+                        <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                           Barcode Resi Ditolak
+                        </div>
+                        <div className="font-mono text-xl sm:text-2xl font-black text-red-400 break-all select-all tracking-wider">
+                           {sequenceAlertModal.barcode}
+                        </div>
+                     </div>
+
+                     {/* Rejection Detail */}
+                     <div className="bg-red-950/40 border border-red-500/40 rounded-2xl p-4 flex items-start gap-3">
+                        <XCircle size={24} className="text-red-400 shrink-0 mt-0.5" />
+                        <div className="text-sm">
+                           <div className="font-black text-red-200 uppercase tracking-wide">
+                              Belum Discan Oleh {sequenceAlertModal.targetRole}
+                           </div>
+                           <div className="text-red-300/80 text-xs mt-1 leading-relaxed">
+                              Sebagai <span className="font-bold text-white">{sequenceAlertModal.role}</span>, Anda dilarang memproses paket ini sebelum tahap <span className="font-bold text-amber-300">{sequenceAlertModal.targetRole}</span> selesai discan.
+                           </div>
+                        </div>
+                     </div>
+
+                     {/* Action Required Box */}
+                     <div className="bg-amber-950/30 border border-amber-500/30 rounded-2xl p-3.5 flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-amber-500/20 flex items-center justify-center shrink-0">
+                           <Package size={18} className="text-amber-400" />
+                        </div>
+                        <div className="text-xs text-amber-200 leading-snug">
+                           <strong className="block text-amber-300 font-bold uppercase mb-0.5">Tindakan Wajib Staf:</strong>
+                           Pisahkan paket ini sekarang dan serahkan ke tim <span className="font-bold underline">{sequenceAlertModal.targetRole}</span>!
+                        </div>
+                     </div>
+
+                     {/* Mandatory Acknowledge Button */}
+                     <button
+                        type="button"
+                        onClick={handleAcknowledgeSequenceAlert}
+                        className="w-full py-4 px-6 bg-gradient-to-r from-red-600 via-rose-600 to-red-600 hover:from-red-500 hover:to-rose-500 active:scale-[0.98] text-white font-black text-base rounded-2xl shadow-lg shadow-red-600/40 transition-all flex items-center justify-center gap-3 uppercase tracking-wider border border-red-400/30 cursor-pointer"
+                     >
+                        <CheckCircle2 size={22} className="text-white" />
+                        <span>Saya Mengerti & Pisahkan Paket</span>
+                     </button>
+
+                     <p className="text-[11px] text-center text-gray-400 italic">
+                        Kamera otomatis dijeda. Tekan tombol di atas (atau Enter/Spasi) untuk melanjutkan scan berikutnya.
+                     </p>
+                  </div>
+               </div>
+            </div>
+         )}
 
          <SettingsModal
             isOpen={isSettingsOpen}
