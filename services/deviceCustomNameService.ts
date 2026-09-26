@@ -75,6 +75,11 @@ export const saveDeviceCustomName = async (
 
     if (error) {
       console.error('Error upserting device_custom_names:', error);
+      if (error.code === '42501') {
+        throw new Error(
+          'Izin database ditolak (Error 42501). Buka Supabase SQL Editor lalu jalankan: GRANT ALL ON TABLE public.device_custom_names TO anon, authenticated;'
+        );
+      }
       throw error;
     }
 
