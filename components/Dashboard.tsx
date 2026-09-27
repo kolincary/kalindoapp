@@ -1530,36 +1530,72 @@ export const Dashboard: React.FC<DashboardProps> = ({
          }
       }
    };
-   const recentBarcodesRef = useRef<string[]>([]);
+   const batchScansTrackerRef = useRef<Record<string, string[]>>({});
 
    const checkForBatchTrigger = async (barcode: string): Promise<boolean> => {
-      // 1. Maintain a buffer of last 3 barcodes
-      recentBarcodesRef.current = [barcode, ...recentBarcodesRef.current].slice(0, 3);
-
-      if (recentBarcodesRef.current.length < 3) return false;
-
-      const [b1, b2, b3] = recentBarcodesRef.current;
-
       try {
-         // 2. Check if these 3 belong to the same batch
-         // We query batch_items for these barcodes
-         const { data: items, error } = await supabase
+         const candidates = getBarcodeCandidates(barcode);
+         if (candidates.length === 0) return false;
+
+         // 1. Check if this barcode belongs to an active batch in batch_items
+         const { data: matchedItem, error: matchErr } = await supabase
             .from('batch_items')
             .select('batch_id, barcode')
-            .in('barcode', [b1, b2, b3]);
+            .in('barcode', candidates)
+            .limit(1)
+            .maybeSingle();
 
-         if (error || !items || items.length < 3) return false;
+         if (matchErr || !matchedItem?.batch_id) return false;
 
-         // Check if they all belong to the same batch_id
-         const batchId = items[0].batch_id;
-         const allSameBatch = items.every(it => it.batch_id === batchId);
+         const batchId = matchedItem.batch_id;
+         const normalizedCurrentBarcode = matchedItem.barcode.trim().toUpperCase();
 
-         if (allSameBatch) {
-            // 3. Trigger Auto-Scan for all items in this batch
-            // Pass the current trigger barcodes to ensure they aren't duplicated
-            triggerAutoBatchScan(batchId, [b1, b2, b3]);
-            // Clear buffer to prevent re-triggering immediately
-            recentBarcodesRef.current = [];
+         // 2. Fetch all barcodes for this batch to know the full batch roster
+         const { data: batchRoster, error: rosterErr } = await supabase
+            .from('batch_items')
+            .select('barcode')
+            .eq('batch_id', batchId);
+
+         if (rosterErr || !batchRoster || batchRoster.length === 0) return false;
+
+         const batchRosterSet = new Set(batchRoster.map(b => b.barcode.trim().toUpperCase()));
+
+         // 3. Collect unique barcodes from this batch that have been scanned by this role
+         const scannedFromThisBatch = new Set<string>();
+
+         // Check local items state for this role
+         items.forEach(it => {
+            if (it.role === role) {
+               const norm = it.barcode.trim().toUpperCase();
+               if (batchRosterSet.has(norm)) {
+                  scannedFromThisBatch.add(norm);
+               }
+            }
+         });
+
+         // Check in-memory tracker for this batch
+         const prevTrackerList = batchScansTrackerRef.current[batchId] || [];
+         prevTrackerList.forEach(b => {
+            if (batchRosterSet.has(b)) {
+               scannedFromThisBatch.add(b);
+            }
+         });
+
+         // Add the current scanned barcode
+         scannedFromThisBatch.add(normalizedCurrentBarcode);
+
+         // Update in-memory tracker
+         batchScansTrackerRef.current[batchId] = Array.from(scannedFromThisBatch);
+
+         // 4. Trigger auto-batch as soon as 3 unique barcodes of this batch are reached (or all if batch size < 3)
+         const requiredCount = Math.min(3, batchRoster.length);
+         if (scannedFromThisBatch.size >= requiredCount) {
+            const triggerList = Array.from(scannedFromThisBatch);
+            // Reset tracker for this batch so it doesn't fire again
+            batchScansTrackerRef.current[batchId] = [];
+
+            // Trigger auto-scan
+            await triggerAutoBatchScan(batchId, triggerList, normalizedCurrentBarcode);
             return true;
          }
       } catch (e) {
@@ -1568,7 +1604,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return false;
    };
 
-   const triggerAutoBatchScan = async (batchId: string, triggeringBarcodes: string[] = []) => {
+   const triggerAutoBatchScan = async (
+      batchId: string,
+      triggeringBarcodes: string[] = [],
+      currentBarcode?: string
+   ) => {
       try {
          setIsProcessing(true);
          // 1. Fetch all items in this batch
@@ -1577,7 +1617,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             .select('*')
             .eq('batch_id', batchId);
 
-         if (fetchErr || !batchItems) {
+         if (fetchErr || !batchItems || batchItems.length === 0) {
             console.error("Fetch batch error:", fetchErr);
             return;
          }
@@ -1599,23 +1639,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
                .map(it => it.barcode.trim().toUpperCase())
          );
          
-         let barcodesToExclude = [...triggeringBarcodes];
-         // For PICKER/SORTIR_BATCH, the 3rd barcode (triggeringBarcodes[0]) is not yet saved 
-         // because it skipped the modal. We remove it from the exclusion list so it gets auto-inserted!
-         if ([UserRole.PICKER, UserRole.PICKER_2, UserRole.SORTIR_BATCH].includes(role)) {
-            barcodesToExclude.shift();
-         }
-         const triggerBarcodes = new Set(barcodesToExclude.map(bc => bc.trim().toUpperCase()));
+         // For PICKER/PICKER_2/SORTIR_BATCH, currentBarcode is currently being scanned and skipped modal,
+         // so it was not saved yet. All OTHER triggeringBarcodes were already saved in previous steps.
+         // For other roles (e.g. SORTIR), all triggeringBarcodes were already saved.
+         const isModalRole = [UserRole.PICKER, UserRole.PICKER_2, UserRole.SORTIR_BATCH].includes(role);
+         const normalizedCurrent = (currentBarcode || '').trim().toUpperCase();
+
+         const alreadySavedTriggers = new Set(
+            triggeringBarcodes
+               .map(bc => bc.trim().toUpperCase())
+               .filter(bc => isModalRole ? bc !== normalizedCurrent : true)
+         );
 
          const toAutoScan = batchItems.filter(it => {
             const normalizedBC = it.barcode.trim().toUpperCase();
-            return !scannedBarcodes.has(normalizedBC) && !triggerBarcodes.has(normalizedBC);
+            return !scannedBarcodes.has(normalizedBC) && !alreadySavedTriggers.has(normalizedBC);
          });
 
          if (toAutoScan.length === 0) {
-            // Even if nothing to auto-scan, we should still clean up the batch_items 
-            // because the 3 triggers are already in scanned_items.
-            await supabase.from('batch_items').delete().eq('batch_id', batchId);
             return;
          }
 
@@ -1638,10 +1679,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                order_id: it.order_id || null, // Include order_id from batch_items
                role: role,
                status: 'COMPLETED' as const,
-               // Description: [CANCEL] tag if matched, else [AUTO-BATCH]
                description: isCancelled ? `[CANCEL] Camera Scan` : `[AUTO-BATCH] ${it.msku || ''}`,
                destination: [UserRole.PICKER, UserRole.PICKER_2, UserRole.SORTIR_BATCH].includes(role) ? `Page ${selectedPage} (Auto)` : 'BATCH',
-               priority: isCancelled ? 'HIGH' : 'NORMAL' as const, // Cancelled items usually need high attention
+               priority: isCancelled ? ('HIGH' as const) : ('NORMAL' as const),
                employee_name: combinedName,
                user_email: userEmail,
                menu_context: 'DEFAULT',
@@ -1666,15 +1706,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
             return;
          }
 
-         // 6. DELETE FROM batch_items (The "Move/Cut" logic)
-         // We delete the whole batch because it's now fully processed
-         const { error: deleteErr } = await supabase.from('batch_items').delete().eq('batch_id', batchId);
+         // NOTE: DO NOT DELETE FROM batch_items!
+         // batch_items must remain intact for Admin Dashboard "Data Items" & "Ringkasan Progress".
 
-         if (deleteErr) {
-            console.warn("Batch deleted locally but DB cleanup failed:", deleteErr);
-         }
-
-         // 6.5 Update trigger barcodes with excel_filename
+         // 6. Update all previously scanned trigger barcodes with excel_filename
          if (batchExcelName && triggeringBarcodes.length > 0) {
             const upperBCs = triggeringBarcodes.map(b => b.trim().toUpperCase());
             await supabase.from('scanned_items')
@@ -1689,7 +1724,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
          const cancelledCount = bulkItems.filter(bi => bi.description.includes('[CANCEL]')).length;
          if (cancelledCount > 0) {
             triggerCameraToast(`Berhasil! ${bulkItems.length} data pindah (${cancelledCount} resi CANCEL!)`, 'success');
-            playError(); // Play error sound once to warn about cancelled items
+            playError();
          } else {
             triggerCameraToast(`Berhasil! ${bulkItems.length} data batch dipindahkan.`, 'success');
          }
@@ -2768,7 +2803,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       await addScan(newItem, tempId, updateContinuousStatus, recordFail);
 
       // --- BATCH AUTO-SCAN TRIGGER (SORTIR ONLY) ---
-      if ((role === UserRole.SORTIR || role === UserRole.SORTIR_BATCH) && navigator.onLine) {
+      if (role === UserRole.SORTIR && navigator.onLine) {
          checkForBatchTrigger(result.barcode);
       }
    };
