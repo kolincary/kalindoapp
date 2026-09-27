@@ -1396,8 +1396,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
       if (hasActiveSequenceAlertRef.current) return;
       if (!manualInput.trim()) return;
 
-      // DevMode toggle: typing 'devmode' or 'devmodenew' activates hidden menus
+      // DevMode toggle: typing 'devmode' or 'devmodenew' activates hidden menus (admin only)
       if (manualInput.trim().toLowerCase() === 'devmode' || manualInput.trim().toLowerCase() === 'devmodenew') {
+         const cleanEmail = (userEmail || '').trim().toLowerCase();
+         const isOnlyAdminAccount = cleanEmail === 'admin' || cleanEmail === 'admin@kalindo.com' || cleanEmail.startsWith('admin@');
+         if (!isOnlyAdminAccount) {
+            setManualInput('');
+            return;
+         }
          setDevMode(prev => !prev);
          setManualInput('');
          setSuccessToast(devMode ? 'Dev Mode OFF' : 'Dev Mode ON');

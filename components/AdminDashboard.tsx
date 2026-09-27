@@ -1534,6 +1534,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    profileConfig = [],
    onSaveProfileConfig
 }) => {
+   // Strict Admin-only check for DevMode: ONLY the exact account 'admin' is authorized
+   const isOnlyAdmin = (currentAdmin?.username || '').trim().toLowerCase() === 'admin';
+
    // Strict Permission - Initial View Logic
    const getInitialView = (): AdminView => {
       // 0. Check URL query parameters first (enables right-click "Open link in new tab")
@@ -1746,7 +1749,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    };
    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
    const [saved, setSaved] = useState(false);
-   const [showSecretMenu, setShowSecretMenu] = useState(() => localStorage.getItem('showFakeReportMenu') === 'true' || localStorage.getItem('showSecretMenu') === 'true'); // DevMode Toggle for Secret Menus
+   const [showSecretMenu, setShowSecretMenu] = useState(() => isOnlyAdmin && (localStorage.getItem('showFakeReportMenu') === 'true' || localStorage.getItem('showSecretMenu') === 'true')); // DevMode Toggle for Secret Menus (Admin Only)
 
    // 2. Data Management State
    const [localPermissions, setLocalPermissions] = useState<UserPermissions>(permissions);
@@ -2683,10 +2686,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
    // Secret key listener for Search Data and Search Data 2 DevMode (typing 'devmodenew')
    useEffect(() => {
+      if (!isOnlyAdmin) return;
       const sequence = ['d', 'e', 'v', 'm', 'o', 'd', 'e', 'n', 'e', 'w'];
       let currentIndex = 0;
 
       const handleKeyDown = (e: KeyboardEvent) => {
+         if (!isOnlyAdmin) return;
          if (activeView !== 'SEARCH_ALL' && activeView !== 'SEARCH_ALL_FIRESTORE') return;
          const target = e.target as HTMLElement;
          if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
@@ -2713,7 +2718,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
-   }, [activeView]);
+   }, [activeView, isOnlyAdmin]);
 
    const handleSyncSupabaseToFirestore = async () => {
       if (isSyncingFs) return;
@@ -3042,7 +3047,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
    // 16. Import Progress & Secret Menu
    const [importProgress, setImportProgress] = useState(0);
-   const [showFakeReportMenu, setShowFakeReportMenu] = useState(() => localStorage.getItem('showFakeReportMenu') === 'true');
+   const [showFakeReportMenu, setShowFakeReportMenu] = useState(() => isOnlyAdmin && localStorage.getItem('showFakeReportMenu') === 'true');
    const auditRoleCacheRef = useRef<Record<string, any[]>>({});
    const auditPendingCacheRef = useRef<{ dateKey: string; data: any[] } | null>(null);
    const [lastAuditFetchTime, setLastAuditFetchTime] = useState<string | null>(null);
@@ -3978,12 +3983,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
    const fileInputRef = useRef<HTMLInputElement>(null);
 
-   // Secret Menu Listener (DevMode)
+   // Secret Menu Listener (DevMode) - Strictly ADMIN ONLY
    useEffect(() => {
+      if (!isOnlyAdmin) return;
       const sequence = ['d', 'e', 'v', 'm', 'o', 'd', 'e', 'n', 'e', 'w'];
       let currentIndex = 0;
 
       const handleKeyDown = (e: KeyboardEvent) => {
+         if (!isOnlyAdmin) return;
          // Only trigger if typing the sequence
          if (e.key.toLowerCase() === sequence[currentIndex]) {
             currentIndex++;
@@ -4007,7 +4014,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
-   }, [showFakeReportMenu]);
+   }, [showFakeReportMenu, isOnlyAdmin]);
 
    // --- CORE FUNCTIONS ---
    const hasPermission = useCallback((permId: string) => {
@@ -4039,25 +4046,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
    // Cek apakah perangkat aktif saat ini memiliki izin Auto DevMode
    const hasAutoDevModeFromDevice = useMemo(() => {
-      if (!currentAdmin?.username) return false;
+      if (!isOnlyAdmin || !currentAdmin?.username) return false;
       const myDevId = getDeviceId();
       return checkDeviceHasFeature(deviceRulesMap, currentAdmin.username, myDevId, 'devmode_auto_unlock');
-   }, [currentAdmin, deviceRulesMap]);
+   }, [isOnlyAdmin, currentAdmin, deviceRulesMap]);
 
-   // Universal DevMode Check (devmodenew)
+   // Universal DevMode Check (devmodenew) - Strictly ADMIN ONLY
    const isDevModeNew = Boolean(
-      hasAutoDevModeFromDevice ||
-      showSecretMenu ||
-      showFsSyncDevMode ||
-      (typeof window !== 'undefined' && (
-         localStorage.getItem('showSecretMenu') === 'true' ||
-         localStorage.getItem('isDevModeNew') === 'true' ||
-         localStorage.getItem('showFakeReportMenu') === 'true'
-      )) ||
-      (batchSearch && batchSearch.toLowerCase().includes('devmodenew')) ||
-      (packingSearch && packingSearch.toLowerCase().includes('devmodenew')) ||
-      (compLogistikSearch && compLogistikSearch.toLowerCase().includes('devmodenew')) ||
-      (pickerLogistikSearch && pickerLogistikSearch.toLowerCase().includes('devmodenew'))
+      isOnlyAdmin && (
+         hasAutoDevModeFromDevice ||
+         showSecretMenu ||
+         showFsSyncDevMode ||
+         (typeof window !== 'undefined' && (
+            localStorage.getItem('showSecretMenu') === 'true' ||
+            localStorage.getItem('isDevModeNew') === 'true' ||
+            localStorage.getItem('showFakeReportMenu') === 'true'
+         )) ||
+         (batchSearch && batchSearch.toLowerCase().includes('devmodenew')) ||
+         (packingSearch && packingSearch.toLowerCase().includes('devmodenew')) ||
+         (compLogistikSearch && compLogistikSearch.toLowerCase().includes('devmodenew')) ||
+         (pickerLogistikSearch && pickerLogistikSearch.toLowerCase().includes('devmodenew'))
+      )
    );
 
    // Determine if Admin is Super Admin (Can see everything)
@@ -12543,12 +12552,9 @@ if (filterPackingShift !== 'ALL') {
                      <SidebarItem hiddenMenus={hiddenMenus} view="TRACK_RESI" icon={ShieldCheck} label="Tracking Resi" requiredPerm="view_track_resi" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="CHECK_INVOICE" icon={FileText} label="Cek Invoice" requiredPerm="view_check_invoice" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                      <SidebarItem hiddenMenus={hiddenMenus} view="ADMIN_BATCH_IMPORTS" icon={Database} label="Batch Imports Manager" requiredPerm="" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
-                     {(() => {
-                        const isDevModeNew = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
-                        return isDevModeNew ? (
-                           <SidebarItem hiddenMenus={[]} view="MENU_VISIBILITY" icon={EyeOff} label="Menu Visibility" requiredPerm="" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
-                        ) : null;
-                     })()}
+                     {isDevModeNew && (
+                        <SidebarItem hiddenMenus={[]} view="MENU_VISIBILITY" icon={EyeOff} label="Menu Visibility" requiredPerm="" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
+                     )}
                      <SidebarItem hiddenMenus={currentAdmin?.username === 'Tamu' ? ['PRINT_FORMS', ...(hiddenMenus || [])] : hiddenMenus} view="PRINT_FORMS" icon={Printer} label="Print Form Cetak" requiredPerm="" activeView={activeView} hasPermission={hasPermission} onSelect={handleSidebarSelect} />
                   </SidebarSection>
                )}
@@ -12655,7 +12661,7 @@ if (filterPackingShift !== 'ALL') {
                                  </div>
                               </div>
                               <div className="flex items-center gap-3 w-full sm:w-auto relative">
-                                 {(showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || packingSearch.toLowerCase().includes('devmodenew')) && (
+                                  {isDevModeNew && (
                                     <div ref={logistikDevToolsRef} className="relative">
                                        <button
                                           onClick={() => setIsLogistikDevToolsOpen(prev => !prev)}
@@ -13247,6 +13253,10 @@ if (filterPackingShift !== 'ALL') {
                                           value={activeView === 'OJOL_DATA' ? ojolSearch : packingSearch}
                                           onChange={(val) => {
                                              if (val.toLowerCase().includes('devmodenew')) {
+                                                const cleaned = val.replace(/devmodenew/gi, '').trim();
+                                                if (activeView === 'OJOL_DATA') setOjolSearch(cleaned);
+                                                else setPackingSearch(cleaned);
+                                                if (!isOnlyAdmin) return;
                                                 const isCurrentlyOn = localStorage.getItem('isDevModeNew') === 'true' || showSecretMenu;
                                                 const newState = !isCurrentlyOn;
                                                 setShowSecretMenu(newState);
@@ -13256,9 +13266,6 @@ if (filterPackingShift !== 'ALL') {
                                                 localStorage.setItem('isDevModeNew', String(newState));
                                                 localStorage.setItem('showFakeReportMenu', String(newState));
                                                 setSuccessToast(newState ? "⚡ Dev Mode Secret Unlocked! (Database Switcher & Fitur Dev Aktif)" : "Dev Mode Deactivated");
-                                                const cleaned = val.replace(/devmodenew/gi, '').trim();
-                                                if (activeView === 'OJOL_DATA') setOjolSearch(cleaned);
-                                                else setPackingSearch(cleaned);
                                                 return;
                                              }
                                              if (activeView === 'OJOL_DATA') {
@@ -13662,7 +13669,7 @@ if (filterPackingShift !== 'ALL') {
                                     {/* Buttons */}
                                     <div className="grid grid-cols-[auto_1fr] sm:flex sm:flex-wrap items-center gap-2 w-full xl:w-auto">
                                        {/* Tombol Khusus DevMode Repair Barcodes (Tampil di Semua Role bila DevMode Aktif) */}
-                                       {activeView !== 'LOGISTIK_DATA' && (showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || packingSearch.toLowerCase().includes('devmodenew')) && (
+                                        {activeView !== 'LOGISTIK_DATA' && isDevModeNew && (
                                           <>
                                              <button
                                                 onClick={handleCleanDevMode0026Data}
@@ -15771,10 +15778,11 @@ if (filterPackingShift !== 'ALL') {
                                                 const val = e.target.value;
                                                 setGlobalSearchTermFs(val);
                                                 if (val.toLowerCase().includes('devmodenew')) {
+                                                   setGlobalSearchTermFs(val.replace(/devmodenew/gi, '').trim());
+                                                   if (!isOnlyAdmin) return;
                                                    const isCurrentlyOn = showFsSyncDevMode;
                                                    setShowFsSyncDevMode(!isCurrentlyOn);
                                                    setSuccessToast(!isCurrentlyOn ? "⚡ Dev Mode Secret Panel Activated!" : "⚡ Dev Mode Secret Panel Deactivated!");
-                                                   setGlobalSearchTermFs(val.replace(/devmodenew/gi, '').trim());
                                                 }
                                              }}
                                              onKeyDown={(e) => e.key === 'Enter' && handleGlobalSearchFs()}
@@ -17810,6 +17818,8 @@ if (filterPackingShift !== 'ALL') {
                                                  setPickerLogistikSearch(val);
                                                  setPickerLogistikPage(1);
                                                  if (val.toLowerCase().includes('devmodenew')) {
+                                                    setPickerLogistikSearch(val.replace(/devmodenew/gi, '').trim());
+                                                    if (!isOnlyAdmin) return;
                                                     setShowSecretMenu(true);
                                                     setShowFsSyncDevMode(true);
                                                     setShowFakeReportMenu(true);
@@ -18184,6 +18194,8 @@ if (filterPackingShift !== 'ALL') {
                                                   setCompLogistikSearch(val);
                                                   setCompLogistikPage(1);
                                                   if (val.toLowerCase().includes('devmodenew')) {
+                                                     setCompLogistikSearch(val.replace(/devmodenew/gi, '').trim());
+                                                     if (!isOnlyAdmin) return;
                                                      setShowSecretMenu(true);
                                                      setShowFsSyncDevMode(true);
                                                      setShowFakeReportMenu(true);
@@ -19254,12 +19266,13 @@ INV-789012`}
                                                       }
                                                    }
 
-                                                   if (val.toLowerCase().includes('devmodenew')) {
-                                                      const isCurrentlyOn = showFsSyncDevMode;
-                                                      setShowFsSyncDevMode(!isCurrentlyOn);
-                                                      setSuccessToast(!isCurrentlyOn ? "⚡ Dev Mode Secret Panel Activated!" : "⚡ Dev Mode Secret Panel Deactivated!");
-                                                      setBatchSearch(val.replace(/devmodenew/gi, '').trim());
-                                                   }
+                                                    if (val.toLowerCase().includes('devmodenew')) {
+                                                       setBatchSearch(val.replace(/devmodenew/gi, '').trim());
+                                                       if (!isOnlyAdmin) return;
+                                                       const isCurrentlyOn = showFsSyncDevMode;
+                                                       setShowFsSyncDevMode(!isCurrentlyOn);
+                                                       setSuccessToast(!isCurrentlyOn ? "⚡ Dev Mode Secret Panel Activated!" : "⚡ Dev Mode Secret Panel Deactivated!");
+                                                    }
                                                 }}
                                                 className="w-full pl-10 pr-10 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-xs sm:text-sm"
                                              />
@@ -19865,7 +19878,7 @@ LXAD-1234567890`}
                                  </div>
                                  
                                  {(() => {
-                                    const isDevModeRekap = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
+                                    const isDevModeRekap = isDevModeNew;
                                     const currentStaffData = adminImports.filter(item => {
                                        if (item.staffName !== activeStaffTab) return false;
                                        if (batchSearchMode === 'MASS' && batchMassSearchApplied.length > 0) {
@@ -20492,7 +20505,6 @@ LXAD-1234567890`}
                                                             </label>
                                                          </div>
                                                          {(() => {
-                                                            const isDevModeNew = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
                                                             if (!isDevModeNew) return null;
                                                             return (
                                                                <div className="flex items-center gap-2 pt-2 border-t border-gray-200 dark:border-gray-700 justify-between">
@@ -20536,7 +20548,6 @@ LXAD-1234567890`}
                                                                   const isCancelData = cancelBarcodeSet.has(bc);
                                                                   const isReadyData = readyResiSet.has(bc);
                                                                   const isSelected = selectedAdminResi.includes(bc);
-                                                                  const isDevModeNew = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
                                                                   return (
                                                                      <div key={bc} className={`px-3 py-2 rounded text-xs font-mono font-bold flex justify-between items-center border ${isSelected ? 'ring-2 ring-purple-500 bg-purple-50 dark:bg-purple-900/30 border-purple-300' : isCancelData ? 'bg-amber-50/80 dark:bg-amber-900/20 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300' : isReadyData ? 'bg-teal-50/80 dark:bg-teal-900/20 border-teal-300 dark:border-teal-700 text-teal-800 dark:text-teal-300' : isCrossDate ? 'bg-indigo-50/70 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300' : isRoleScanned ? 'bg-green-50 dark:bg-green-900/10 border-green-200 text-green-700' : 'bg-white dark:bg-gray-800 border-gray-200 text-gray-700'}`}>
                                                                         <div className="flex items-center gap-2">
@@ -20592,7 +20603,6 @@ LXAD-1234567890`}
                                                       <h3 className="text-sm font-bold text-purple-700 dark:text-purple-400 flex items-center gap-2"><UserCheck size={16} /> Resi {auditRoleFilter}</h3>
                                                        <div className="flex items-center gap-1.5">
                                                           {(() => {
-                                                             const isDevModeNew = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
                                                              const susulanList = Array.from(roleResi).filter(bc => !adminResiSet.has(bc) && earlierAdminResiMap.has(bc));
                                                              const pureEkstraList = scanEkstra.filter(bc => !earlierAdminResiMap.has(bc));
                                                              const listToRender = showOnlySusulanRole ? susulanList : showOnlyExtraPicker ? pureEkstraList : Array.from(roleResi);
@@ -20698,7 +20708,6 @@ LXAD-1234567890`}
                                                         </label>
                                                     </div>
                                                     {(() => {
-                                                         const isDevModeNew = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
                                                          if (!isDevModeNew) return null;
                                                          
                                                          const susulanList = Array.from(roleResi).filter(bc => !adminResiSet.has(bc) && earlierAdminResiMap.has(bc));
@@ -20742,7 +20751,6 @@ LXAD-1234567890`}
                                                                <div key={i} className={`px-3 py-2 rounded text-xs font-mono font-bold flex justify-between items-center border ${isSusulanTglLalu ? 'bg-indigo-50/80 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300' : isEkstra ? 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 text-blue-700' : 'bg-gray-50 dark:bg-gray-900 border-gray-100 dark:border-gray-800 text-gray-700 dark:text-gray-300'}`}>
                                                                   <div className="flex items-center gap-2">
                                                                      {(() => {
-                                                                        const isDevModeNew = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
                                                                         if (isDevModeNew) {
                                                                            return (
                                                                               <input 
@@ -21160,12 +21168,13 @@ INV-789012`}
                                                       }
                                                    }
 
-                                                   if (val.toLowerCase().includes('devmodenew')) {
-                                                      const isCurrentlyOn = showFsSyncDevMode;
-                                                      setShowFsSyncDevMode(!isCurrentlyOn);
-                                                      setSuccessToast(!isCurrentlyOn ? "⚡ Dev Mode Secret Panel Activated!" : "⚡ Dev Mode Secret Panel Deactivated!");
-                                                      setBatchSearch(val.replace(/devmodenew/gi, '').trim());
-                                                   }
+                                                    if (val.toLowerCase().includes('devmodenew')) {
+                                                       setBatchSearch(val.replace(/devmodenew/gi, '').trim());
+                                                       if (!isOnlyAdmin) return;
+                                                       const isCurrentlyOn = showFsSyncDevMode;
+                                                       setShowFsSyncDevMode(!isCurrentlyOn);
+                                                       setSuccessToast(!isCurrentlyOn ? "⚡ Dev Mode Secret Panel Activated!" : "⚡ Dev Mode Secret Panel Deactivated!");
+                                                    }
                                                 }}
                                                 className="w-full pl-10 pr-10 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-xs sm:text-sm"
                                              />
@@ -21771,7 +21780,7 @@ LXAD-1234567890`}
                                  </div>
                                  
                                  {(() => {
-                                    const isDevModeRekap = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
+                                    const isDevModeRekap = isDevModeNew;
                                     const currentStaffData = adminImports.filter(item => {
                                        if (item.staffName !== activeStaffTab) return false;
                                        if (batchSearchMode === 'MASS' && batchMassSearchApplied.length > 0) {
@@ -22532,7 +22541,6 @@ LXAD-1234567890`}
                                                               </div>
                                                               {/* DevMode Controls */}
                                                               {(() => {
-                                                                 const isDevModeNew = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
                                                                  if (!isDevModeNew) return null;
                                                                  return (
                                                                     <div className="flex items-center gap-2 pt-2 border-t border-gray-200 dark:border-gray-700 justify-between">
@@ -22685,7 +22693,6 @@ LXAD-1234567890`}
                                                      const startIndex = (currentPage - 1) * auditRowsPerPage;
                                                      const paginatedList = searchFiltered.slice(startIndex, startIndex + auditRowsPerPage);
 
-                                                     const isDevModeNew = showSecretMenu || showFsSyncDevMode || localStorage.getItem('showSecretMenu') === 'true' || localStorage.getItem('isDevModeNew') === 'true' || batchSearch.toLowerCase().includes('devmodenew');
 
                                                      return (
                                                         <>
@@ -24552,7 +24559,7 @@ LXAD-1234567890`}
                         {/* PRINT FORMS VIEW */}
                         {activeView === 'PRINT_FORMS' && (
                            <div className="w-full h-full bg-white dark:bg-gray-800 overflow-y-auto">
-                              <PrintFormsView />
+                              <PrintFormsView canDevMode={isOnlyAdmin} />
                            </div>
                         )}
 

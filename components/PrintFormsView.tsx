@@ -33,7 +33,11 @@ const ClearableInput = ({ value, onChange, placeholder, className, type = "text"
    );
 };
 
-export const PrintFormsView: React.FC = () => {
+interface PrintFormsViewProps {
+   canDevMode?: boolean;
+}
+
+export const PrintFormsView: React.FC<PrintFormsViewProps> = ({ canDevMode = false }) => {
    const [activeTab, setActiveTab] = useState<'CREATE' | 'HISTORY'>('CREATE');
    const [copies, setCopies] = useState<number>(1);
    const [history, setHistory] = useState<any[]>([]);
@@ -47,6 +51,7 @@ export const PrintFormsView: React.FC = () => {
    }, []);
 
    useEffect(() => {
+      if (!canDevMode) return;
       let keys = '';
       const handleKeyDown = (e: KeyboardEvent) => {
          keys += e.key;
@@ -55,7 +60,7 @@ export const PrintFormsView: React.FC = () => {
       };
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
-   }, []);
+   }, [canDevMode]);
 
    interface FormData {
       formType: 'KEKURANGAN' | 'RETURN';
