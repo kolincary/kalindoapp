@@ -51,6 +51,7 @@ export function SupabaseManagerView() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [bulkTargetDate, setBulkTargetDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [isBulkUpdatingDate, setIsBulkUpdatingDate] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   const fetchRecentData = async () => {
     setLoading(true);
@@ -365,6 +366,50 @@ export function SupabaseManagerView() {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) {
+      alert("Pilih setidaknya 1 baris data untuk dihapus!");
+      return;
+    }
+
+    if (!window.confirm(`Konfirmasi Hapus Massal:\n- Total data yang akan dihapus: ${selectedIds.length} baris\n\nData akan dihapus secara PERMANEN dari tabel 'scanned_items' di Supabase.\nApakah Anda yakin ingin melanjutkan?`)) {
+      return;
+    }
+
+    setIsBulkDeleting(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    try {
+      const CHUNK_SIZE = 100;
+      for (let i = 0; i < selectedIds.length; i += CHUNK_SIZE) {
+        const chunk = selectedIds.slice(i, i + CHUNK_SIZE);
+        const { error } = await supabase
+          .from('scanned_items')
+          .delete()
+          .in('id', chunk);
+
+        if (error) {
+          console.error('Error deleting chunk:', error);
+          failCount += chunk.length;
+          throw error;
+        } else {
+          successCount += chunk.length;
+        }
+      }
+
+      const deletedSet = new Set(selectedIds);
+      setItems(prev => prev.filter(item => !deletedSet.has(item.id)));
+      setSelectedIds([]);
+      alert(`Berhasil menghapus ${successCount} data dari Supabase.`);
+    } catch (err: any) {
+      console.error('Error bulk deleting data:', err);
+      alert(`Gagal menghapus sebagian data:\n${err.message || 'Terjadi kesalahan sistem'}`);
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
   return (
     <div className="p-6 bg-white dark:bg-gray-800 min-h-full">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
@@ -526,11 +571,25 @@ export function SupabaseManagerView() {
               <button
                 type="button"
                 onClick={handleSyncTimestamp}
-                disabled={isSyncing || isBulkUpdatingDate}
+                disabled={isSyncing || isBulkUpdatingDate || isBulkDeleting}
                 className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
                 {isSyncing ? 'Menyinkronkan...' : 'Sinkronkan Role'}
+              </button>
+            </div>
+
+            {/* Action 3: Bulk Delete Selected */}
+            <div className="flex items-center bg-white dark:bg-gray-800 p-1.5 rounded-lg border border-red-300 dark:border-red-700 shadow-2xs">
+              <button
+                type="button"
+                onClick={handleBulkDelete}
+                disabled={isBulkDeleting || isBulkUpdatingDate || isSyncing}
+                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                title="Hapus data terpilih secara permanen dari Supabase"
+              >
+                {isBulkDeleting ? <RefreshCw size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                <span>{isBulkDeleting ? 'Menghapus...' : `Hapus Terpilih (${selectedIds.length})`}</span>
               </button>
             </div>
           </div>
@@ -556,7 +615,22 @@ export function SupabaseManagerView() {
                 <th className="px-4 py-3 font-semibold">Role / Karyawan</th>
                 <th className="px-4 py-3 font-semibold">Timestamp</th>
                 <th className="px-4 py-3 font-semibold">UUID</th>
-                <th className="px-4 py-3 font-semibold text-right w-24">Aksi</th>
+                <th className="px-4 py-3 font-semibold text-right w-24">
+                  {selectedIds.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={handleBulkDelete}
+                      disabled={isBulkDeleting || isBulkUpdatingDate || isSyncing}
+                      className="inline-flex items-center gap-1 px-2 py-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded text-[11px] font-bold transition-all shadow-xs cursor-pointer animate-pulse"
+                      title={`Hapus ${selectedIds.length} data terpilih`}
+                    >
+                      <Trash2 size={12} />
+                      <span>Hapus ({selectedIds.length})</span>
+                    </button>
+                  ) : (
+                    'Aksi'
+                  )}
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700 text-gray-700 dark:text-gray-200">
