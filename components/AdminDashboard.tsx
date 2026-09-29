@@ -3367,6 +3367,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [batchSummaryData, setBatchSummaryData] = useState<any[]>([]);
    const [isLoadingBatchSummary, setIsLoadingBatchSummary] = useState(false);
    const [batchProgressMap, setBatchProgressMap] = useState<Record<string, { total: number, scanned: number, staff?: string, loading: boolean }>>({});
+   const [batchSummaryProgressFilter, setBatchSummaryProgressFilter] = useState<'INCOMPLETE' | 'COMPLETE' | 'ALL'>('INCOMPLETE');
    const [adminImportsTrigger, setAdminImportsTrigger] = useState(0);
    // --- SYSTEM SETTINGS STATE ---
    const [skipDuplicateBatch, setSkipDuplicateBatch] = useState(false);
@@ -3682,6 +3683,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const [isSavingBatch, setIsSavingBatch] = useState(false);
    const [isBatchConfirmModalOpen, setIsBatchConfirmModalOpen] = useState(false);
    const [batchConfirmMessage, setBatchConfirmMessage] = useState("");
+   const [batchDuplicateErrorData, setBatchDuplicateErrorData] = useState<{
+      filename: string;
+      dateStr: string;
+      batchNo: string;
+      createdAt: string;
+   } | null>(null);
+
+   const liveDuplicateBatch = useMemo(() => {
+      const clean = (batchExcelFilename || '').trim().toUpperCase();
+      if (!clean || !batchImportDate || !batchSummaryData || batchSummaryData.length === 0) return null;
+      return batchSummaryData.find((b: any) => {
+         if (!b.excel_filename || !b.created_at) return false;
+         if (b.excel_filename.trim().toUpperCase() !== clean) return false;
+         const d = new Date(b.created_at);
+         const y = d.getFullYear();
+         const m = String(d.getMonth() + 1).padStart(2, '0');
+         const day = String(d.getDate()).padStart(2, '0');
+         return `${y}-${m}-${day}` === batchImportDate;
+      }) || null;
+   }, [batchExcelFilename, batchImportDate, batchSummaryData]);
    const [batchTotalRows, setBatchTotalRows] = useState(0);
    const [batchPage, setBatchPage] = useState(1);
    const [batchRowsPerPage, setBatchRowsPerPage] = useState(100);
@@ -4068,6 +4089,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          (pickerLogistikSearch && pickerLogistikSearch.toLowerCase().includes('devmodenew'))
       )
    );
+
+   // Status DevMode untuk Ringkasan Progress
+   const isDevModeSummary = Boolean(isDevModeNew || showFsSyncDevMode || showSecretMenu);
+
+   // Hitung jumlah batch berdasarkan status progress (scanned vs total)
+   const batchSummaryCounts = useMemo(() => {
+      let incomplete = 0;
+      let complete = 0;
+      for (const batch of batchSummaryData) {
+         const progress = batchProgressMap[batch.id];
+         if (progress && progress.total > 0 && progress.scanned >= progress.total) {
+            complete++;
+         } else {
+            incomplete++;
+         }
+      }
+      return {
+         incomplete,
+         complete,
+         all: batchSummaryData.length,
+      };
+   }, [batchSummaryData, batchProgressMap]);
+
+   // Data Batch Summary yang sudah terfilter rapi sesuai mode & filter sub-tab
+   const filteredBatchSummary = useMemo(() => {
+      return batchSummaryData.filter(batch => {
+         const progress = batchProgressMap[batch.id];
+         const isComplete = Boolean(progress && progress.total > 0 && progress.scanned >= progress.total);
+
+         // Jika bukan devmode, selalu sembunyikan batch yang sudah 100% komplit
+         if (!isDevModeSummary) {
+            return !isComplete;
+         }
+
+         // Jika devmode aktif, ikuti filter sub-tab yang dipilih
+         if (batchSummaryProgressFilter === 'INCOMPLETE') {
+            return !isComplete;
+         }
+         if (batchSummaryProgressFilter === 'COMPLETE') {
+            return isComplete;
+         }
+         return true; // 'ALL'
+      });
+   }, [batchSummaryData, batchProgressMap, isDevModeSummary, batchSummaryProgressFilter]);
 
    // Determine if Admin is Super Admin (Can see everything)
    const isSuperAdmin = useMemo(() => {
@@ -7705,6 +7770,80 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       pureEkstraList = [] as string[]
    } = auditComputedData || {};
 
+   const checkDuplicateBatchFilename = async (filename: string, dateStr: string): Promise<{
+      isDuplicate: boolean;
+      existingBatch?: { batch_no: string; created_at: string; excel_filename: string };
+   }> => {
+      const cleanName = filename.trim().toUpperCase();
+      if (!cleanName || !dateStr) return { isDuplicate: false };
+
+      const getLocalDateStr = (isoOrDate: string | Date): string => {
+         const d = new Date(isoOrDate);
+         const year = d.getFullYear();
+         const month = String(d.getMonth() + 1).padStart(2, '0');
+         const day = String(d.getDate()).padStart(2, '0');
+         return `${year}-${month}-${day}`;
+      };
+
+      // 1. Cek dari batchSummaryData di state lokal
+      if (batchSummaryData && batchSummaryData.length > 0) {
+         const localMatch = batchSummaryData.find((b: any) => {
+            if (!b.excel_filename || !b.created_at) return false;
+            if (b.excel_filename.trim().toUpperCase() !== cleanName) return false;
+            return getLocalDateStr(b.created_at) === dateStr;
+         });
+         if (localMatch) {
+            return {
+               isDuplicate: true,
+               existingBatch: {
+                  batch_no: localMatch.batch_no || '-',
+                  created_at: localMatch.created_at,
+                  excel_filename: localMatch.excel_filename
+               }
+            };
+         }
+      }
+
+      // 2. Query tabel batches di Supabase untuk tanggal kalender tersebut
+      try {
+         const [y, m, d] = dateStr.split('-').map(Number);
+         if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+            const startOfDay = new Date(y, m - 1, d, 0, 0, 0, 0);
+            const endOfDay = new Date(y, m - 1, d, 23, 59, 59, 999);
+            const searchStart = new Date(startOfDay.getTime() - 7200000).toISOString();
+            const searchEnd = new Date(endOfDay.getTime() + 7200000).toISOString();
+
+            const { data: dbBatches, error } = await supabase
+               .from('batches')
+               .select('id, batch_no, excel_filename, created_at')
+               .gte('created_at', searchStart)
+               .lte('created_at', searchEnd);
+
+            if (!error && dbBatches && dbBatches.length > 0) {
+               const dbMatch = dbBatches.find((b: any) => {
+                  if (!b.excel_filename || !b.created_at) return false;
+                  if (b.excel_filename.trim().toUpperCase() !== cleanName) return false;
+                  return getLocalDateStr(b.created_at) === dateStr;
+               });
+               if (dbMatch) {
+                  return {
+                     isDuplicate: true,
+                     existingBatch: {
+                        batch_no: dbMatch.batch_no || '-',
+                        created_at: dbMatch.created_at,
+                        excel_filename: dbMatch.excel_filename
+                     }
+                  };
+               }
+            }
+         }
+      } catch (err) {
+         console.warn("Pengecekan duplikat batch gagal:", err);
+      }
+
+      return { isDuplicate: false };
+   };
+
    const handleSaveBatch = async () => {
       if (!batchExcelFilename.trim()) {
          alert("Nama File Excel harus diisi!");
@@ -7714,6 +7853,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          alert("Masukkan data barcode!");
          return;
       }
+
+      // Pengecekan penolakan duplikat nama file Excel di hari/tanggal/tahun yang sama
+      setIsSavingBatch(true);
+      const dupCheck = await checkDuplicateBatchFilename(batchExcelFilename, batchImportDate);
+      if (dupCheck.isDuplicate) {
+         setIsSavingBatch(false);
+         const existing = dupCheck.existingBatch;
+         const [y, m, d] = (batchImportDate || '').split('-');
+         const formattedDate = (d && m && y) ? `${d}-${m}-${y}` : batchImportDate;
+         const createdAtStr = existing?.created_at
+            ? new Date(existing.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+            : '-';
+
+         setBatchDuplicateErrorData({
+            filename: batchExcelFilename.trim(),
+            dateStr: formattedDate,
+            batchNo: existing?.batch_no || '-',
+            createdAt: createdAtStr
+         });
+         return;
+      }
+      setIsSavingBatch(false);
 
       const lines = batchImportText.split(/[\n,;]+/)
          .map(line => line.replace(/@/g, '').trim().toUpperCase())
@@ -7821,6 +7982,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
    const executeSaveBatch = async () => {
       setIsSavingBatch(true);
       try {
+         // Perlindungan ganda jika executeSaveBatch dipanggil dari modal konfirmasi
+         const dupCheck = await checkDuplicateBatchFilename(batchExcelFilename, batchImportDate);
+         if (dupCheck.isDuplicate) {
+            setIsSavingBatch(false);
+            const existing = dupCheck.existingBatch;
+            const [y, m, d] = (batchImportDate || '').split('-');
+            const formattedDate = (d && m && y) ? `${d}-${m}-${y}` : batchImportDate;
+            const createdAtStr = existing?.created_at
+               ? new Date(existing.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+               : '-';
+
+            setBatchDuplicateErrorData({
+               filename: batchExcelFilename.trim(),
+               dateStr: formattedDate,
+               batchNo: existing?.batch_no || '-',
+               createdAt: createdAtStr
+            });
+            return;
+         }
+
          const parsedLines = batchImportText.split(/[\n,;]+/)
             .map(line => line.trim())
             .filter(line => line.length > 0)
@@ -19389,7 +19570,7 @@ INV-789012`}
                                           )}
                                           {activeBatchTab !== 'REKAP_ADMIN' && activeBatchTab !== 'AUDIT_KOMPARASI' && (
                                              <div className="text-xs text-gray-500 font-bold bg-white dark:bg-gray-800 px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 shadow-sm">
-                                                Total: {activeBatchTab === 'ITEMS' ? batchDataList.filter(item => (showFsSyncDevMode || showSecretMenu) ? true : !item.is_scanned).length.toLocaleString() : activeBatchTab === 'SUMMARY' ? batchSummaryData.filter(batch => (showFsSyncDevMode || showSecretMenu) ? true : !(batchProgressMap[batch.id] && batchProgressMap[batch.id].total > 0 && batchProgressMap[batch.id].scanned >= batchProgressMap[batch.id].total)).length.toLocaleString() : adminImports.filter(item => item.staffName === activeStaffTab).length.toLocaleString()} data
+                                                Total: {activeBatchTab === 'ITEMS' ? batchDataList.filter(item => (showFsSyncDevMode || showSecretMenu) ? true : !item.is_scanned).length.toLocaleString() : activeBatchTab === 'SUMMARY' ? filteredBatchSummary.length.toLocaleString() : adminImports.filter(item => item.staffName === activeStaffTab).length.toLocaleString()} data
                                              </div>
                                           )}
                                        </div>
@@ -19682,6 +19863,75 @@ LXAD-1234567890`}
                                     </div>
                                  )}
 
+                                 {/* Filter Tabs when DevMode is active */}
+                                 {isDevModeSummary && (
+                                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 p-2.5 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm animate-[fadeIn_0.2s_ease-out]">
+                                       <div className="flex items-center gap-2">
+                                          <div className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
+                                             <Filter size={15} />
+                                          </div>
+                                          <span className="text-xs font-bold text-gray-700 dark:text-gray-300">Filter Status:</span>
+                                          <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-gray-700/50 p-1 rounded-xl">
+                                             <button
+                                                type="button"
+                                                onClick={() => { setBatchSummaryProgressFilter('INCOMPLETE'); setBatchSummaryPage(1); }}
+                                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                                   batchSummaryProgressFilter === 'INCOMPLETE'
+                                                      ? 'bg-amber-500 text-white shadow-sm shadow-amber-500/30'
+                                                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-gray-600/50'
+                                                }`}
+                                             >
+                                                <Clock size={13} />
+                                                <span>Belum Komplit</span>
+                                                <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] ${
+                                                   batchSummaryProgressFilter === 'INCOMPLETE' ? 'bg-amber-600 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300'
+                                                }`}>
+                                                   {batchSummaryCounts.incomplete}
+                                                </span>
+                                             </button>
+                                             <button
+                                                type="button"
+                                                onClick={() => { setBatchSummaryProgressFilter('COMPLETE'); setBatchSummaryPage(1); }}
+                                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                                   batchSummaryProgressFilter === 'COMPLETE'
+                                                      ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/30'
+                                                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-gray-600/50'
+                                                }`}
+                                             >
+                                                <CheckCircle2 size={13} />
+                                                <span>Sudah Komplit</span>
+                                                <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] ${
+                                                   batchSummaryProgressFilter === 'COMPLETE' ? 'bg-emerald-700 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300'
+                                                }`}>
+                                                   {batchSummaryCounts.complete}
+                                                </span>
+                                             </button>
+                                             <button
+                                                type="button"
+                                                onClick={() => { setBatchSummaryProgressFilter('ALL'); setBatchSummaryPage(1); }}
+                                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                                   batchSummaryProgressFilter === 'ALL'
+                                                      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/30'
+                                                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-gray-600/50'
+                                                }`}
+                                             >
+                                                <Layers size={13} />
+                                                <span>Semua</span>
+                                                <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] ${
+                                                   batchSummaryProgressFilter === 'ALL' ? 'bg-indigo-700 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300'
+                                                }`}>
+                                                   {batchSummaryCounts.all}
+                                                </span>
+                                             </button>
+                                          </div>
+                                       </div>
+                                       <div className="text-[11px] font-medium text-gray-400 flex items-center gap-1.5">
+                                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                                          DevMode Aktif
+                                       </div>
+                                    </div>
+                                 )}
+
                                  {isLoadingBatchSummary ? (
                                     <div className="flex-1 p-4 animate-pulse">
                                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -19712,10 +19962,10 @@ LXAD-1234567890`}
                                                    <div className="flex items-center justify-center">
                                                       <input
                                                          type="checkbox"
-                                                         checked={selectedBatchSummaryIds.length > 0 && selectedBatchSummaryIds.length === batchSummaryData.filter(batch => (showFsSyncDevMode || showSecretMenu) ? true : !(batchProgressMap[batch.id] && batchProgressMap[batch.id].total > 0 && batchProgressMap[batch.id].scanned >= batchProgressMap[batch.id].total)).length}
+                                                         checked={selectedBatchSummaryIds.length > 0 && selectedBatchSummaryIds.length === filteredBatchSummary.length}
                                                          onChange={(e) => {
                                                             if (e.target.checked) {
-                                                               const incompleteIds = batchSummaryData.filter(batch => (showFsSyncDevMode || showSecretMenu) ? true : !(batchProgressMap[batch.id] && batchProgressMap[batch.id].total > 0 && batchProgressMap[batch.id].scanned >= batchProgressMap[batch.id].total)).map(b => b.id);
+                                                               const incompleteIds = filteredBatchSummary.map(b => b.id);
                                                                setSelectedBatchSummaryIds(incompleteIds);
                                                             } else {
                                                                setSelectedBatchSummaryIds([]);
@@ -19733,8 +19983,7 @@ LXAD-1234567890`}
                                              </tr>
                                           </thead>
                                           <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                                             {batchSummaryData
-                                                .filter(batch => (showFsSyncDevMode || showSecretMenu) ? true : !(batchProgressMap[batch.id] && batchProgressMap[batch.id].total > 0 && batchProgressMap[batch.id].scanned >= batchProgressMap[batch.id].total))
+                                             {filteredBatchSummary
                                                 .slice((batchSummaryPage - 1) * batchSummaryRowsPerPage, batchSummaryPage * batchSummaryRowsPerPage)
                                                 .map((batch) => {
                                                 const progress = batchProgressMap[batch.id];
@@ -19800,7 +20049,7 @@ LXAD-1234567890`}
                                                    </tr>
                                                 );
                                              })}
-                                             {batchSummaryData.length === 0 && (
+                                             {filteredBatchSummary.length === 0 && (
                                                 <tr><td colSpan={6} className="p-8 text-center text-gray-400">Tidak ada batch data</td></tr>
                                              )}
                                           </tbody>
@@ -19823,7 +20072,7 @@ LXAD-1234567890`}
                                           </select>
                                        </div>
                                        <span className="text-sm text-gray-500">
-                                          Showing {(batchSummaryPage - 1) * batchSummaryRowsPerPage + 1} to {Math.min(batchSummaryPage * batchSummaryRowsPerPage, batchSummaryData.filter(batch => (showFsSyncDevMode || showSecretMenu) ? true : !(batchProgressMap[batch.id] && batchProgressMap[batch.id].total > 0 && batchProgressMap[batch.id].scanned >= batchProgressMap[batch.id].total)).length)} of {batchSummaryData.filter(batch => (showFsSyncDevMode || showSecretMenu) ? true : !(batchProgressMap[batch.id] && batchProgressMap[batch.id].total > 0 && batchProgressMap[batch.id].scanned >= batchProgressMap[batch.id].total)).length} entries
+                                          Showing {filteredBatchSummary.length === 0 ? 0 : (batchSummaryPage - 1) * batchSummaryRowsPerPage + 1} to {Math.min(batchSummaryPage * batchSummaryRowsPerPage, filteredBatchSummary.length)} of {filteredBatchSummary.length} entries
                                        </span>
                                        <div className="flex items-center gap-1">
                                           <button 
@@ -19837,7 +20086,7 @@ LXAD-1234567890`}
                                              {batchSummaryPage}
                                           </span>
                                           <button 
-                                             disabled={batchSummaryPage * batchSummaryRowsPerPage >= batchSummaryData.length} 
+                                             disabled={batchSummaryPage * batchSummaryRowsPerPage >= filteredBatchSummary.length} 
                                              onClick={() => setBatchSummaryPage(p => p + 1)}
                                              className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
                                           >
@@ -21291,7 +21540,7 @@ INV-789012`}
                                           )}
                                           {activeBatchTab !== 'REKAP_ADMIN' && activeBatchTab !== 'AUDIT_KOMPARASI' && (
                                              <div className="text-xs text-gray-500 font-bold bg-white dark:bg-gray-800 px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 shadow-sm">
-                                                Total: {activeBatchTab === 'ITEMS' ? batchDataList.filter(item => (showFsSyncDevMode || showSecretMenu) ? true : !item.is_scanned).length.toLocaleString() : activeBatchTab === 'SUMMARY' ? batchSummaryData.filter(batch => (showFsSyncDevMode || showSecretMenu) ? true : !(batchProgressMap[batch.id] && batchProgressMap[batch.id].total > 0 && batchProgressMap[batch.id].scanned >= batchProgressMap[batch.id].total)).length.toLocaleString() : adminImports.filter(item => item.staffName === activeStaffTab).length.toLocaleString()} data
+                                                Total: {activeBatchTab === 'ITEMS' ? batchDataList.filter(item => (showFsSyncDevMode || showSecretMenu) ? true : !item.is_scanned).length.toLocaleString() : activeBatchTab === 'SUMMARY' ? filteredBatchSummary.length.toLocaleString() : adminImports.filter(item => item.staffName === activeStaffTab).length.toLocaleString()} data
                                              </div>
                                           )}
                                        </div>
@@ -21584,6 +21833,75 @@ LXAD-1234567890`}
                                     </div>
                                  )}
 
+                                 {/* Filter Tabs when DevMode is active */}
+                                 {isDevModeSummary && (
+                                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 p-2.5 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm animate-[fadeIn_0.2s_ease-out]">
+                                       <div className="flex items-center gap-2">
+                                          <div className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
+                                             <Filter size={15} />
+                                          </div>
+                                          <span className="text-xs font-bold text-gray-700 dark:text-gray-300">Filter Status:</span>
+                                          <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-gray-700/50 p-1 rounded-xl">
+                                             <button
+                                                type="button"
+                                                onClick={() => { setBatchSummaryProgressFilter('INCOMPLETE'); setBatchSummaryPage(1); }}
+                                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                                   batchSummaryProgressFilter === 'INCOMPLETE'
+                                                      ? 'bg-amber-500 text-white shadow-sm shadow-amber-500/30'
+                                                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-gray-600/50'
+                                                }`}
+                                             >
+                                                <Clock size={13} />
+                                                <span>Belum Komplit</span>
+                                                <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] ${
+                                                   batchSummaryProgressFilter === 'INCOMPLETE' ? 'bg-amber-600 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300'
+                                                }`}>
+                                                   {batchSummaryCounts.incomplete}
+                                                </span>
+                                             </button>
+                                             <button
+                                                type="button"
+                                                onClick={() => { setBatchSummaryProgressFilter('COMPLETE'); setBatchSummaryPage(1); }}
+                                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                                   batchSummaryProgressFilter === 'COMPLETE'
+                                                      ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/30'
+                                                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-gray-600/50'
+                                                }`}
+                                             >
+                                                <CheckCircle2 size={13} />
+                                                <span>Sudah Komplit</span>
+                                                <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] ${
+                                                   batchSummaryProgressFilter === 'COMPLETE' ? 'bg-emerald-700 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300'
+                                                }`}>
+                                                   {batchSummaryCounts.complete}
+                                                </span>
+                                             </button>
+                                             <button
+                                                type="button"
+                                                onClick={() => { setBatchSummaryProgressFilter('ALL'); setBatchSummaryPage(1); }}
+                                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                                   batchSummaryProgressFilter === 'ALL'
+                                                      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/30'
+                                                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-gray-600/50'
+                                                }`}
+                                             >
+                                                <Layers size={13} />
+                                                <span>Semua</span>
+                                                <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] ${
+                                                   batchSummaryProgressFilter === 'ALL' ? 'bg-indigo-700 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300'
+                                                }`}>
+                                                   {batchSummaryCounts.all}
+                                                </span>
+                                             </button>
+                                          </div>
+                                       </div>
+                                       <div className="text-[11px] font-medium text-gray-400 flex items-center gap-1.5">
+                                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                                          DevMode Aktif
+                                       </div>
+                                    </div>
+                                 )}
+
                                  {isLoadingBatchSummary ? (
                                     <div className="flex-1 p-4 animate-pulse">
                                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -21614,10 +21932,10 @@ LXAD-1234567890`}
                                                    <div className="flex items-center justify-center">
                                                       <input
                                                          type="checkbox"
-                                                         checked={selectedBatchSummaryIds.length > 0 && selectedBatchSummaryIds.length === batchSummaryData.filter(batch => (showFsSyncDevMode || showSecretMenu) ? true : !(batchProgressMap[batch.id] && batchProgressMap[batch.id].total > 0 && batchProgressMap[batch.id].scanned >= batchProgressMap[batch.id].total)).length}
+                                                         checked={selectedBatchSummaryIds.length > 0 && selectedBatchSummaryIds.length === filteredBatchSummary.length}
                                                          onChange={(e) => {
                                                             if (e.target.checked) {
-                                                               const incompleteIds = batchSummaryData.filter(batch => (showFsSyncDevMode || showSecretMenu) ? true : !(batchProgressMap[batch.id] && batchProgressMap[batch.id].total > 0 && batchProgressMap[batch.id].scanned >= batchProgressMap[batch.id].total)).map(b => b.id);
+                                                               const incompleteIds = filteredBatchSummary.map(b => b.id);
                                                                setSelectedBatchSummaryIds(incompleteIds);
                                                             } else {
                                                                setSelectedBatchSummaryIds([]);
@@ -21635,8 +21953,7 @@ LXAD-1234567890`}
                                              </tr>
                                           </thead>
                                           <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                                             {batchSummaryData
-                                                .filter(batch => (showFsSyncDevMode || showSecretMenu) ? true : !(batchProgressMap[batch.id] && batchProgressMap[batch.id].total > 0 && batchProgressMap[batch.id].scanned >= batchProgressMap[batch.id].total))
+                                             {filteredBatchSummary
                                                 .slice((batchSummaryPage - 1) * batchSummaryRowsPerPage, batchSummaryPage * batchSummaryRowsPerPage)
                                                 .map((batch) => {
                                                 const progress = batchProgressMap[batch.id];
@@ -21702,7 +22019,7 @@ LXAD-1234567890`}
                                                    </tr>
                                                 );
                                              })}
-                                             {batchSummaryData.length === 0 && (
+                                             {filteredBatchSummary.length === 0 && (
                                                 <tr><td colSpan={6} className="p-8 text-center text-gray-400">Tidak ada batch data</td></tr>
                                              )}
                                           </tbody>
@@ -21725,7 +22042,7 @@ LXAD-1234567890`}
                                           </select>
                                        </div>
                                        <span className="text-sm text-gray-500">
-                                          Showing {(batchSummaryPage - 1) * batchSummaryRowsPerPage + 1} to {Math.min(batchSummaryPage * batchSummaryRowsPerPage, batchSummaryData.filter(batch => (showFsSyncDevMode || showSecretMenu) ? true : !(batchProgressMap[batch.id] && batchProgressMap[batch.id].total > 0 && batchProgressMap[batch.id].scanned >= batchProgressMap[batch.id].total)).length)} of {batchSummaryData.filter(batch => (showFsSyncDevMode || showSecretMenu) ? true : !(batchProgressMap[batch.id] && batchProgressMap[batch.id].total > 0 && batchProgressMap[batch.id].scanned >= batchProgressMap[batch.id].total)).length} entries
+                                          Showing {filteredBatchSummary.length === 0 ? 0 : (batchSummaryPage - 1) * batchSummaryRowsPerPage + 1} to {Math.min(batchSummaryPage * batchSummaryRowsPerPage, filteredBatchSummary.length)} of {filteredBatchSummary.length} entries
                                        </span>
                                        <div className="flex items-center gap-1">
                                           <button 
@@ -21739,7 +22056,7 @@ LXAD-1234567890`}
                                              {batchSummaryPage}
                                           </span>
                                           <button 
-                                             disabled={batchSummaryPage * batchSummaryRowsPerPage >= batchSummaryData.length} 
+                                             disabled={batchSummaryPage * batchSummaryRowsPerPage >= filteredBatchSummary.length} 
                                              onClick={() => setBatchSummaryPage(p => p + 1)}
                                              className="p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
                                           >
@@ -26441,7 +26758,11 @@ LXAD-1234567890`}
                            value={batchExcelFilename}
                            onChange={(e) => setBatchExcelFilename(e.target.value.toUpperCase())}
                            placeholder="Contoh: CAMPUR 73.50 IRDA 15"
-                           className="w-full p-4 pr-12 bg-gray-50 dark:bg-gray-900/50 border-2 border-gray-300 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all font-mono text-sm dark:text-gray-200"
+                           className={`w-full p-4 pr-12 bg-gray-50 dark:bg-gray-900/50 border-2 ${
+                              liveDuplicateBatch
+                                 ? 'border-red-400 dark:border-red-500 focus:ring-red-500 focus:border-red-500'
+                                 : 'border-gray-300 dark:border-gray-700 focus:ring-indigo-500 focus:border-indigo-500'
+                           } rounded-xl outline-none transition-all font-mono text-sm dark:text-gray-200`}
                            disabled={isSavingBatch}
                         />
                         {batchExcelFilename && !isSavingBatch && (
@@ -26455,6 +26776,21 @@ LXAD-1234567890`}
                            </button>
                         )}
                      </div>
+
+                     {liveDuplicateBatch && (
+                        <div className="mb-4 p-3.5 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-2xl flex items-start gap-3 text-xs text-red-700 dark:text-red-300 animate-fadeIn">
+                           <AlertCircle size={18} className="text-red-500 flex-shrink-0 mt-0.5" />
+                           <div className="flex-1">
+                              <div className="font-bold flex items-center justify-between">
+                                 <span>Data Sudah Ada di Tanggal Ini!</span>
+                                 <span className="font-mono text-[10px] bg-red-100 dark:bg-red-900/60 text-red-700 dark:text-red-300 px-2 py-0.5 rounded-full font-bold">{liveDuplicateBatch.batch_no}</span>
+                              </div>
+                              <div className="text-[11px] text-red-600 dark:text-red-400 mt-1 leading-relaxed">
+                                 Nama file ini sudah terdaftar pada tanggal yang dipilih (pukul <b>{new Date(liveDuplicateBatch.created_at).toLocaleTimeString('id-ID')} WIB</b>). Import dengan nama file yang sama pada hari yang sama akan ditolak.
+                              </div>
+                           </div>
+                        </div>
+                     )}
 
                      <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">Tanggal Import</label>
                      <input
@@ -26571,6 +26907,70 @@ LXAD-1234567890`}
                         <CheckCircle2 size={16} /> Ya, Simpan
                      </button>
                   </div>
+               </div>
+            </div>
+         )}
+
+         {/* BATCH DUPLICATE REJECTION CUSTOM MODAL */}
+         {batchDuplicateErrorData && (
+            <div className="fixed inset-0 z-[260] flex items-center justify-center px-4">
+               <div className="absolute inset-0 bg-black/70 backdrop-blur-sm animate-fadeIn" onClick={() => setBatchDuplicateErrorData(null)}></div>
+               <div className="bg-white dark:bg-gray-800 w-full max-w-md rounded-3xl shadow-2xl relative z-10 p-7 border-2 border-red-200 dark:border-red-800/60 transform scale-100 animate-scaleIn">
+                  <div className="mx-auto w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-2xl flex items-center justify-center mb-4 text-red-600 dark:text-red-400 shadow-inner">
+                     <AlertCircle size={36} />
+                  </div>
+                  
+                  <h3 className="text-xl font-black text-center text-gray-900 dark:text-white mb-2 tracking-tight">
+                     ⛔ Import Ditolak: Data Sudah Ada!
+                  </h3>
+
+                  <p className="text-xs text-center text-gray-500 dark:text-gray-400 mb-5">
+                     Nama file Excel ini sudah pernah diimport pada hari atau tanggal yang sama.
+                  </p>
+
+                  <div className="bg-red-50 dark:bg-red-950/40 rounded-2xl p-4 border border-red-200 dark:border-red-900/50 mb-5 space-y-2.5">
+                     <div>
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400">Nama File Excel</div>
+                        <div className="font-mono font-bold text-sm text-gray-900 dark:text-white break-words mt-0.5">
+                           {batchDuplicateErrorData.filename}
+                        </div>
+                     </div>
+                     <div className="grid grid-cols-2 gap-2 pt-2 border-t border-red-100 dark:border-red-900/40 text-xs">
+                        <div>
+                           <div className="text-[10px] font-bold text-gray-500 dark:text-gray-400">Tanggal Input</div>
+                           <div className="font-semibold text-gray-800 dark:text-gray-200 flex items-center gap-1 mt-0.5">
+                              <CalendarIcon size={12} className="text-red-500" />
+                              {batchDuplicateErrorData.dateStr}
+                           </div>
+                        </div>
+                        <div>
+                           <div className="text-[10px] font-bold text-gray-500 dark:text-gray-400">Waktu Sebelumnya</div>
+                           <div className="font-semibold text-gray-800 dark:text-gray-200 flex items-center gap-1 mt-0.5">
+                              <Clock size={12} className="text-red-500" />
+                              {batchDuplicateErrorData.createdAt} WIB
+                           </div>
+                        </div>
+                     </div>
+                     <div className="pt-2 border-t border-red-100 dark:border-red-900/40 text-xs">
+                        <div className="text-[10px] font-bold text-gray-500 dark:text-gray-400">Nomor Batch Terdaftar</div>
+                        <div className="font-mono font-bold text-indigo-600 dark:text-indigo-400 mt-0.5">
+                           {batchDuplicateErrorData.batchNo}
+                        </div>
+                     </div>
+                  </div>
+
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 text-center leading-relaxed mb-6 italic">
+                     Sistem menolak import duplikat dengan Nama File Excel yang sama di hari yang sama untuk menghindari data ganda dan ketidaksesuaian scan.
+                  </p>
+
+                  <button
+                     type="button"
+                     onClick={() => setBatchDuplicateErrorData(null)}
+                     className="w-full py-3.5 px-5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white font-extrabold rounded-2xl transition-all shadow-lg shadow-red-500/30 active:scale-95 text-sm flex items-center justify-center gap-2 focus:outline-none"
+                  >
+                     <CheckCircle2 size={16} />
+                     Mengerti & Tutup
+                  </button>
                </div>
             </div>
          )}
