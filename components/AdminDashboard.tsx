@@ -9109,11 +9109,35 @@ Data yang dihapus tidak dapat dipulihkan.`)) {
             return dateObj.getTime();
          })() : Date.now();
 
+         // 3. Check for existing barcodes in database (Role LOGISTIK) to prevent 409 Conflict (unique constraint)
+         const existingInDb = new Set<string>();
+         const checkChunkSize = 1000;
+         for (let i = 0; i < uniqueBarcodes.length; i += checkChunkSize) {
+            const chunk = uniqueBarcodes.slice(i, i + checkChunkSize);
+            const { data: existRows, error: checkErr } = await supabase
+               .from('scanned_items')
+               .select('barcode')
+               .eq('role', 'LOGISTIK')
+               .in('barcode', chunk);
+
+            if (!checkErr && existRows) {
+               existRows.forEach(r => existingInDb.add((r.barcode || '').trim().toUpperCase()));
+            }
+         }
+
+         const barcodesToInsert = uniqueBarcodes.filter(b => !existingInDb.has(b.trim().toUpperCase()));
+
+         if (barcodesToInsert.length === 0) {
+            alert(`⚠️ Seluruh ${uniqueBarcodes.length} data resi yang diinput SUDAH ADA di database (Role Logistik)!\n\nTidak ada data baru yang perlu diimpor.`);
+            setIsSavingLogistik(false);
+            return;
+         }
+
          const insertChunkSize = 500;
-         for (let i = 0; i < uniqueBarcodes.length; i += insertChunkSize) {
-            const chunk = uniqueBarcodes.slice(i, i + insertChunkSize);
-            const insertData = chunk.map(barcode => {
-               const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+         for (let i = 0; i < barcodesToInsert.length; i += insertChunkSize) {
+            const chunk = barcodesToInsert.slice(i, i + insertChunkSize);
+            const insertData = chunk.map((barcode, idx) => {
+               const uniqueId = `${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 9)}`;
                return {
                   id: uniqueId,
                   barcode,
@@ -9126,10 +9150,25 @@ Data yang dihapus tidak dapat dipulihkan.`)) {
                };
             });
             const { error } = await supabase.from('scanned_items').insert(insertData);
-            if (error) throw error;
+            if (error) {
+               // Fallback: jika terjadi conflict 409, insert per item dan lewati yang duplikat
+               if (error.code === '23505' || String(error.message || '').includes('unique_scan_global_role_menu') || error.code === '409') {
+                  for (const row of insertData) {
+                     const { error: singleErr } = await supabase.from('scanned_items').insert([row]);
+                     if (singleErr && singleErr.code !== '23505') throw singleErr;
+                  }
+               } else {
+                  throw error;
+               }
+            }
          }
 
-         setSuccessToast(`Berhasil mengimpor ${uniqueBarcodes.length} data Logistik pada tanggal ${logistikImportDate}.`);
+         const skippedCount = existingInDb.size;
+         if (skippedCount > 0) {
+            setSuccessToast(`✅ Berhasil mengimpor ${barcodesToInsert.length} data Logistik baru (${skippedCount} data duplikat otomatis dilewati).`);
+         } else {
+            setSuccessToast(`✅ Berhasil mengimpor ${barcodesToInsert.length} data Logistik pada tanggal ${logistikImportDate}.`);
+         }
          setLogistikImportText('');
          const today = new Date();
          const offset = today.getTimezoneOffset() * 60000;

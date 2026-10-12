@@ -46,9 +46,17 @@ export const getConfig = (): ActiveSupabaseConfig => {
     const newKey = localStorage.getItem('supabase_new_key') || DEFAULT_NEW_KEY;
 
     if (customUrl && customKey && customUrl.startsWith('https://')) {
+      let sanitizedKey = customKey.trim();
+      if (customUrl.trim() === FALLBACK_URL && sanitizedKey !== FALLBACK_KEY) {
+        sanitizedKey = FALLBACK_KEY;
+        try {
+          localStorage.setItem('active_supabase_key', FALLBACK_KEY);
+          localStorage.setItem('supabase_key', FALLBACK_KEY);
+        } catch (e) {}
+      }
       return {
         url: customUrl.trim(),
-        key: customKey.trim(),
+        key: sanitizedKey,
         newUrl: newUrl.trim(),
         newKey: newKey.trim(),
         specialOldUrl: DEFAULT_SPECIAL_OLD_URL,
@@ -82,9 +90,74 @@ export const getConfig = (): ActiveSupabaseConfig => {
   }
 };
 
+// Resilient fetch handler to intercept and auto-recover from 401 Unauthorized errors caused by expired user sessions
+const createCustomFetch = (validAnonKey: string, projectRef: string) => {
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    let res = await fetch(input, init);
+    if (res.status === 401) {
+      console.warn('⚠️ Supabase 401 Unauthorized detected on:', typeof input === 'string' ? input : (input as any)?.url || 'request');
+      const authHeader = (init?.headers as any)?.['Authorization'] || (init?.headers as any)?.['authorization'];
+      
+      // 1. If an expired user session JWT token was sent instead of the anon key, clean it and retry
+      if (authHeader && authHeader !== `Bearer ${validAnonKey}`) {
+        console.warn('🔄 Clearing stale/expired Supabase auth session from localStorage and retrying...');
+        try {
+          Object.keys(localStorage).forEach(k => {
+            if (k.startsWith('sb-') && k.includes('auth-token')) {
+              localStorage.removeItem(k);
+            }
+          });
+        } catch (e) {}
+
+        const newHeaders = new Headers(init?.headers);
+        newHeaders.set('Authorization', `Bearer ${validAnonKey}`);
+        newHeaders.set('apikey', validAnonKey);
+
+        res = await fetch(input, {
+          ...init,
+          headers: newHeaders
+        });
+      }
+
+      // 2. If still 401 and the project is the primary/fallback URL, ensure it uses the verified FALLBACK_KEY
+      if (res.status === 401 && String(input).includes('nufvlqrtpzfiqghsxsze')) {
+        console.warn('🔄 Retrying request with verified FALLBACK_KEY...');
+        try {
+          localStorage.setItem('active_supabase_key', FALLBACK_KEY);
+          localStorage.setItem('supabase_key', FALLBACK_KEY);
+        } catch (e) {}
+
+        const newHeaders = new Headers(init?.headers);
+        newHeaders.set('Authorization', `Bearer ${FALLBACK_KEY}`);
+        newHeaders.set('apikey', FALLBACK_KEY);
+
+        res = await fetch(input, {
+          ...init,
+          headers: newHeaders
+        });
+      }
+
+      if (res.status !== 401) {
+        console.log('✅ Supabase request auto-recovered successfully!');
+      }
+    }
+    return res;
+  };
+};
+
 let activeConfig = getConfig();
 
-export let supabase: SupabaseClient = createClient(activeConfig.url, activeConfig.key);
+export let supabase: SupabaseClient = createClient(activeConfig.url, activeConfig.key, {
+  auth: {
+    storageKey: `sb-${extractProjectRef(activeConfig.url)}-auth-token`,
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true
+  },
+  global: {
+    fetch: createCustomFetch(activeConfig.key, extractProjectRef(activeConfig.url))
+  }
+});
 export let supabaseNew: SupabaseClient = createClient(activeConfig.newUrl, activeConfig.newKey, {
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
 });
@@ -103,6 +176,9 @@ export const refreshSupabaseClients = () => {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true
+    },
+    global: {
+      fetch: createCustomFetch(activeConfig.key, extractProjectRef(activeConfig.url))
     }
   });
   supabaseNew = createClient(activeConfig.newUrl, activeConfig.newKey, {
@@ -147,6 +223,9 @@ export const testSupabaseConnection = async (
         autoRefreshToken: false,
         detectSessionInUrl: false,
         storageKey: `test-${extractProjectRef(cleanUrl)}-${Date.now()}`
+      },
+      global: {
+        fetch: createCustomFetch(cleanKey, extractProjectRef(cleanUrl))
       }
     });
 

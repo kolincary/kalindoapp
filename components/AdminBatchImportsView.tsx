@@ -226,8 +226,30 @@ export function AdminBatchImportsView({ currentAdmin }: AdminBatchImportsViewPro
   // Edit State
   const [editingItem, setEditingItem] = useState<AdminBatchImportItem | null>(null);
   const [editForm, setEditForm] = useState<Partial<AdminBatchImportItem>>({});
+  const [editBarcodesText, setEditBarcodesText] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Parsed Barcodes for Edit Modal
+  const editBarcodesList = useMemo(() => {
+    if (!editBarcodesText || !editBarcodesText.trim()) return [];
+    return editBarcodesText
+      .split(/[\r\n,;\t]+/)
+      .map(b => b.replace(/@/g, '').trim().toUpperCase())
+      .filter(b => b.length > 0);
+  }, [editBarcodesText]);
+
+  const uniqueEditBarcodesCount = useMemo(() => {
+    return new Set(editBarcodesList).size;
+  }, [editBarcodesList]);
+
+  const handleCleanAndDeduplicateBarcodes = () => {
+    if (!editBarcodesText.trim()) return;
+    const uniqueList = Array.from(new Set(editBarcodesList));
+    setEditBarcodesText(uniqueList.join('\n'));
+    setEditForm(prev => ({ ...prev, jumlah: uniqueList.length }));
+    showToast(`${uniqueList.length} resi dirapikan (duplikat dibuang).`);
+  };
 
   // Barcode Viewer Modal State
   const [viewingBarcodesItem, setViewingBarcodesItem] = useState<AdminBatchImportItem | null>(null);
@@ -489,6 +511,8 @@ export function AdminBatchImportsView({ currentAdmin }: AdminBatchImportsViewPro
   const openEditModal = (item: AdminBatchImportItem) => {
     setEditingItem(item);
     setEditForm({ ...item });
+    const initialText = Array.isArray(item.barcodes) ? item.barcodes.join('\n') : '';
+    setEditBarcodesText(initialText);
   };
 
   const openBarcodesModal = (item: AdminBatchImportItem) => {
@@ -512,14 +536,78 @@ export function AdminBatchImportsView({ currentAdmin }: AdminBatchImportsViewPro
     try {
       const docRef = doc(db, 'admin_batch_imports', editingItem.id);
       
-      const dataToSave = { ...editForm };
+      // Parse current edited barcodes
+      const parsedBarcodes = editBarcodesText
+        .split(/[\r\n,;\t]+/)
+        .map(b => b.replace(/@/g, '').trim().toUpperCase())
+        .filter(b => b.length > 0);
+
+      const finalJumlah = parsedBarcodes.length > 0 ? parsedBarcodes.length : (editForm.jumlah || 0);
+
+      const dataToSave = { 
+        ...editForm,
+        barcodes: parsedBarcodes,
+        jumlah: finalJumlah
+      };
       delete dataToSave.id;
       
+      // 1. Update in Firestore
       await updateDoc(docRef, dataToSave);
+
+      // 2. Sync with Supabase (batches and batch_items) if exists
+      try {
+        const oldBatchId = editingItem.batchId;
+        const newBatchId = dataToSave.batchId || oldBatchId;
+        const newExcelFilename = dataToSave.excelFilename || editingItem.excelFilename;
+
+        if (oldBatchId) {
+          const { data: matchedBatches } = await supabase
+            .from('batches')
+            .select('id, batch_no')
+            .eq('batch_no', oldBatchId);
+
+          if (matchedBatches && matchedBatches.length > 0) {
+            const batchIdInDb = matchedBatches[0].id;
+            
+            // Update batch header
+            await supabase.from('batches').update({
+              batch_no: newBatchId,
+              excel_filename: newExcelFilename
+            }).eq('id', batchIdInDb);
+
+            // Check if barcodes were changed
+            const oldBarcodes = editingItem.barcodes || [];
+            const isBarcodeChanged = 
+              oldBarcodes.length !== parsedBarcodes.length || 
+              oldBarcodes.some((bc, idx) => bc !== parsedBarcodes[idx]);
+
+            if (isBarcodeChanged) {
+              // Delete existing batch_items for this batch
+              await supabase.from('batch_items').delete().eq('batch_id', batchIdInDb);
+
+              // Re-insert new barcodes in chunks of 500
+              if (parsedBarcodes.length > 0) {
+                const itemsToInsert = parsedBarcodes.map(bc => ({
+                  batch_id: batchIdInDb,
+                  barcode: bc,
+                  created_at: dataToSave.createdAt || editingItem.createdAt || new Date().toISOString()
+                }));
+
+                for (let i = 0; i < itemsToInsert.length; i += 500) {
+                  const chunk = itemsToInsert.slice(i, i + 500);
+                  await supabase.from('batch_items').insert(chunk);
+                }
+              }
+            }
+          }
+        }
+      } catch (sbErr) {
+        console.warn('Supabase sync on batch edit warning:', sbErr);
+      }
       
       setItems(items.map(item => item.id === editingItem.id ? { ...item, ...dataToSave } as AdminBatchImportItem : item));
       setEditingItem(null);
-      showToast('Data batch berhasil diperbarui.');
+      showToast(`Data batch berhasil diperbarui (${parsedBarcodes.length} resi).`);
     } catch (err: any) {
       console.error('Error updating document:', err);
       alert('Gagal mengupdate data: ' + err.message);
@@ -1067,6 +1155,18 @@ export function AdminBatchImportsView({ currentAdmin }: AdminBatchImportsViewPro
 
               <div className="flex items-center gap-2">
                 <button
+                  onClick={() => {
+                    const itemToEdit = viewingBarcodesItem;
+                    setViewingBarcodesItem(null);
+                    openEditModal(itemToEdit);
+                  }}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  title="Edit data batch dan daftar resi ini"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  <span>Edit Resi</span>
+                </button>
+                <button
                   onClick={() => handleCopyBarcodes(viewingBarcodesItem.barcodes || [])}
                   className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
                 >
@@ -1208,7 +1308,18 @@ export function AdminBatchImportsView({ currentAdmin }: AdminBatchImportsViewPro
                  </div>
                  
                  <div>
-                   <label className="block text-xs sm:text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Jumlah</label>
+                   <div className="flex items-center justify-between mb-1">
+                     <label className="text-xs sm:text-sm font-semibold text-gray-700 dark:text-gray-300">Jumlah</label>
+                     {editBarcodesList.length > 0 && editBarcodesList.length !== (editForm.jumlah || 0) && (
+                       <button
+                         type="button"
+                         onClick={() => setEditForm(prev => ({ ...prev, jumlah: editBarcodesList.length }))}
+                         className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline font-semibold"
+                       >
+                         Sinkron ({editBarcodesList.length} resi)
+                       </button>
+                     )}
+                   </div>
                    <input 
                      type="number" 
                      value={editForm.jumlah || 0} 
@@ -1240,13 +1351,80 @@ export function AdminBatchImportsView({ currentAdmin }: AdminBatchImportsViewPro
               </div>
 
               <div>
-                <label className="block text-xs sm:text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                  Barcodes (Read Only) - {editForm.barcodes?.length || 0} resi
-                </label>
-                <div className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-900 text-gray-600 dark:text-gray-400 h-32 overflow-y-auto font-mono text-xs leading-relaxed">
-                   {editForm.barcodes ? editForm.barcodes.join(', ') : 'Tidak ada barcode'}
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                  <label className="text-xs sm:text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                    <span>Daftar Barcode / Resi</span>
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
+                      {editBarcodesList.length} resi
+                    </span>
+                    {editBarcodesList.length !== uniqueEditBarcodesCount && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300">
+                        {editBarcodesList.length - uniqueEditBarcodesCount} duplikat
+                      </span>
+                    )}
+                  </label>
+
+                  <div className="flex items-center gap-1.5">
+                    {editBarcodesList.length !== uniqueEditBarcodesCount && (
+                      <button
+                        type="button"
+                        onClick={handleCleanAndDeduplicateBarcodes}
+                        className="text-[11px] px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold transition-colors shadow-xs"
+                        title="Buang resi duplikat dari daftar"
+                      >
+                        Buang Duplikat
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!editBarcodesText.trim()) return;
+                        navigator.clipboard.writeText(editBarcodesText);
+                        showToast(`${editBarcodesList.length} resi disalin.`);
+                      }}
+                      className="text-[11px] px-2.5 py-1 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-lg font-medium transition-colors flex items-center gap-1"
+                    >
+                      <Copy className="w-3 h-3" />
+                      <span>Salin</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (editBarcodesText.trim() && window.confirm('Kosongkan semua daftar resi?')) {
+                          setEditBarcodesText('');
+                          setEditForm(prev => ({ ...prev, jumlah: 0 }));
+                        }
+                      }}
+                      className="text-[11px] px-2.5 py-1 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 rounded-lg font-medium transition-colors flex items-center gap-1"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Kosongkan</span>
+                    </button>
+                  </div>
                 </div>
-                <p className="text-[11px] text-gray-400 mt-1.5 italic">* Data barcode hanya bisa dibaca dan tidak bisa diedit untuk mencegah kerusakan format array.</p>
+
+                <textarea
+                  value={editBarcodesText}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setEditBarcodesText(val);
+                    const parsed = val
+                      .split(/[\r\n,;\t]+/)
+                      .map(b => b.replace(/@/g, '').trim().toUpperCase())
+                      .filter(b => b.length > 0);
+                    setEditForm(prev => ({ ...prev, jumlah: parsed.length }));
+                  }}
+                  rows={6}
+                  placeholder="Tempel nomor resi di sini (satu resi per baris, atau pisahkan dengan koma)..."
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 outline-none font-mono text-xs leading-relaxed resize-y shadow-inner"
+                />
+
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                  <span>* Masukkan 1 nomor resi per baris (Enter) atau pisahkan dengan koma (,).</span>
+                  <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
+                    Total: {editBarcodesList.length} resi ({uniqueEditBarcodesCount} unik)
+                  </span>
+                </div>
               </div>
             </div>
             
