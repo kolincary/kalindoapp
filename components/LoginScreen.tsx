@@ -206,7 +206,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onAdmi
 
       {/* ================= MOBILE & TABLET LAYOUT (< lg) ================= */}
       <div className="lg:hidden relative w-full h-[100dvh] min-h-[100dvh] flex flex-col justify-between items-center p-4 sm:p-6 overflow-hidden bg-gradient-to-b from-[#1d63ed] via-[#2563eb] to-[#0f172a] text-white">
-        
+
         {/* Full Screen Background Graphic (using 9:16 login-illustration-mobile.webp or tablet webp) */}
         <div className="absolute inset-0 w-full h-full pointer-events-none z-0">
           <picture className="w-full h-full block">
@@ -271,10 +271,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onAdmi
                   >
                     <div className="w-7 h-7 rounded-full bg-white flex items-center justify-center shrink-0">
                       <svg className="w-4 h-4" viewBox="0 0 24 24">
-                        <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/>
-                        <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.25 21.3 7.31 24 12 24z"/>
-                        <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.26C.46 8.18 0 10.02 0 12s.46 3.82 1.26 5.42l4.02-3.15z"/>
-                        <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.7 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+                        <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z" />
+                        <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.25 21.3 7.31 24 12 24z" />
+                        <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.26C.46 8.18 0 10.02 0 12s.46 3.82 1.26 5.42l4.02-3.15z" />
+                        <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.7 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98z" />
                       </svg>
                     </div>
                     <span className="text-sm tracking-wide">Login dengan Google</span>
@@ -292,7 +292,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onAdmi
                 <span className="px-3 bg-white dark:bg-gray-900 text-gray-400 font-semibold tracking-wider text-[10px] uppercase rounded-full">SECURE SYSTEM</span>
               </div>
             </div>
-            
+
             {/* Admin Login Button */}
             {onAdminLoginRequest && (
               <div className="w-full">
@@ -325,7 +325,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onAdmi
       <div className="hidden lg:flex w-full h-[100dvh] flex-row overflow-hidden">
         {/* Desktop Left Side - Illustration & Branding */}
         <div className="w-1/2 h-full bg-gradient-to-br from-[#1d63ed] via-[#2563eb] to-[#1e40af] relative flex items-center justify-center overflow-hidden">
-          
+
           {/* WebP Illustration Asset */}
           <div className="absolute inset-0 w-full h-full pointer-events-none">
             <img
@@ -341,7 +341,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onAdmi
 
           {/* Branding Overlay */}
           <div className="relative z-10 text-left p-10 max-w-xl -mt-16">
-            
+
             <div className="w-24 h-24 bg-white/20 backdrop-blur-md rounded-3xl flex items-center justify-center mb-8 border border-white/40 shadow-2xl relative group">
               <div className="absolute inset-0 bg-blue-400/20 rounded-3xl blur-xl opacity-60 group-hover:opacity-100 transition-opacity"></div>
               <Monitor size={48} className="text-white relative z-10" strokeWidth={1.75} />
@@ -406,10 +406,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onAdmi
                     >
                       <div className="w-7 h-7 rounded-full bg-white flex items-center justify-center shrink-0">
                         <svg className="w-4 h-4" viewBox="0 0 24 24">
-                          <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/>
-                          <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.25 21.3 7.31 24 12 24z"/>
-                          <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.26C.46 8.18 0 10.02 0 12s.46 3.82 1.26 5.42l4.02-3.15z"/>
-                          <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.7 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+                          <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z" />
+                          <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.25 21.3 7.31 24 12 24z" />
+                          <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.26C.46 8.18 0 10.02 0 12s.46 3.82 1.26 5.42l4.02-3.15z" />
+                          <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.7 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98z" />
                         </svg>
                       </div>
                       <span className="text-sm tracking-wide">Login dengan Google</span>
@@ -427,7 +427,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onAdmi
                   <span className="px-3 bg-white dark:bg-gray-900 text-gray-400 font-semibold tracking-wider text-[11px] uppercase">SECURE SYSTEM</span>
                 </div>
               </div>
-              
+
               {/* Admin Login Button */}
               {onAdminLoginRequest && (
                 <div className="w-full">

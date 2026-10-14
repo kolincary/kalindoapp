@@ -7176,7 +7176,49 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
    };
 
+   const handleDeleteSingleRekap = async (item: AdminBatchImport) => {
+      if (!isOnlyAdmin) return;
+      const batchTitle = item.excelFilename || item.batchId || 'item ini';
+      if (!confirm(`Apakah Anda yakin ingin menghapus 1 data rekap batch "${batchTitle}"? Data ini akan dihapus dari Firestore dan Supabase secara permanen.`)) {
+         return;
+      }
+      
+      try {
+         setIsLoadingAdminImports(true);
+
+         // 1. Delete from Firestore
+         await deleteDoc(doc(db, 'admin_batch_imports', item.id));
+
+         // 2. Delete from Supabase
+         if (item.batchId) {
+            const { data: matchedBatches } = await supabase.from('batches').select('id').eq('batch_no', item.batchId);
+            const matchingIds = (matchedBatches || []).map(b => b.id);
+            if (matchingIds.length > 0) {
+               await supabase.from('batch_items').delete().in('batch_id', matchingIds);
+               await supabase.from('batches').delete().in('id', matchingIds);
+            }
+         }
+         if (item.barcodes && item.barcodes.length > 0) {
+            for (let i = 0; i < item.barcodes.length; i += 500) {
+               const chunk = item.barcodes.slice(i, i + 500);
+               await supabase.from('batch_items').delete().in('barcode', chunk);
+            }
+         }
+         
+         setSuccessToast(`Berhasil menghapus 1 data rekap: ${batchTitle}`);
+         setSelectedRekapIds(prev => prev.filter(id => id !== item.id));
+         setAdminImportsTrigger(prev => prev + 1);
+         fetchBatchData();
+      } catch (err: any) {
+         console.error("Gagal menghapus single rekap:", err);
+         alert("Gagal menghapus data: " + err.message);
+      } finally {
+         setIsLoadingAdminImports(false);
+      }
+   };
+
    const handleDeleteSelectedRekap = async () => {
+      if (!isOnlyAdmin) return;
       if (selectedRekapIds.length === 0) return;
       if (!confirm(`Apakah Anda yakin ingin menghapus ${selectedRekapIds.length} data rekap admin? Data ini akan dihapus dari Firestore dan Supabase secara permanen.`)) {
          return;
@@ -20165,179 +20207,221 @@ LXAD-1234567890`}
                                     </div>
                                  </div>
                                  
-                                 {(() => {
-                                    const isDevModeRekap = isDevModeNew;
-                                    const currentStaffData = adminImports.filter(item => {
-                                       if (item.staffName !== activeStaffTab) return false;
-                                       if (batchSearchMode === 'MASS' && batchMassSearchApplied.length > 0) {
-                                          return item.barcodes?.some(b => batchMassSearchApplied.includes((b || '').toString().trim().toUpperCase()));
-                                       }
-                                       if (batchSearch) {
-                                          const s = batchSearch.trim().toUpperCase();
-                                          return item.excelFilename?.toUpperCase().includes(s) || item.barcodes?.some(b => (b || '').toString().toUpperCase().includes(s));
-                                       }
-                                       return true;
-                                    });
-                                    const isAllSelected = currentStaffData.length > 0 && currentStaffData.every(item => selectedRekapIds.includes(item.id));
+                                  {(() => {
+                                     const showAdminRekapActions = isOnlyAdmin;
+                                     const currentStaffData = adminImports.filter(item => {
+                                        if (item.staffName !== activeStaffTab) return false;
+                                        if (batchSearchMode === 'MASS' && batchMassSearchApplied.length > 0) {
+                                           return item.barcodes?.some(b => batchMassSearchApplied.includes((b || '').toString().trim().toUpperCase()));
+                                        }
+                                        if (batchSearch) {
+                                           const s = batchSearch.trim().toUpperCase();
+                                           return item.excelFilename?.toUpperCase().includes(s) || item.barcodes?.some(b => (b || '').toString().toUpperCase().includes(s));
+                                        }
+                                        return true;
+                                     });
+                                     const isAllSelected = currentStaffData.length > 0 && currentStaffData.every(item => selectedRekapIds.includes(item.id));
 
-                                    return (
-                                       <>
-                                 <div className="mb-3 flex justify-between items-center bg-white dark:bg-gray-800 p-3 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-                                    <div className="flex items-center gap-2 text-sm font-bold text-gray-700 dark:text-gray-300">
-                                       Total Resi <span className="text-indigo-600 dark:text-indigo-400">{activeStaffTab}</span>: 
-                                       <span className="bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded text-lg">
-                                          {currentStaffData.reduce((sum, item) => sum + (item.jumlah || 0), 0).toLocaleString()}
-                                       </span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                       {isDevModeRekap && selectedRekapIds.length > 0 && (
-                                          <button 
-                                             onClick={handleDeleteSelectedRekap}
-                                             disabled={isLoadingAdminImports}
-                                             className="flex items-center gap-2 px-3 py-1.5 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors text-xs font-bold"
-                                          >
-                                             <Trash2 size={14} /> Hapus {selectedRekapIds.length} Data
-                                          </button>
-                                       )}
-                                       <button 
-                                          onClick={() => {
-                                             if (currentStaffData.length > 0) {
-                                                const textToCopy = currentStaffData.map(item => item.excelFilename).join('\n');
-                                                navigator.clipboard.writeText(textToCopy);
-                                                alert(`Berhasil menyalin ${currentStaffData.length} nama batch!`);
-                                             }
-                                          }}
-                                          className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors text-xs font-bold"
-                                       >
-                                          <Copy size={14} /> Salin Nama Batch
-                                       </button>
-                                    </div>
-                                 </div>
+                                     return (
+                                        <>
+                                  <div className="mb-3 flex justify-between items-center bg-white dark:bg-gray-800 p-3 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+                                     <div className="flex items-center gap-2 text-sm font-bold text-gray-700 dark:text-gray-300">
+                                        Total Resi <span className="text-indigo-600 dark:text-indigo-400">{activeStaffTab}</span>: 
+                                        <span className="bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded text-lg">
+                                           {currentStaffData.reduce((sum, item) => sum + (item.jumlah || 0), 0).toLocaleString()}
+                                        </span>
+                                     </div>
+                                     <div className="flex items-center gap-2">
+                                        {showAdminRekapActions && selectedRekapIds.length > 0 && (
+                                           <button 
+                                              onClick={handleDeleteSelectedRekap}
+                                              disabled={isLoadingAdminImports}
+                                              className="flex items-center gap-2 px-3 py-1.5 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors text-xs font-bold cursor-pointer"
+                                           >
+                                              <Trash2 size={14} /> Hapus {selectedRekapIds.length} Data
+                                           </button>
+                                        )}
+                                        {showAdminRekapActions && (
+                                           <button 
+                                              onClick={() => {
+                                                 const itemsToCopy = selectedRekapIds.length > 0
+                                                    ? currentStaffData.filter(item => selectedRekapIds.includes(item.id))
+                                                    : currentStaffData;
+                                                 if (itemsToCopy.length > 0) {
+                                                    const textToCopy = itemsToCopy.map(item => item.excelFilename || item.batchId || '').filter(Boolean).join('\n');
+                                                    navigator.clipboard.writeText(textToCopy);
+                                                    setSuccessToast(`Berhasil menyalin ${itemsToCopy.length} nama batch!`);
+                                                 }
+                                              }}
+                                              className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors text-xs font-bold cursor-pointer"
+                                              title="Salin Nama Batch"
+                                           >
+                                              <Copy size={14} /> Salin Nama Batch {selectedRekapIds.length > 0 ? `(${selectedRekapIds.length})` : ''}
+                                           </button>
+                                        )}
+                                     </div>
+                                  </div>
 
-                                 <div className="flex-1 overflow-y-auto bg-white dark:bg-gray-800 rounded-2xl rounded-tl-none shadow-sm border border-gray-200 dark:border-gray-700 relative z-0">
-                                    {isLoadingAdminImports ? (
-                                       <div className="flex justify-center items-center h-40"><Loader2 className="animate-spin text-indigo-500" size={32} /></div>
-                                    ) : (
-                                       <table className="w-full text-sm text-left">
-                                          <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700 text-gray-500 sticky top-0 z-10 shadow-sm">
-                                             <tr>
-                                                {isDevModeRekap && (
-                                                   <th className="p-4 font-bold uppercase tracking-wider text-[10px] w-10 text-center">
-                                                      <input 
-                                                         type="checkbox" 
-                                                         checked={isAllSelected}
-                                                         onChange={(e) => {
-                                                            if (e.target.checked) {
-                                                               setSelectedRekapIds(currentStaffData.map(item => item.id));
-                                                            } else {
-                                                               setSelectedRekapIds([]);
-                                                            }
-                                                         }}
-                                                         className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                                      />
-                                                   </th>
-                                                )}
-                                                <th className="p-4 font-bold uppercase tracking-wider text-[10px]">TANGGAL</th>
-                                                <th className="p-4 font-bold uppercase tracking-wider text-[10px]">NAMA BATCH</th>
-                                                <th className="p-4 font-bold uppercase tracking-wider text-[10px]">JUMLAH</th>
-                                                <th className="p-4 font-bold uppercase tracking-wider text-[10px]">BATCH MANAJEMEN</th>
-                                             </tr>
-                                          </thead>
-                                          <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                                             {currentStaffData.map(item => (
-                                                <React.Fragment key={item.id}>
-                                                   <tr className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${selectedRekapIds.includes(item.id) ? 'bg-indigo-50/30 dark:bg-indigo-900/10' : ''}`}>
-                                                      {isDevModeRekap && (
-                                                         <td className="p-4 text-center">
-                                                            <input 
-                                                               type="checkbox" 
-                                                               checked={selectedRekapIds.includes(item.id)}
-                                                               onChange={(e) => {
-                                                                  if (e.target.checked) {
-                                                                     setSelectedRekapIds(prev => [...prev, item.id]);
-                                                                  } else {
-                                                                     setSelectedRekapIds(prev => prev.filter(id => id !== item.id));
-                                                                  }
-                                                               }}
-                                                               className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                                            />
-                                                         </td>
-                                                      )}
-                                                      <td className="p-4 text-xs font-medium text-gray-900 dark:text-gray-100">{new Date(item.timestamp).toLocaleString()}</td>
-                                                      <td className="p-4 text-xs font-bold text-gray-600 dark:text-gray-300">{item.excelFilename}</td>
-                                                      <td className="p-4 text-xs font-bold text-indigo-600 dark:text-indigo-400">
-                                                         {item.jumlah}
-                                                      </td>
-                                                      <td className="p-4 text-xs">
-                                                         <div className="flex items-center gap-2">
-                                                            <span className="font-mono bg-gray-50 dark:bg-gray-900/50 text-gray-500 px-2 py-1 rounded border border-gray-200 dark:border-gray-700">
-                                                               {item.batchId}
-                                                            </span>
-                                                            {item.barcodes && item.barcodes.length > 0 && (
-                                                               <button
-                                                                  onClick={() => setExpandedRekapId(expandedRekapId === item.id ? null : item.id)}
-                                                                  className={`p-1.5 rounded transition-all ${expandedRekapId === item.id ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-100 dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/30'}`}
-                                                                  title="Lihat Detail Resi"
-                                                               >
-                                                                  {expandedRekapId === item.id ? <EyeOff size={16} /> : <Eye size={16} />}
-                                                               </button>
-                                                            )}
-                                                         </div>
-                                                      </td>
-                                                   </tr>
-                                                   {expandedRekapId === item.id && item.barcodes && (
-                                                      <tr className="bg-indigo-50/50 dark:bg-indigo-900/10">
-                                                         <td colSpan={4} className="p-4 border-t border-indigo-100 dark:border-indigo-800/30">
-                                                            <div className="flex flex-col gap-2 max-w-xl">
-                                                               <div className="flex items-center justify-between">
-                                                                  <h4 className="text-xs font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-2">
-                                                                     <Package size={14} /> Daftar Resi ({item.barcodes.length})
-                                                                  </h4>
-                                                                  <button 
-                                                                     onClick={() => {
-                                                                        navigator.clipboard.writeText(item.barcodes!.join('\n'));
-                                                                        alert('Berhasil menyalin semua resi!');
-                                                                     }}
-                                                                     className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                                                                  >
-                                                                     <Copy size={12} /> Salin Semua
-                                                                  </button>
-                                                               </div>
-                                                               <div className="flex flex-col gap-1 max-h-48 overflow-y-auto p-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-inner">
-                                                                  {item.barcodes.map(bc => (
-                                                                     <div key={bc} className="flex items-center justify-between px-3 py-1.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors group">
-                                                                        <span className="text-xs font-mono font-bold text-gray-700 dark:text-gray-200">{bc}</span>
-                                                                        <button 
-                                                                           onClick={() => {
-                                                                              navigator.clipboard.writeText(bc);
-                                                                           }}
-                                                                           className="text-gray-400 hover:text-indigo-600 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                                                                           title="Salin Resi"
-                                                                        >
-                                                                           <Copy size={14} />
-                                                                        </button>
-                                                                     </div>
-                                                                  ))}
-                                                               </div>
-                                                            </div>
-                                                         </td>
-                                                      </tr>
-                                                   )}
-                                                </React.Fragment>
-                                             ))}
-                                             {currentStaffData.length === 0 && (
-                                                <tr>
-                                                   <td colSpan={isDevModeRekap ? 5 : 4} className="p-10 text-center text-gray-400">
-                                                      <div className="flex flex-col items-center gap-2">
-                                                         <Database size={40} className="opacity-20" />
-                                                         <span>Tidak ada rekap print untuk {activeStaffTab} pada filter ini.</span>
-                                                      </div>
-                                                   </td>
-                                                </tr>
-                                             )}
-                                          </tbody>
-                                       </table>
-                                    )}
+                                  <div className="flex-1 overflow-y-auto bg-white dark:bg-gray-800 rounded-2xl rounded-tl-none shadow-sm border border-gray-200 dark:border-gray-700 relative z-0">
+                                     {isLoadingAdminImports ? (
+                                        <div className="flex justify-center items-center h-40"><Loader2 className="animate-spin text-indigo-500" size={32} /></div>
+                                     ) : (
+                                        <table className="w-full text-sm text-left">
+                                           <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700 text-gray-500 sticky top-0 z-10 shadow-sm">
+                                              <tr>
+                                                 {showAdminRekapActions && (
+                                                    <th className="p-4 font-bold uppercase tracking-wider text-[10px] w-10 text-center">
+                                                       <input 
+                                                          type="checkbox" 
+                                                          checked={isAllSelected}
+                                                          onChange={(e) => {
+                                                             if (e.target.checked) {
+                                                                setSelectedRekapIds(currentStaffData.map(item => item.id));
+                                                             } else {
+                                                                setSelectedRekapIds([]);
+                                                             }
+                                                          }}
+                                                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                                       />
+                                                    </th>
+                                                 )}
+                                                 <th className="p-4 font-bold uppercase tracking-wider text-[10px]">TANGGAL</th>
+                                                 <th className="p-4 font-bold uppercase tracking-wider text-[10px]">NAMA BATCH</th>
+                                                 <th className="p-4 font-bold uppercase tracking-wider text-[10px]">JUMLAH</th>
+                                                 <th className="p-4 font-bold uppercase tracking-wider text-[10px]">BATCH MANAJEMEN</th>
+                                              </tr>
+                                           </thead>
+                                           <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                                              {currentStaffData.map(item => (
+                                                 <React.Fragment key={item.id}>
+                                                    <tr className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${selectedRekapIds.includes(item.id) ? 'bg-indigo-50/30 dark:bg-indigo-900/10' : ''}`}>
+                                                       {showAdminRekapActions && (
+                                                          <td className="p-4 text-center">
+                                                             <input 
+                                                                type="checkbox" 
+                                                                checked={selectedRekapIds.includes(item.id)}
+                                                                onChange={(e) => {
+                                                                   if (e.target.checked) {
+                                                                      setSelectedRekapIds(prev => [...prev, item.id]);
+                                                                   } else {
+                                                                      setSelectedRekapIds(prev => prev.filter(id => id !== item.id));
+                                                                   }
+                                                                }}
+                                                                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                                             />
+                                                          </td>
+                                                       )}
+                                                       <td className="p-4 text-xs font-medium text-gray-900 dark:text-gray-100">{new Date(item.timestamp).toLocaleString()}</td>
+                                                       <td className="p-4 text-xs font-bold text-gray-600 dark:text-gray-300">
+                                                          <div className="flex items-center gap-1.5">
+                                                             <span>{item.excelFilename}</span>
+                                                             {showAdminRekapActions && (
+                                                                <button
+                                                                   type="button"
+                                                                   onClick={(e) => {
+                                                                      e.stopPropagation();
+                                                                      const nameToCopy = item.excelFilename || item.batchId || '';
+                                                                      if (nameToCopy) {
+                                                                         navigator.clipboard.writeText(nameToCopy);
+                                                                         setSuccessToast(`Nama batch disalin: ${nameToCopy}`);
+                                                                      }
+                                                                   }}
+                                                                   className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors cursor-pointer"
+                                                                   title="Salin Nama Batch"
+                                                                >
+                                                                   <Copy size={13} />
+                                                                </button>
+                                                             )}
+                                                          </div>
+                                                       </td>
+                                                       <td className="p-4 text-xs font-bold text-indigo-600 dark:text-indigo-400">
+                                                          {item.jumlah}
+                                                       </td>
+                                                       <td className="p-4 text-xs">
+                                                          <div className="flex items-center gap-2">
+                                                             <span className="font-mono bg-gray-50 dark:bg-gray-900/50 text-gray-500 px-2 py-1 rounded border border-gray-200 dark:border-gray-700">
+                                                                {item.batchId}
+                                                             </span>
+                                                             {item.barcodes && item.barcodes.length > 0 && (
+                                                                <button
+                                                                   onClick={() => setExpandedRekapId(expandedRekapId === item.id ? null : item.id)}
+                                                                   className={`p-1.5 rounded transition-all cursor-pointer ${expandedRekapId === item.id ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-100 dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/30'}`}
+                                                                   title="Lihat Detail Resi"
+                                                                >
+                                                                   {expandedRekapId === item.id ? <EyeOff size={16} /> : <Eye size={16} />}
+                                                                </button>
+                                                             )}
+                                                             {showAdminRekapActions && (
+                                                                <button
+                                                                   type="button"
+                                                                   onClick={(e) => {
+                                                                      e.stopPropagation();
+                                                                      handleDeleteSingleRekap(item);
+                                                                   }}
+                                                                   disabled={isLoadingAdminImports}
+                                                                   className="flex items-center gap-1 px-2 py-1 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 border border-red-200 dark:border-red-800 rounded transition-colors text-xs font-bold cursor-pointer"
+                                                                   title="Hapus 1 Data Batch Ini"
+                                                                >
+                                                                   <Trash2 size={13} />
+                                                                   <span className="text-[11px] font-bold hidden sm:inline">Hapus</span>
+                                                                </button>
+                                                             )}
+                                                          </div>
+                                                       </td>
+                                                    </tr>
+                                                    {expandedRekapId === item.id && item.barcodes && (
+                                                       <tr className="bg-indigo-50/50 dark:bg-indigo-900/10">
+                                                          <td colSpan={showAdminRekapActions ? 5 : 4} className="p-4 border-t border-indigo-100 dark:border-indigo-800/30">
+                                                             <div className="flex flex-col gap-2 max-w-xl">
+                                                                <div className="flex items-center justify-between">
+                                                                   <h4 className="text-xs font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-2">
+                                                                      <Package size={14} /> Daftar Resi ({item.barcodes.length})
+                                                                   </h4>
+                                                                   <button 
+                                                                      onClick={() => {
+                                                                         navigator.clipboard.writeText(item.barcodes!.join('\n'));
+                                                                         alert('Berhasil menyalin semua resi!');
+                                                                      }}
+                                                                      className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                                                                   >
+                                                                      <Copy size={12} /> Salin Semua
+                                                                   </button>
+                                                                </div>
+                                                                <div className="flex flex-col gap-1 max-h-48 overflow-y-auto p-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-inner">
+                                                                   {item.barcodes.map(bc => (
+                                                                      <div key={bc} className="flex items-center justify-between px-3 py-1.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors group">
+                                                                         <span className="text-xs font-mono font-bold text-gray-700 dark:text-gray-200">{bc}</span>
+                                                                         <button 
+                                                                            onClick={() => {
+                                                                               navigator.clipboard.writeText(bc);
+                                                                            }}
+                                                                            className="text-gray-400 hover:text-indigo-600 p-1 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                                                                            title="Salin Resi"
+                                                                         >
+                                                                            <Copy size={14} />
+                                                                         </button>
+                                                                      </div>
+                                                                   ))}
+                                                                </div>
+                                                             </div>
+                                                          </td>
+                                                       </tr>
+                                                    )}
+                                                 </React.Fragment>
+                                              ))}
+                                              {currentStaffData.length === 0 && (
+                                                 <tr>
+                                                    <td colSpan={showAdminRekapActions ? 5 : 4} className="p-10 text-center text-gray-400">
+                                                       <div className="flex flex-col items-center gap-2">
+                                                          <Database size={40} className="opacity-20" />
+                                                          <span>Tidak ada rekap print untuk {activeStaffTab} pada filter ini.</span>
+                                                       </div>
+                                                    </td>
+                                                 </tr>
+                                              )}
+                                           </tbody>
+                                        </table>
+                                     )}
                                  </div>
                                  </>
                                  );
@@ -22135,179 +22219,221 @@ LXAD-1234567890`}
                                     </div>
                                  </div>
                                  
-                                 {(() => {
-                                    const isDevModeRekap = isDevModeNew;
-                                    const currentStaffData = adminImports.filter(item => {
-                                       if (item.staffName !== activeStaffTab) return false;
-                                       if (batchSearchMode === 'MASS' && batchMassSearchApplied.length > 0) {
-                                          return item.barcodes?.some(b => batchMassSearchApplied.includes((b || '').toString().trim().toUpperCase()));
-                                       }
-                                       if (batchSearch) {
-                                          const s = batchSearch.trim().toUpperCase();
-                                          return item.excelFilename?.toUpperCase().includes(s) || item.barcodes?.some(b => (b || '').toString().toUpperCase().includes(s));
-                                       }
-                                       return true;
-                                    });
-                                    const isAllSelected = currentStaffData.length > 0 && currentStaffData.every(item => selectedRekapIds.includes(item.id));
+                                  {(() => {
+                                     const showAdminRekapActions = isOnlyAdmin;
+                                     const currentStaffData = adminImports.filter(item => {
+                                        if (item.staffName !== activeStaffTab) return false;
+                                        if (batchSearchMode === 'MASS' && batchMassSearchApplied.length > 0) {
+                                           return item.barcodes?.some(b => batchMassSearchApplied.includes((b || '').toString().trim().toUpperCase()));
+                                        }
+                                        if (batchSearch) {
+                                           const s = batchSearch.trim().toUpperCase();
+                                           return item.excelFilename?.toUpperCase().includes(s) || item.barcodes?.some(b => (b || '').toString().toUpperCase().includes(s));
+                                        }
+                                        return true;
+                                     });
+                                     const isAllSelected = currentStaffData.length > 0 && currentStaffData.every(item => selectedRekapIds.includes(item.id));
 
-                                    return (
-                                       <>
-                                 <div className="mb-3 flex justify-between items-center bg-white dark:bg-gray-800 p-3 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-                                    <div className="flex items-center gap-2 text-sm font-bold text-gray-700 dark:text-gray-300">
-                                       Total Resi <span className="text-indigo-600 dark:text-indigo-400">{activeStaffTab}</span>: 
-                                       <span className="bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded text-lg">
-                                          {currentStaffData.reduce((sum, item) => sum + (item.jumlah || 0), 0).toLocaleString()}
-                                       </span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                       {isDevModeRekap && selectedRekapIds.length > 0 && (
-                                          <button 
-                                             onClick={handleDeleteSelectedRekap}
-                                             disabled={isLoadingAdminImports}
-                                             className="flex items-center gap-2 px-3 py-1.5 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors text-xs font-bold"
-                                          >
-                                             <Trash2 size={14} /> Hapus {selectedRekapIds.length} Data
-                                          </button>
-                                       )}
-                                       <button 
-                                          onClick={() => {
-                                             if (currentStaffData.length > 0) {
-                                                const textToCopy = currentStaffData.map(item => item.excelFilename).join('\n');
-                                                navigator.clipboard.writeText(textToCopy);
-                                                alert(`Berhasil menyalin ${currentStaffData.length} nama batch!`);
-                                             }
-                                          }}
-                                          className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors text-xs font-bold"
-                                       >
-                                          <Copy size={14} /> Salin Nama Batch
-                                       </button>
-                                    </div>
-                                 </div>
+                                     return (
+                                        <>
+                                  <div className="mb-3 flex justify-between items-center bg-white dark:bg-gray-800 p-3 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+                                     <div className="flex items-center gap-2 text-sm font-bold text-gray-700 dark:text-gray-300">
+                                        Total Resi <span className="text-indigo-600 dark:text-indigo-400">{activeStaffTab}</span>: 
+                                        <span className="bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded text-lg">
+                                           {currentStaffData.reduce((sum, item) => sum + (item.jumlah || 0), 0).toLocaleString()}
+                                        </span>
+                                     </div>
+                                     <div className="flex items-center gap-2">
+                                        {showAdminRekapActions && selectedRekapIds.length > 0 && (
+                                           <button 
+                                              onClick={handleDeleteSelectedRekap}
+                                              disabled={isLoadingAdminImports}
+                                              className="flex items-center gap-2 px-3 py-1.5 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors text-xs font-bold cursor-pointer"
+                                           >
+                                              <Trash2 size={14} /> Hapus {selectedRekapIds.length} Data
+                                           </button>
+                                        )}
+                                        {showAdminRekapActions && (
+                                           <button 
+                                              onClick={() => {
+                                                 const itemsToCopy = selectedRekapIds.length > 0
+                                                    ? currentStaffData.filter(item => selectedRekapIds.includes(item.id))
+                                                    : currentStaffData;
+                                                 if (itemsToCopy.length > 0) {
+                                                    const textToCopy = itemsToCopy.map(item => item.excelFilename || item.batchId || '').filter(Boolean).join('\n');
+                                                    navigator.clipboard.writeText(textToCopy);
+                                                    setSuccessToast(`Berhasil menyalin ${itemsToCopy.length} nama batch!`);
+                                                 }
+                                              }}
+                                              className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors text-xs font-bold cursor-pointer"
+                                              title="Salin Nama Batch"
+                                           >
+                                              <Copy size={14} /> Salin Nama Batch {selectedRekapIds.length > 0 ? `(${selectedRekapIds.length})` : ''}
+                                           </button>
+                                        )}
+                                     </div>
+                                  </div>
 
-                                 <div className="flex-1 overflow-y-auto bg-white dark:bg-gray-800 rounded-2xl rounded-tl-none shadow-sm border border-gray-200 dark:border-gray-700 relative z-0">
-                                    {isLoadingAdminImports ? (
-                                       <div className="flex justify-center items-center h-40"><Loader2 className="animate-spin text-indigo-500" size={32} /></div>
-                                    ) : (
-                                       <table className="w-full text-sm text-left">
-                                          <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700 text-gray-500 sticky top-0 z-10 shadow-sm">
-                                             <tr>
-                                                {isDevModeRekap && (
-                                                   <th className="p-4 font-bold uppercase tracking-wider text-[10px] w-10 text-center">
-                                                      <input 
-                                                         type="checkbox" 
-                                                         checked={isAllSelected}
-                                                         onChange={(e) => {
-                                                            if (e.target.checked) {
-                                                               setSelectedRekapIds(currentStaffData.map(item => item.id));
-                                                            } else {
-                                                               setSelectedRekapIds([]);
-                                                            }
-                                                         }}
-                                                         className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                                      />
-                                                   </th>
-                                                )}
-                                                <th className="p-4 font-bold uppercase tracking-wider text-[10px]">TANGGAL</th>
-                                                <th className="p-4 font-bold uppercase tracking-wider text-[10px]">NAMA BATCH</th>
-                                                <th className="p-4 font-bold uppercase tracking-wider text-[10px]">JUMLAH</th>
-                                                <th className="p-4 font-bold uppercase tracking-wider text-[10px]">BATCH MANAJEMEN</th>
-                                             </tr>
-                                          </thead>
-                                          <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                                             {currentStaffData.map(item => (
-                                                <React.Fragment key={item.id}>
-                                                   <tr className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${selectedRekapIds.includes(item.id) ? 'bg-indigo-50/30 dark:bg-indigo-900/10' : ''}`}>
-                                                      {isDevModeRekap && (
-                                                         <td className="p-4 text-center">
-                                                            <input 
-                                                               type="checkbox" 
-                                                               checked={selectedRekapIds.includes(item.id)}
-                                                               onChange={(e) => {
-                                                                  if (e.target.checked) {
-                                                                     setSelectedRekapIds(prev => [...prev, item.id]);
-                                                                  } else {
-                                                                     setSelectedRekapIds(prev => prev.filter(id => id !== item.id));
-                                                                  }
-                                                               }}
-                                                               className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                                            />
-                                                         </td>
-                                                      )}
-                                                      <td className="p-4 text-xs font-medium text-gray-900 dark:text-gray-100">{new Date(item.timestamp).toLocaleString()}</td>
-                                                      <td className="p-4 text-xs font-bold text-gray-600 dark:text-gray-300">{item.excelFilename}</td>
-                                                      <td className="p-4 text-xs font-bold text-indigo-600 dark:text-indigo-400">
-                                                         {item.jumlah}
-                                                      </td>
-                                                      <td className="p-4 text-xs">
-                                                         <div className="flex items-center gap-2">
-                                                            <span className="font-mono bg-gray-50 dark:bg-gray-900/50 text-gray-500 px-2 py-1 rounded border border-gray-200 dark:border-gray-700">
-                                                               {item.batchId}
-                                                            </span>
-                                                            {item.barcodes && item.barcodes.length > 0 && (
-                                                               <button
-                                                                  onClick={() => setExpandedRekapId(expandedRekapId === item.id ? null : item.id)}
-                                                                  className={`p-1.5 rounded transition-all ${expandedRekapId === item.id ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-100 dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/30'}`}
-                                                                  title="Lihat Detail Resi"
-                                                               >
-                                                                  {expandedRekapId === item.id ? <EyeOff size={16} /> : <Eye size={16} />}
-                                                               </button>
-                                                            )}
-                                                         </div>
-                                                      </td>
-                                                   </tr>
-                                                   {expandedRekapId === item.id && item.barcodes && (
-                                                      <tr className="bg-indigo-50/50 dark:bg-indigo-900/10">
-                                                         <td colSpan={4} className="p-4 border-t border-indigo-100 dark:border-indigo-800/30">
-                                                            <div className="flex flex-col gap-2 max-w-xl">
-                                                               <div className="flex items-center justify-between">
-                                                                  <h4 className="text-xs font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-2">
-                                                                     <Package size={14} /> Daftar Resi ({item.barcodes.length})
-                                                                  </h4>
-                                                                  <button 
-                                                                     onClick={() => {
-                                                                        navigator.clipboard.writeText(item.barcodes!.join('\n'));
-                                                                        alert('Berhasil menyalin semua resi!');
-                                                                     }}
-                                                                     className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                                                                  >
-                                                                     <Copy size={12} /> Salin Semua
-                                                                  </button>
-                                                               </div>
-                                                               <div className="flex flex-col gap-1 max-h-48 overflow-y-auto p-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-inner">
-                                                                  {item.barcodes.map(bc => (
-                                                                     <div key={bc} className="flex items-center justify-between px-3 py-1.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors group">
-                                                                        <span className="text-xs font-mono font-bold text-gray-700 dark:text-gray-200">{bc}</span>
-                                                                        <button 
-                                                                           onClick={() => {
-                                                                              navigator.clipboard.writeText(bc);
-                                                                           }}
-                                                                           className="text-gray-400 hover:text-indigo-600 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                                                                           title="Salin Resi"
-                                                                        >
-                                                                           <Copy size={14} />
-                                                                        </button>
-                                                                     </div>
-                                                                  ))}
-                                                               </div>
-                                                            </div>
-                                                         </td>
-                                                      </tr>
-                                                   )}
-                                                </React.Fragment>
-                                             ))}
-                                             {currentStaffData.length === 0 && (
-                                                <tr>
-                                                   <td colSpan={isDevModeRekap ? 5 : 4} className="p-10 text-center text-gray-400">
-                                                      <div className="flex flex-col items-center gap-2">
-                                                         <Database size={40} className="opacity-20" />
-                                                         <span>Tidak ada rekap print untuk {activeStaffTab} pada filter ini.</span>
-                                                      </div>
-                                                   </td>
-                                                </tr>
-                                             )}
-                                          </tbody>
-                                       </table>
-                                    )}
+                                  <div className="flex-1 overflow-y-auto bg-white dark:bg-gray-800 rounded-2xl rounded-tl-none shadow-sm border border-gray-200 dark:border-gray-700 relative z-0">
+                                     {isLoadingAdminImports ? (
+                                        <div className="flex justify-center items-center h-40"><Loader2 className="animate-spin text-indigo-500" size={32} /></div>
+                                     ) : (
+                                        <table className="w-full text-sm text-left">
+                                           <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700 text-gray-500 sticky top-0 z-10 shadow-sm">
+                                              <tr>
+                                                 {showAdminRekapActions && (
+                                                    <th className="p-4 font-bold uppercase tracking-wider text-[10px] w-10 text-center">
+                                                       <input 
+                                                          type="checkbox" 
+                                                          checked={isAllSelected}
+                                                          onChange={(e) => {
+                                                             if (e.target.checked) {
+                                                                setSelectedRekapIds(currentStaffData.map(item => item.id));
+                                                             } else {
+                                                                setSelectedRekapIds([]);
+                                                             }
+                                                          }}
+                                                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                                       />
+                                                    </th>
+                                                 )}
+                                                 <th className="p-4 font-bold uppercase tracking-wider text-[10px]">TANGGAL</th>
+                                                 <th className="p-4 font-bold uppercase tracking-wider text-[10px]">NAMA BATCH</th>
+                                                 <th className="p-4 font-bold uppercase tracking-wider text-[10px]">JUMLAH</th>
+                                                 <th className="p-4 font-bold uppercase tracking-wider text-[10px]">BATCH MANAJEMEN</th>
+                                              </tr>
+                                           </thead>
+                                           <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                                              {currentStaffData.map(item => (
+                                                 <React.Fragment key={item.id}>
+                                                    <tr className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${selectedRekapIds.includes(item.id) ? 'bg-indigo-50/30 dark:bg-indigo-900/10' : ''}`}>
+                                                       {showAdminRekapActions && (
+                                                          <td className="p-4 text-center">
+                                                             <input 
+                                                                type="checkbox" 
+                                                                checked={selectedRekapIds.includes(item.id)}
+                                                                onChange={(e) => {
+                                                                   if (e.target.checked) {
+                                                                      setSelectedRekapIds(prev => [...prev, item.id]);
+                                                                   } else {
+                                                                      setSelectedRekapIds(prev => prev.filter(id => id !== item.id));
+                                                                   }
+                                                                }}
+                                                                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                                             />
+                                                          </td>
+                                                       )}
+                                                       <td className="p-4 text-xs font-medium text-gray-900 dark:text-gray-100">{new Date(item.timestamp).toLocaleString()}</td>
+                                                       <td className="p-4 text-xs font-bold text-gray-600 dark:text-gray-300">
+                                                          <div className="flex items-center gap-1.5">
+                                                             <span>{item.excelFilename}</span>
+                                                             {showAdminRekapActions && (
+                                                                <button
+                                                                   type="button"
+                                                                   onClick={(e) => {
+                                                                      e.stopPropagation();
+                                                                      const nameToCopy = item.excelFilename || item.batchId || '';
+                                                                      if (nameToCopy) {
+                                                                         navigator.clipboard.writeText(nameToCopy);
+                                                                         setSuccessToast(`Nama batch disalin: ${nameToCopy}`);
+                                                                      }
+                                                                   }}
+                                                                   className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors cursor-pointer"
+                                                                   title="Salin Nama Batch"
+                                                                >
+                                                                   <Copy size={13} />
+                                                                </button>
+                                                             )}
+                                                          </div>
+                                                       </td>
+                                                       <td className="p-4 text-xs font-bold text-indigo-600 dark:text-indigo-400">
+                                                          {item.jumlah}
+                                                       </td>
+                                                       <td className="p-4 text-xs">
+                                                          <div className="flex items-center gap-2">
+                                                             <span className="font-mono bg-gray-50 dark:bg-gray-900/50 text-gray-500 px-2 py-1 rounded border border-gray-200 dark:border-gray-700">
+                                                                {item.batchId}
+                                                             </span>
+                                                             {item.barcodes && item.barcodes.length > 0 && (
+                                                                <button
+                                                                   onClick={() => setExpandedRekapId(expandedRekapId === item.id ? null : item.id)}
+                                                                   className={`p-1.5 rounded transition-all cursor-pointer ${expandedRekapId === item.id ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-100 dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/30'}`}
+                                                                   title="Lihat Detail Resi"
+                                                                >
+                                                                   {expandedRekapId === item.id ? <EyeOff size={16} /> : <Eye size={16} />}
+                                                                </button>
+                                                             )}
+                                                             {showAdminRekapActions && (
+                                                                <button
+                                                                   type="button"
+                                                                   onClick={(e) => {
+                                                                      e.stopPropagation();
+                                                                      handleDeleteSingleRekap(item);
+                                                                   }}
+                                                                   disabled={isLoadingAdminImports}
+                                                                   className="flex items-center gap-1 px-2 py-1 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 border border-red-200 dark:border-red-800 rounded transition-colors text-xs font-bold cursor-pointer"
+                                                                   title="Hapus 1 Data Batch Ini"
+                                                                >
+                                                                   <Trash2 size={13} />
+                                                                   <span className="text-[11px] font-bold hidden sm:inline">Hapus</span>
+                                                                </button>
+                                                             )}
+                                                          </div>
+                                                       </td>
+                                                    </tr>
+                                                    {expandedRekapId === item.id && item.barcodes && (
+                                                       <tr className="bg-indigo-50/50 dark:bg-indigo-900/10">
+                                                          <td colSpan={showAdminRekapActions ? 5 : 4} className="p-4 border-t border-indigo-100 dark:border-indigo-800/30">
+                                                             <div className="flex flex-col gap-2 max-w-xl">
+                                                                <div className="flex items-center justify-between">
+                                                                   <h4 className="text-xs font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-2">
+                                                                      <Package size={14} /> Daftar Resi ({item.barcodes.length})
+                                                                   </h4>
+                                                                   <button 
+                                                                      onClick={() => {
+                                                                         navigator.clipboard.writeText(item.barcodes!.join('\n'));
+                                                                         alert('Berhasil menyalin semua resi!');
+                                                                      }}
+                                                                      className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                                                                   >
+                                                                      <Copy size={12} /> Salin Semua
+                                                                   </button>
+                                                                </div>
+                                                                <div className="flex flex-col gap-1 max-h-48 overflow-y-auto p-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-inner">
+                                                                   {item.barcodes.map(bc => (
+                                                                      <div key={bc} className="flex items-center justify-between px-3 py-1.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors group">
+                                                                         <span className="text-xs font-mono font-bold text-gray-700 dark:text-gray-200">{bc}</span>
+                                                                         <button 
+                                                                            onClick={() => {
+                                                                               navigator.clipboard.writeText(bc);
+                                                                            }}
+                                                                            className="text-gray-400 hover:text-indigo-600 p-1 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                                                                            title="Salin Resi"
+                                                                         >
+                                                                            <Copy size={14} />
+                                                                         </button>
+                                                                      </div>
+                                                                   ))}
+                                                                </div>
+                                                             </div>
+                                                          </td>
+                                                       </tr>
+                                                    )}
+                                                 </React.Fragment>
+                                              ))}
+                                              {currentStaffData.length === 0 && (
+                                                 <tr>
+                                                    <td colSpan={showAdminRekapActions ? 5 : 4} className="p-10 text-center text-gray-400">
+                                                       <div className="flex flex-col items-center gap-2">
+                                                          <Database size={40} className="opacity-20" />
+                                                          <span>Tidak ada rekap print untuk {activeStaffTab} pada filter ini.</span>
+                                                       </div>
+                                                    </td>
+                                                 </tr>
+                                              )}
+                                           </tbody>
+                                        </table>
+                                     )}
                                  </div>
                                  </>
                                  );
