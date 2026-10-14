@@ -115,6 +115,8 @@ const App: React.FC = () => {
   // 0. TRAFFIC-BASED BACKUP TRIGGER
   const triggerTrafficBasedBackup = async () => {
     try {
+      const isBackupEnabled = localStorage.getItem('enable_drive_backup') === 'true';
+      if (!isBackupEnabled) return;
       const lastBackupStr = localStorage.getItem(STORAGE_KEY_LAST_BACKUP);
       const lastBackup = lastBackupStr ? parseInt(lastBackupStr, 10) : 0;
       const now = Date.now();

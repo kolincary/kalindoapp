@@ -7190,19 +7190,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          await deleteDoc(doc(db, 'admin_batch_imports', item.id));
 
          // 2. Delete from Supabase
-         if (item.batchId) {
-            const { data: matchedBatches } = await supabase.from('batches').select('id').eq('batch_no', item.batchId);
-            const matchingIds = (matchedBatches || []).map(b => b.id);
-            if (matchingIds.length > 0) {
-               await supabase.from('batch_items').delete().in('batch_id', matchingIds);
-               await supabase.from('batches').delete().in('id', matchingIds);
+         try {
+            // A. If barcodes are available, delete batch_items by barcode FIRST (uses idx_batch_items_barcode, super fast <200ms)
+            if (item.barcodes && item.barcodes.length > 0) {
+               for (let i = 0; i < item.barcodes.length; i += 500) {
+                  const chunk = item.barcodes.slice(i, i + 500);
+                  await supabase.from('batch_items').delete().in('barcode', chunk);
+               }
             }
-         }
-         if (item.barcodes && item.barcodes.length > 0) {
-            for (let i = 0; i < item.barcodes.length; i += 500) {
-               const chunk = item.barcodes.slice(i, i + 500);
-               await supabase.from('batch_items').delete().in('barcode', chunk);
+
+            // B. Delete batch record from batches table
+            if (item.batchId) {
+               const { data: matchedBatches } = await supabase.from('batches').select('id').eq('batch_no', item.batchId);
+               const matchingIds = (matchedBatches || []).map(b => b.id);
+               if (matchingIds.length > 0) {
+                  if (!item.barcodes || item.barcodes.length === 0) {
+                     await supabase.from('batch_items').delete().in('batch_id', matchingIds);
+                  }
+                  await supabase.from('batches').delete().in('id', matchingIds);
+               }
             }
+         } catch (sbErr) {
+            console.warn("Supabase batch cleanup warning:", sbErr);
          }
          
          setSuccessToast(`Berhasil menghapus 1 data rekap: ${batchTitle}`);
@@ -7239,19 +7248,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
          await batch.commit();
 
          // 2. Delete from Supabase
-         if (batchNosToDelete.length > 0) {
-            const { data: matchedBatches } = await supabase.from('batches').select('id').in('batch_no', batchNosToDelete);
-            const matchingIds = (matchedBatches || []).map(b => b.id);
-            if (matchingIds.length > 0) {
-               await supabase.from('batch_items').delete().in('batch_id', matchingIds);
-               await supabase.from('batches').delete().in('id', matchingIds);
+         try {
+            // A. Delete by barcode FIRST in chunks (fast, uses idx_batch_items_barcode)
+            if (barcodesToDelete.length > 0) {
+               for (let i = 0; i < barcodesToDelete.length; i += 500) {
+                  const chunk = barcodesToDelete.slice(i, i + 500);
+                  await supabase.from('batch_items').delete().in('barcode', chunk);
+               }
             }
-         }
-         if (barcodesToDelete.length > 0) {
-            for (let i = 0; i < barcodesToDelete.length; i += 500) {
-               const chunk = barcodesToDelete.slice(i, i + 500);
-               await supabase.from('batch_items').delete().in('barcode', chunk);
+
+            // B. Delete parent batch records
+            if (batchNosToDelete.length > 0) {
+               const { data: matchedBatches } = await supabase.from('batches').select('id').in('batch_no', batchNosToDelete);
+               const matchingIds = (matchedBatches || []).map(b => b.id);
+               if (matchingIds.length > 0) {
+                  if (barcodesToDelete.length === 0) {
+                     await supabase.from('batch_items').delete().in('batch_id', matchingIds);
+                  }
+                  await supabase.from('batches').delete().in('id', matchingIds);
+               }
             }
+         } catch (sbErr) {
+            console.warn("Supabase batch cleanup warning:", sbErr);
          }
          
          setSuccessToast(`Berhasil menghapus ${selectedRekapIds.length} data rekap.`);
